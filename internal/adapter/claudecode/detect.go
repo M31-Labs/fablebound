@@ -153,3 +153,20 @@ func DetectTier(transcriptPath string) (tier string, ok bool) {
 func IsFableModel(model string) bool {
 	return fableModels[model]
 }
+
+// ModelTier maps a model string to its tier label.
+//   - "reason" — model is in the fable (reason-tier) family
+//   - ""       — model string is empty (absent / not specified)
+//   - "other"  — model is non-empty but not a fable model
+//
+// Vendor model IDs are confined to this package (spec §2.1); callers receive
+// only the opaque tier string.
+func ModelTier(model string) string {
+	if model == "" {
+		return ""
+	}
+	if fableModels[model] {
+		return "reason"
+	}
+	return "other"
+}

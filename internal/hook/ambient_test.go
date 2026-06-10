@@ -759,3 +759,98 @@ func TestDenyCodeHeavyMarkdown_Edit(t *testing.T) {
 		t.Errorf("expected deny for code-dominant edit (5 prose + 80 fenced), got %q", decision)
 	}
 }
+
+// ─── Gap 1: orchestration/harness tools ─────────────────────────────────────
+
+// TestGap1_ToolSearchAllowed: ToolSearch is allowed for the ambient orchestrator.
+func TestGap1_ToolSearchAllowed(t *testing.T) {
+	p := fableTranscript(t)
+	decision := runAmbientHookFull(t, p, "ToolSearch", map[string]any{"query": "Read,Edit"})
+	if decision != "allow" {
+		t.Errorf("expected allow for ToolSearch, got %q", decision)
+	}
+}
+
+// TestGap1_SkillAllowed: Skill is allowed for the ambient orchestrator.
+func TestGap1_SkillAllowed(t *testing.T) {
+	p := fableTranscript(t)
+	decision := runAmbientHookFull(t, p, "Skill", map[string]any{"skill": "hyphae"})
+	if decision != "allow" {
+		t.Errorf("expected allow for Skill, got %q", decision)
+	}
+}
+
+// TestGap1_TaskUpdateAllowed: TaskUpdate is allowed for the ambient orchestrator.
+func TestGap1_TaskUpdateAllowed(t *testing.T) {
+	p := fableTranscript(t)
+	decision := runAmbientHookFull(t, p, "TaskUpdate", map[string]any{"id": "t1", "status": "in_progress"})
+	if decision != "allow" {
+		t.Errorf("expected allow for TaskUpdate, got %q", decision)
+	}
+}
+
+// ─── Gap 2: subagent model confinement ───────────────────────────────────────
+
+// TestGap2_WorkerWithFableModelDenied: Task tiller-worker with an explicit
+// reason-tier model is denied (DenyReasonModelSubagent).
+func TestGap2_WorkerWithFableModelDenied(t *testing.T) {
+	p := fableTranscript(t)
+	decision := runAmbientHookFull(t, p, "Task", map[string]any{
+		"subagent_type": "tiller-worker",
+		"model":         "claude-fable-5",
+	})
+	if decision != "deny" {
+		t.Errorf("expected deny for tiller-worker with reason-tier model, got %q", decision)
+	}
+}
+
+// TestGap2_ArchitectWithFableModelAllowed: Task tiller-architect with an
+// explicit reason-tier model is allowed (architect exception).
+func TestGap2_ArchitectWithFableModelAllowed(t *testing.T) {
+	p := fableTranscript(t)
+	decision := runAmbientHookFull(t, p, "Task", map[string]any{
+		"subagent_type": "tiller-architect",
+		"model":         "claude-fable-5",
+	})
+	if decision != "allow" {
+		t.Errorf("expected allow for tiller-architect with reason-tier model, got %q", decision)
+	}
+}
+
+// TestGap2_WorkerNoModelAllowed: Task tiller-worker with no model override is
+// allowed — persona frontmatter governs model selection.
+func TestGap2_WorkerNoModelAllowed(t *testing.T) {
+	p := fableTranscript(t)
+	decision := runAmbientHookFull(t, p, "Task", map[string]any{
+		"subagent_type": "tiller-worker",
+	})
+	if decision != "allow" {
+		t.Errorf("expected allow for tiller-worker with no model override, got %q", decision)
+	}
+}
+
+// TestGap2_GeneralPurposeNoModelDenied: Task general-purpose with no model
+// inherits the ambient reason-tier model → deny (DenyImplicitReasonInheritance).
+func TestGap2_GeneralPurposeNoModelDenied(t *testing.T) {
+	p := fableTranscript(t)
+	decision := runAmbientHookFull(t, p, "Task", map[string]any{
+		"subagent_type": "general-purpose",
+	})
+	if decision != "deny" {
+		t.Errorf("expected deny for general-purpose with no model, got %q", decision)
+	}
+}
+
+// TestGap2_GeneralPurposeWithNonReasonModelAllowed: Task general-purpose with
+// an explicit non-reason (other-tier) model is allowed.
+func TestGap2_GeneralPurposeWithNonReasonModelAllowed(t *testing.T) {
+	p := fableTranscript(t)
+	// claude-sonnet-4-5 is not in fableModels → ModelTier returns "other"
+	decision := runAmbientHookFull(t, p, "Task", map[string]any{
+		"subagent_type": "general-purpose",
+		"model":         "claude-sonnet-4-5",
+	})
+	if decision != "allow" {
+		t.Errorf("expected allow for general-purpose with non-reason model, got %q", decision)
+	}
+}

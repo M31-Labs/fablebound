@@ -20,7 +20,7 @@ rule AllowRead priority 10 {
 }
 
 rule AllowAgent priority 10 {
-    when { tool.name == "Agent" }
+    when { tool.name in ["Agent", "Task"] }
     then Allow { reason: "reason-tier orchestrator dispatches via Agent (Task); subagents execute" }
 }
 
@@ -32,6 +32,63 @@ rule AllowTodoWrite priority 10 {
 rule AllowWebFetch priority 10 {
     when { tool.name == "WebFetch" }
     then Allow { reason: "web reading is permitted for the ambient orchestrator" }
+}
+
+# Gap 1: orchestration / harness tools that the ambient orchestrator needs.
+# ToolSearch loads deferred tool schemas — without it the orchestrator cannot
+# invoke any deferred tool at all.  Skill, AskUserQuestion, EnterPlanMode,
+# ExitPlanMode are orchestration-shaped and must be allowed at the same tier.
+# The Task-tracking family (TaskCreate / TaskGet / TaskList / TaskUpdate /
+# TaskOutput / TaskStop) lets the orchestrator manage in-flight work items;
+# "Task" (the subagent spawner) is already allowed by AllowAgent above.
+rule AllowOrchestrationTools priority 10 {
+    when {
+        tool.name in [
+            "ToolSearch",
+            "Skill",
+            "AskUserQuestion",
+            "EnterPlanMode",
+            "ExitPlanMode",
+            "TaskCreate",
+            "TaskGet",
+            "TaskList",
+            "TaskUpdate",
+            "TaskOutput",
+            "TaskStop"
+        ]
+    }
+    then Allow { reason: "orchestration and harness tools are permitted for the ambient orchestrator" }
+}
+
+# Gap 2: confinement rules for Task/Agent subagent model selection.
+# These fire BEFORE the AllowAgent allow (higher priority = lower number).
+#
+# DenyReasonModelSubagent — blocks Task/Agent calls that carry an explicit
+# reason-tier model override for persona types that should use cheaper tiers.
+# tiller-architect and tiller-deep-report are the only personas legitimately
+# operated at the reason tier; all execution/investigation/review personas
+# should pin to cheaper models via their frontmatter.
+rule DenyReasonModelSubagent priority 8 {
+    when {
+        tool.name in ["Task", "Agent"] and
+        tool.agent_model_tier == "reason" and
+        tool.agent_type not in ["tiller-architect", "tiller-deep-report"]
+    }
+    then Deny { reason: "tiller: reason-tier model overrides are reserved for tiller-architect and tiller-deep-report. Execution work → tiller-worker or tiller-debugger; investigation → tiller-investigator; review → tiller-reviewer. Remove the model override or select the appropriate tiller-* persona." }
+}
+
+# DenyImplicitReasonInheritance — blocks Task/Agent calls with a generic
+# subagent type and no explicit model field.  In an ambient reason-tier
+# session these generic agents inherit the parent (reason-tier) model, which
+# wastes budget.  The orchestrator must either pass an explicit cheaper model
+# or use a named tiller-* persona whose frontmatter pins the model.
+rule DenyImplicitReasonInheritance priority 9 {
+    when {
+        tool.name in ["Task", "Agent"] and
+        tool.agent_type in ["general-purpose", "claude", "Explore", "Plan", ""] and
+        tool.agent_model_tier == ""
+    }
+    then Deny { reason: "tiller: generic subagent types inherit the ambient reason-tier model when no explicit model is provided. Pass an explicit cheaper model or use a named tiller-* persona (tiller-worker, tiller-debugger, tiller-investigator, tiller-reviewer, tiller-architect, tiller-deep-report) whose frontmatter pins the model." }
 }
 
 # DenyHyphaDaemons — defense-in-depth: even if a future classifier change

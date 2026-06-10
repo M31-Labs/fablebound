@@ -22,15 +22,17 @@ type DispatchRequest struct {
 
 // ToolCallRequest is the input schema for toolgate.arb.
 type ToolCallRequest struct {
-	Role         string `arb:"agent.role"`
-	Depth        int    `arb:"agent.depth"`
-	DispatchID   string `arb:"agent.dispatch_id"`
-	Tool         string `arb:"tool.name"`
-	Command      string `arb:"tool.command"`          // Bash, else ""
-	CommandClass string `arb:"tool.command_class"`    // "readonly"|"other"; computed in Go for Bash
-	FilePath     string `arb:"tool.file_path"`        // Edit/Write/Read/NotebookEdit, else ""
-	InScratch    bool   `arb:"tool.path_in_scratch"`  // computed in Go (§6.5)
-	InWorkspace  bool   `arb:"tool.path_in_workspace"`
-	WriteClass   string `arb:"tool.write_class"`      // "doc"|"code-heavy"; computed in Go for Write/Edit *.md
-	RunID        string `arb:"run.id"`
+	Role           string `arb:"agent.role"`
+	Depth          int    `arb:"agent.depth"`
+	DispatchID     string `arb:"agent.dispatch_id"`
+	Tool           string `arb:"tool.name"`
+	Command        string `arb:"tool.command"`           // Bash, else ""
+	CommandClass   string `arb:"tool.command_class"`     // "readonly"|"other"; computed in Go for Bash
+	FilePath       string `arb:"tool.file_path"`         // Edit/Write/Read/NotebookEdit, else ""
+	InScratch      bool   `arb:"tool.path_in_scratch"`   // computed in Go (§6.5)
+	InWorkspace    bool   `arb:"tool.path_in_workspace"`
+	WriteClass     string `arb:"tool.write_class"`       // "doc"|"code-heavy"; computed in Go for Write/Edit *.md
+	AgentType      string `arb:"tool.agent_type"`        // Task/Agent: subagent_type field, "" if absent
+	AgentModelTier string `arb:"tool.agent_model_tier"`  // Task/Agent: "reason"|"other"|""; computed via claudecode.ModelTier
+	RunID          string `arb:"run.id"`
 }

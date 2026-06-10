@@ -61,6 +61,10 @@ type ToolInput struct {
 	// Grep/Glob
 	Pattern string `json:"pattern"`
 	Query   string `json:"query"`
+
+	// Task / Agent: subagent dispatch fields.
+	SubagentType string `json:"subagent_type"` // e.g. "tiller-worker", "general-purpose", ""
+	Model        string `json:"model"`         // explicit model override; "" means inherit
 }
 
 // ToolResponse holds the structured response for PostToolUse.
@@ -411,6 +415,13 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer) error {
 			content = input.NewString
 		}
 		req.WriteClass = ClassifyWrite(content)
+	}
+
+	// Populate AgentType and AgentModelTier for Task/Agent calls.
+	// Vendor model IDs are resolved via the claudecode package to keep them confined.
+	if event.ToolName == "Task" || event.ToolName == "Agent" {
+		req.AgentType = input.SubagentType
+		req.AgentModelTier = claudecode.ModelTier(input.Model)
 	}
 
 	loaded, err := policy.Load("ambient", "")

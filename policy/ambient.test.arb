@@ -540,6 +540,8 @@ test "unknown tool is denied by default (no rule matches)" {
         tool.path_in_scratch: false
         tool.path_in_workspace: false
         tool.write_class: ""
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
         run.id: ""
     }
     expect rule AllowRead not matched
@@ -547,4 +549,211 @@ test "unknown tool is denied by default (no rule matches)" {
     expect rule AllowTodoWrite not matched
     expect rule AllowWebFetch not matched
     expect rule DenyExecution not matched
+}
+
+# ── Gap 1: AllowOrchestrationTools ───────────────────────────────────────────
+
+test "ToolSearch is allowed in ambient mode" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "ToolSearch"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule AllowOrchestrationTools matched
+    expect rule DenyExecution not matched
+}
+
+test "Skill is allowed in ambient mode" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Skill"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule AllowOrchestrationTools matched
+    expect rule DenyExecution not matched
+}
+
+test "TaskUpdate is allowed in ambient mode" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "TaskUpdate"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule AllowOrchestrationTools matched
+    expect rule DenyExecution not matched
+}
+
+test "TaskCreate is allowed in ambient mode" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "TaskCreate"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule AllowOrchestrationTools matched
+}
+
+# ── Gap 2: DenyReasonModelSubagent ────────────────────────────────────────────
+
+test "Task tiller-worker with reason-tier model is denied (DenyReasonModelSubagent)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Task"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: "tiller-worker"
+        tool.agent_model_tier: "reason"
+        run.id: ""
+    }
+    expect rule DenyReasonModelSubagent matched
+    expect rule AllowAgent not matched
+}
+
+test "Task tiller-architect with reason-tier model is allowed (architect exception)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Task"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: "tiller-architect"
+        tool.agent_model_tier: "reason"
+        run.id: ""
+    }
+    expect rule DenyReasonModelSubagent not matched
+    expect rule AllowAgent matched
+}
+
+test "Task tiller-deep-report with reason-tier model is allowed (deep-report exception)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Task"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: "tiller-deep-report"
+        tool.agent_model_tier: "reason"
+        run.id: ""
+    }
+    expect rule DenyReasonModelSubagent not matched
+    expect rule AllowAgent matched
+}
+
+# ── Gap 2: DenyImplicitReasonInheritance ──────────────────────────────────────
+
+test "Task general-purpose with no model is denied (DenyImplicitReasonInheritance)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Task"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: "general-purpose"
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule DenyImplicitReasonInheritance matched
+    expect rule AllowAgent not matched
+}
+
+test "Task general-purpose with non-reason model is allowed" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Task"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: "general-purpose"
+        tool.agent_model_tier: "other"
+        run.id: ""
+    }
+    expect rule DenyImplicitReasonInheritance not matched
+    expect rule DenyReasonModelSubagent not matched
+    expect rule AllowAgent matched
+}
+
+test "Task tiller-worker with no model override is allowed (frontmatter governs)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Task"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: "tiller-worker"
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule DenyImplicitReasonInheritance not matched
+    expect rule DenyReasonModelSubagent not matched
+    expect rule AllowAgent matched
 }

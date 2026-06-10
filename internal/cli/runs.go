@@ -133,7 +133,7 @@ func runRunsShowText(st scratch.Store, id string) error {
 	fmt.Printf("status:      %s\n", runRec.Status)
 	fmt.Printf("task:        %s\n", firstLine(runRec.Task))
 	fmt.Printf("workspace:   %s\n", runRec.Workspace)
-	fmt.Printf("fable_budget:%d\n", runRec.FableBudget)
+	fmt.Printf("reason_budget:%d\n", runRec.FableBudget)
 	if !runRec.CreatedAt.IsZero() {
 		fmt.Printf("created:     %s\n", runRec.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"))
 	}

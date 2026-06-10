@@ -7,9 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 
 	"m31labs.dev/tiller/internal/policy"
 )
+
+// vendorStrayRe matches vendor model tokens that should not appear in default policies.
+var vendorStrayRe = regexp.MustCompile(`\b(fable|opus|sonnet|haiku)\b`)
 
 // runPolicy implements `tiller policy <subcommand>`.
 func runPolicy(args []string) error {
@@ -37,7 +41,7 @@ func policyVet() error {
 	}
 
 	allOK := true
-	for _, kind := range []string{"dispatch", "toolgate"} {
+	for _, kind := range []string{"dispatch", "toolgate", "ambient"} {
 		loaded, err := policy.Load(kind, projectDir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "policy vet: %v\n", err)
@@ -45,6 +49,17 @@ func policyVet() error {
 			continue
 		}
 		fmt.Printf("%s  %s (%s)\n", loaded.SHA256, kind+".arb", loaded.Path)
+
+		// Vendor-stray detector: fail if any default policy contains bare vendor
+		// model tokens (fable|opus|sonnet|haiku). Project-local overrides are exempt.
+		if loaded.Path == "embedded:"+kind {
+			src, readErr := policy.EmbeddedDefaultSource(kind)
+			if readErr == nil && vendorStrayRe.Match(src) {
+				locs := vendorStrayRe.FindAllIndex(src, -1)
+				fmt.Fprintf(os.Stderr, "policy vet: %s.arb contains vendor model token(s) at %d location(s); remove all fable|opus|sonnet|haiku references\n", kind, len(locs))
+				allOK = false
+			}
+		}
 	}
 	if !allOK {
 		return fmt.Errorf("policy vet failed")

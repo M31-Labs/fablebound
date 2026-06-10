@@ -10,10 +10,10 @@ import (
 // Manifest is the run-level record written to manifest.json.
 type Manifest struct {
 	RunID         string            `json:"run_id"`
-	Task          string            `json:"task"`         // first line of task.md
-	Workspace     string            `json:"workspace"`    // absolute path to workspace root
-	Status        string            `json:"status"`       // created|running|completed|failed|halted
-	FableBudget   int               `json:"fable_budget"` // max insight (fable) dispatches; default 2
+	Task          string            `json:"task"`          // first line of task.md
+	Workspace     string            `json:"workspace"`     // absolute path to workspace root
+	Status        string            `json:"status"`        // created|running|completed|failed|halted
+	FableBudget   int               `json:"reason_budget"` // max reason-tier dispatches; default 2 (was fable_budget in v1)
 	CreatedAt     time.Time         `json:"created_at"`
 	EndedAt       *time.Time        `json:"ended_at,omitempty"`
 	RootSessionID string            `json:"root_session_id,omitempty"`
@@ -37,6 +37,8 @@ func WriteManifest(runDir string, m *Manifest) error {
 }
 
 // ReadManifest reads and parses manifest.json from runDir.
+// It handles both the v2 "reason_budget" key and the legacy v1 "fable_budget" key
+// (the latter is read from a raw map and promoted when reason_budget is absent/zero).
 func ReadManifest(runDir string) (*Manifest, error) {
 	data, err := os.ReadFile(manifestPath(runDir))
 	if err != nil {
@@ -45,6 +47,19 @@ func ReadManifest(runDir string) (*Manifest, error) {
 	var m Manifest
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, err
+	}
+	// Legacy fallback: if reason_budget is absent (zero) and fable_budget is present,
+	// use fable_budget value. This handles v1 manifest.json files transparently.
+	if m.FableBudget == 0 {
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(data, &raw); err == nil {
+			if v, ok := raw["fable_budget"]; ok {
+				var n int
+				if err := json.Unmarshal(v, &n); err == nil && n > 0 {
+					m.FableBudget = n
+				}
+			}
+		}
 	}
 	return &m, nil
 }

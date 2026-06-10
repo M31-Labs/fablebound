@@ -25,7 +25,7 @@ func runRun(args []string) error {
 	fs.SetOutput(os.Stderr)
 
 	var (
-		fableBudget = fs.Int("fable-budget", 2, "max fable-model dispatches per run (default 2)")
+		fableBudget = fs.Int("reason-budget", 2, "max reason-tier dispatches per run (default 2)")
 		policyDir   = fs.String("policy-dir", "", "project directory override for policy loading")
 	)
 

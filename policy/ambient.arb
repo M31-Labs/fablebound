@@ -1,7 +1,7 @@
 # tiller ambient policy. Input schema: ToolCallRequest.
 # Applied when TILLER_ROLE is unset (not inside a managed run) but
-# the active main-session model is fable. Enforces orchestrator-only
-# capability: the root fable agent may read and dispatch (Agent/TodoWrite),
+# the active main-session model is in the reason tier. Enforces orchestrator-only
+# capability: the root reason-tier agent may read and dispatch (Agent/TodoWrite),
 # but may not directly edit, write, or execute.
 
 segment denied_tools {
@@ -21,7 +21,7 @@ rule AllowRead priority 10 {
 
 rule AllowAgent priority 10 {
     when { tool.name == "Agent" }
-    then Allow { reason: "fable dispatches via Agent (Task); subagents execute" }
+    then Allow { reason: "reason-tier orchestrator dispatches via Agent (Task); subagents execute" }
 }
 
 rule AllowTodoWrite priority 10 {
@@ -36,5 +36,5 @@ rule AllowWebFetch priority 10 {
 
 rule DenyExecution priority 20 {
     when segment denied_tools { true }
-    then Deny { reason: "tiller: fable runs orchestrator-only — dispatch a subagent (Task) to execute; {tool.name} is not permitted for the root fable agent." }
+    then Deny { reason: "tiller: ambient orchestrator runs in read/dispatch mode — dispatch a subagent (Task) to execute; {tool.name} is not permitted for the root orchestrator agent." }
 }

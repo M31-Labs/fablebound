@@ -146,6 +146,26 @@ func TestManifestRoundtrip(t *testing.T) {
 	}
 }
 
+// TestManifestLegacyFableBudget verifies that a raw v1 manifest.json containing
+// "fable_budget" (and no "reason_budget") is read back with the budget promoted
+// to the FableBudget field via the legacy fallback in ReadManifest.
+func TestManifestLegacyFableBudget(t *testing.T) {
+	dir := t.TempDir()
+	// Write a minimal v1 manifest with only fable_budget (no reason_budget key).
+	raw := `{"run_id":"test-run","task":"t","workspace":"/tmp","status":"created","fable_budget":3,"created_at":"2024-01-01T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := run.ReadManifest(dir)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if m.FableBudget != 3 {
+		t.Errorf("legacy fable_budget not promoted: got FableBudget=%d, want 3", m.FableBudget)
+	}
+}
+
 // ── Meta tests ────────────────────────────────────────────────────────────────
 
 func mkMeta(runDir string, s *run.Store, runID string, id, parent, role, model, status string, depth int) error {

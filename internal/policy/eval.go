@@ -10,7 +10,7 @@ import (
 
 // Route is the routing outcome from the DispatchRoute strategy.
 type Route struct {
-	Model          string
+	Tier           string // reason|scrutiny|execute
 	Profile        string // orchestrator | insight | readonly | execution
 	MaxTurns       int
 	TimeoutMinutes int
@@ -69,16 +69,16 @@ func EvalDispatch(loaded *Loaded, req DispatchRequest) (DispatchResult, error) {
 
 	p := stratRes.Params
 	route := Route{
-		Model:          stringParam(p, "model"),
+		Tier:           stringParam(p, "tier"),
 		Profile:        stringParam(p, "profile"),
 		MaxTurns:       intParam(p, "max_turns"),
 		TimeoutMinutes: intParam(p, "timeout_minutes"),
 	}
 
-	// Honor --model downgrade: substitute iff the explicit request is a
-	// cost downgrade (haiku < sonnet < fable).
-	if req.Model != "" && modelCost(req.Model) < modelCost(route.Model) {
-		route.Model = req.Model
+	// Honor --tier downgrade: substitute iff the explicit request is a
+	// cost downgrade (execute < scrutiny < reason).
+	if req.Tier != "" && tierCost(req.Tier) < tierCost(route.Tier) {
+		route.Tier = req.Tier
 	}
 
 	result.Route = route
@@ -105,19 +105,17 @@ func EvalToolCall(loaded *Loaded, req ToolCallRequest) (ToolCallResult, error) {
 	}, nil
 }
 
-// modelCost returns a comparable cost rank: lower = cheaper.
-func modelCost(model string) int {
-	switch model {
-	case "haiku":
+// tierCost returns a comparable cost rank: lower = cheaper.
+func tierCost(tier string) int {
+	switch tier {
+	case "execute":
 		return 0
-	case "sonnet":
+	case "scrutiny":
 		return 1
-	case "opus":
+	case "reason":
 		return 2
-	case "fable":
-		return 3
 	default:
-		return 1 // unknown = treat as sonnet
+		return 0 // unknown = treat as execute
 	}
 }
 

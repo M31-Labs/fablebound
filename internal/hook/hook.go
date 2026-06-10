@@ -411,8 +411,15 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer) error {
 
 	toolName := event.ToolName
 	reason := result.Reason
-	if decision == "deny" && toolName != "" {
-		reason = fmt.Sprintf("tiller: fable is orchestrator-only — delegate this with the Task tool: code changes → tiller-worker (sonnet), debugging → tiller-debugger (sonnet), investigation → tiller-investigator (opus), review → tiller-reviewer (opus); reserve fable for tiller-architect/tiller-deep-report. (%s blocked for the root fable agent.)", toolName)
+	if decision == "deny" {
+		if reason == "" {
+			// Fallback if the policy emitted no reason: neutral message naming the personas.
+			reason = "tiller: ambient orchestrator runs in read/dispatch mode — dispatch a subagent (Task) to execute; delegate to tiller-worker, tiller-debugger, tiller-investigator, tiller-reviewer, tiller-architect, or tiller-deep-report."
+		}
+		// Substitute {tool.name} placeholder that the policy may embed.
+		if toolName != "" {
+			reason = strings.ReplaceAll(reason, "{tool.name}", toolName)
+		}
 	}
 
 	decisionReason := fmt.Sprintf("RULE: %s: %s", result.Rule, reason)

@@ -1,5 +1,5 @@
 # Tests for ambient.arb — tiller ambient orchestrator-only gate.
-# Applied when TILLER_ROLE is unset and the session model is fable.
+# Applied when TILLER_ROLE is unset and the session model is in the reason tier.
 # Denied: Edit, Write, NotebookEdit, Bash.
 # Allowed: Read, Glob, Grep, Agent, TodoWrite, WebFetch.
 # No match → deny (combinator default).

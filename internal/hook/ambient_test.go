@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -331,5 +332,90 @@ func TestAmbientFableAllowRead(t *testing.T) {
 	// Read should be allowed by the ambient policy (orchestrator-read allowed).
 	if decision == "deny" {
 		t.Errorf("Read should not be denied in fable ambient session, got %q", decision)
+	}
+}
+
+// ─── Ambient deny reason: no vendor tokens, correct persona list ──────────────
+
+// runAmbientHookWithTranscriptFull returns the full decoded output including
+// the PermissionDecisionReason field.
+func runAmbientHookWithTranscriptFull(t *testing.T, transcriptFile, toolName string) (decision, reason string) {
+	t.Helper()
+
+	event := map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       toolName,
+		"tool_input":      map[string]any{"file_path": "/workspace/foo.go"},
+		"transcript_path": transcriptFile,
+		"agent_id":        "",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("TILLER_ROLE", old)
+		}
+	})
+
+	var out bytes.Buffer
+	if err := Run(strings.NewReader(string(data)), &out, ""); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+
+	outBytes := bytes.TrimSpace(out.Bytes())
+	if len(outBytes) == 0 {
+		return "passthrough", ""
+	}
+
+	var wrapper struct {
+		HookSpecificOutput struct {
+			PermissionDecision       string `json:"permissionDecision"`
+			PermissionDecisionReason string `json:"permissionDecisionReason"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(outBytes, &wrapper); err != nil {
+		t.Fatalf("parse output: %v (raw: %s)", err, outBytes)
+	}
+	return wrapper.HookSpecificOutput.PermissionDecision, wrapper.HookSpecificOutput.PermissionDecisionReason
+}
+
+// TestAmbientDenyReason_NoVendorTokens verifies that the deny reason emitted for
+// a fable ambient session contains no vendor-model tokens (fable, opus, sonnet,
+// haiku as bare words) and matches what the compiled ambient.arb policy emits.
+func TestAmbientDenyReason_NoVendorTokens(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "t.jsonl")
+	line := `{"type":"assistant","isSidechain":false,"message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(p, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	decision, reason := runAmbientHookWithTranscriptFull(t, p, "Bash")
+	if decision != "deny" {
+		t.Fatalf("expected deny for Bash in fable ambient session, got %q", decision)
+	}
+	if reason == "" {
+		t.Fatal("deny reason must not be empty")
+	}
+
+	// The reason must contain the tool name substituted in place of {tool.name}.
+	if !strings.Contains(reason, "Bash") {
+		t.Errorf("deny reason must reference the blocked tool (Bash); got: %q", reason)
+	}
+
+	// The reason must mention subagent delegation (from the policy reason).
+	if !strings.Contains(reason, "dispatch") && !strings.Contains(reason, "Task") && !strings.Contains(reason, "tiller-worker") {
+		t.Errorf("deny reason must mention subagent delegation; got: %q", reason)
+	}
+
+	// No vendor-model tokens as bare words.
+	vendorRe := regexp.MustCompile(`\b(fable|opus|sonnet|haiku)\b`)
+	if m := vendorRe.FindString(reason); m != "" {
+		t.Errorf("deny reason must not contain vendor token %q; full reason: %q", m, reason)
 	}
 }

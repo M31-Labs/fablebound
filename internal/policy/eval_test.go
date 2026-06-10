@@ -22,14 +22,14 @@ func init() {
 
 // --- Dispatch tests ---
 
-func TestDispatch_FableWorker_Deny(t *testing.T) {
+func TestDispatch_ReasonWorker_Deny(t *testing.T) {
 	req := DispatchRequest{
-		Role:        "worker",
-		Model:       "fable",
-		CallerRole:  "orchestrator",
-		CallerDepth: 0,
-		RunID:       "20260609-000000-aa01",
-		FableBudget: 2,
+		Role:         "worker",
+		Tier:         "reason",
+		CallerRole:   "orchestrator",
+		CallerDepth:  0,
+		RunID:        "20260609-000000-aa01",
+		ReasonBudget: 2,
 	}
 	res, err := EvalDispatch(dispatchLoaded, req)
 	if err != nil {
@@ -38,20 +38,20 @@ func TestDispatch_FableWorker_Deny(t *testing.T) {
 	if res.Verdict != VerdictDeny {
 		t.Errorf("verdict = %s, want Deny", res.Verdict)
 	}
-	if res.Rule != "DenyFableForExecution" {
-		t.Errorf("rule = %q, want DenyFableForExecution", res.Rule)
+	if res.Rule != "DenyReasonTierForExecution" {
+		t.Errorf("rule = %q, want DenyReasonTierForExecution", res.Rule)
 	}
 }
 
-func TestDispatch_FableChiefArchitect_Allow(t *testing.T) {
+func TestDispatch_ReasonChiefArchitect_Allow(t *testing.T) {
 	req := DispatchRequest{
-		Role:        "chief-architect",
-		Model:       "fable",
-		CallerRole:  "orchestrator",
-		CallerDepth: 0,
-		RunID:       "20260609-000000-aa02",
-		FableBudget: 2,
-		FableCount:  0,
+		Role:         "chief-architect",
+		Tier:         "reason",
+		CallerRole:   "orchestrator",
+		CallerDepth:  0,
+		RunID:        "20260609-000000-aa02",
+		ReasonBudget: 2,
+		ReasonCount:  0,
 	}
 	res, err := EvalDispatch(dispatchLoaded, req)
 	if err != nil {
@@ -60,19 +60,19 @@ func TestDispatch_FableChiefArchitect_Allow(t *testing.T) {
 	if res.Verdict != VerdictAllow {
 		t.Errorf("verdict = %s, want Allow (rule=%s reason=%s)", res.Verdict, res.Rule, res.Reason)
 	}
-	if res.Route.Model != "fable" {
-		t.Errorf("route.model = %q, want fable", res.Route.Model)
+	if res.Route.Tier != "reason" {
+		t.Errorf("route.tier = %q, want reason", res.Route.Tier)
 	}
 }
 
 func TestDispatch_Depth1_Allow_Depth2_Deny(t *testing.T) {
 	// depth 1 → Allow
 	req1 := DispatchRequest{
-		Role:        "worker",
-		CallerRole:  "orchestrator",
-		CallerDepth: 1,
-		RunID:       "20260609-000000-aa03",
-		FableBudget: 2,
+		Role:         "worker",
+		CallerRole:   "orchestrator",
+		CallerDepth:  1,
+		RunID:        "20260609-000000-aa03",
+		ReasonBudget: 2,
 	}
 	res1, err := EvalDispatch(dispatchLoaded, req1)
 	if err != nil {
@@ -84,11 +84,11 @@ func TestDispatch_Depth1_Allow_Depth2_Deny(t *testing.T) {
 
 	// depth 2 → Deny DenyTerminalDepth
 	req2 := DispatchRequest{
-		Role:        "worker",
-		CallerRole:  "worker",
-		CallerDepth: 2,
-		RunID:       "20260609-000000-aa04",
-		FableBudget: 2,
+		Role:         "worker",
+		CallerRole:   "worker",
+		CallerDepth:  2,
+		RunID:        "20260609-000000-aa04",
+		ReasonBudget: 2,
 	}
 	res2, err := EvalDispatch(dispatchLoaded, req2)
 	if err != nil {
@@ -104,11 +104,11 @@ func TestDispatch_Depth1_Allow_Depth2_Deny(t *testing.T) {
 
 func TestDispatch_ReviewerCaller_Deny(t *testing.T) {
 	req := DispatchRequest{
-		Role:        "worker",
-		CallerRole:  "reviewer",
-		CallerDepth: 1,
-		RunID:       "20260609-000000-aa05",
-		FableBudget: 2,
+		Role:         "worker",
+		CallerRole:   "reviewer",
+		CallerDepth:  1,
+		RunID:        "20260609-000000-aa05",
+		ReasonBudget: 2,
 	}
 	res, err := EvalDispatch(dispatchLoaded, req)
 	if err != nil {
@@ -124,11 +124,11 @@ func TestDispatch_ReviewerCaller_Deny(t *testing.T) {
 
 func TestDispatch_InvestigatorScope_Deny(t *testing.T) {
 	req := DispatchRequest{
-		Role:        "worker",
-		CallerRole:  "investigator",
-		CallerDepth: 1,
-		RunID:       "20260609-000000-aa06",
-		FableBudget: 2,
+		Role:         "worker",
+		CallerRole:   "investigator",
+		CallerDepth:  1,
+		RunID:        "20260609-000000-aa06",
+		ReasonBudget: 2,
 	}
 	res, err := EvalDispatch(dispatchLoaded, req)
 	if err != nil {
@@ -142,15 +142,15 @@ func TestDispatch_InvestigatorScope_Deny(t *testing.T) {
 	}
 }
 
-// TestDispatch_InvestigatorRoute_Opus verifies that investigator always routes
-// to opus (canonical combo; canary removed).
-func TestDispatch_InvestigatorRoute_Opus(t *testing.T) {
+// TestDispatch_InvestigatorRoute_Scrutiny verifies that investigator always routes
+// to scrutiny tier (canonical combo; canary removed).
+func TestDispatch_InvestigatorRoute_Scrutiny(t *testing.T) {
 	req := DispatchRequest{
-		Role:        "investigator",
-		CallerRole:  "orchestrator",
-		CallerDepth: 0,
-		RunID:       "20260609-000000-aa07",
-		FableBudget: 2,
+		Role:         "investigator",
+		CallerRole:   "orchestrator",
+		CallerDepth:  0,
+		RunID:        "20260609-000000-aa07",
+		ReasonBudget: 2,
 	}
 	res, err := EvalDispatch(dispatchLoaded, req)
 	if err != nil {
@@ -159,19 +159,19 @@ func TestDispatch_InvestigatorRoute_Opus(t *testing.T) {
 	if res.Verdict != VerdictAllow {
 		t.Fatalf("verdict = %s, want Allow (rule=%s)", res.Verdict, res.Rule)
 	}
-	if res.Route.Model != "opus" {
-		t.Errorf("route.model = %q, want opus", res.Route.Model)
+	if res.Route.Tier != "scrutiny" {
+		t.Errorf("route.tier = %q, want scrutiny", res.Route.Tier)
 	}
 }
 
-// TestDispatch_ReviewerRoute_Opus verifies that reviewer routes to opus.
-func TestDispatch_ReviewerRoute_Opus(t *testing.T) {
+// TestDispatch_ReviewerRoute_Scrutiny verifies that reviewer routes to scrutiny tier.
+func TestDispatch_ReviewerRoute_Scrutiny(t *testing.T) {
 	req := DispatchRequest{
-		Role:        "reviewer",
-		CallerRole:  "orchestrator",
-		CallerDepth: 0,
-		RunID:       "20260609-000000-aa08",
-		FableBudget: 2,
+		Role:         "reviewer",
+		CallerRole:   "orchestrator",
+		CallerDepth:  0,
+		RunID:        "20260609-000000-aa08",
+		ReasonBudget: 2,
 	}
 	res, err := EvalDispatch(dispatchLoaded, req)
 	if err != nil {
@@ -180,18 +180,18 @@ func TestDispatch_ReviewerRoute_Opus(t *testing.T) {
 	if res.Verdict != VerdictAllow {
 		t.Fatalf("verdict = %s, want Allow (rule=%s)", res.Verdict, res.Rule)
 	}
-	if res.Route.Model != "opus" {
-		t.Errorf("route.model = %q, want opus", res.Route.Model)
+	if res.Route.Tier != "scrutiny" {
+		t.Errorf("route.tier = %q, want scrutiny", res.Route.Tier)
 	}
 }
 
 func TestDispatch_UnknownRole_Deny(t *testing.T) {
 	req := DispatchRequest{
-		Role:        "wizard",
-		CallerRole:  "orchestrator",
-		CallerDepth: 0,
-		RunID:       "20260609-000000-aa99",
-		FableBudget: 2,
+		Role:         "wizard",
+		CallerRole:   "orchestrator",
+		CallerDepth:  0,
+		RunID:        "20260609-000000-aa99",
+		ReasonBudget: 2,
 	}
 	res, err := EvalDispatch(dispatchLoaded, req)
 	if err != nil {

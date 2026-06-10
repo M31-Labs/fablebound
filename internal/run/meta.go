@@ -14,8 +14,9 @@ type Meta struct {
 	Parent         string     `json:"parent,omitempty"` // parent dispatch id; "" for root
 	Role           string     `json:"role"`
 	Model          string     `json:"model"`
-	Profile        string     `json:"profile"` // settings/toolgate class
-	Status         string     `json:"status"`  // running|completed|failed|halted|stale
+	Tier           string     `json:"tier,omitempty"` // reason|scrutiny|execute; empty on v1 records
+	Profile        string     `json:"profile"`         // settings/toolgate class
+	Status         string     `json:"status"`          // running|completed|failed|halted|stale
 	Depth          int        `json:"depth"`
 	SupervisorPID  int        `json:"supervisor_pid,omitempty"` // PID of the _supervise process
 	MaxTurns       int        `json:"max_turns,omitempty"`
@@ -63,9 +64,20 @@ func (m *Meta) EffectiveStatus() string {
 	return m.Status
 }
 
-// IsFableModel returns true if the dispatch used a fable-class model.
-func (m *Meta) IsFableModel() bool {
+// IsReasonTier returns true if the dispatch used the reason tier.
+// Prefers the Tier field; falls back to the v1 model field (model=="fable").
+func (m *Meta) IsReasonTier() bool {
+	if m.Tier != "" {
+		return m.Tier == "reason"
+	}
+	// v1 backward compat: derive from model string.
 	return m.Model == "fable"
+}
+
+// IsFableModel returns true if the dispatch used a fable-class model.
+// Deprecated: prefer IsReasonTier for v2 code.
+func (m *Meta) IsFableModel() bool {
+	return m.IsReasonTier()
 }
 
 // metaPath returns the path to meta.json for a dispatch inside a run directory.
@@ -139,17 +151,24 @@ func ActiveCount(runDir string) (int, error) {
 	return n, nil
 }
 
-// FableCount returns the number of dispatches using a fable-class model.
-func FableCount(runDir string) (int, error) {
+// ReasonCount returns the number of dispatches using the reason tier.
+// Checks tier=="reason" for v2 records; falls back to model=="fable" for v1.
+func ReasonCount(runDir string) (int, error) {
 	metas, err := ScanMetas(runDir)
 	if err != nil {
 		return 0, err
 	}
 	n := 0
 	for _, m := range metas {
-		if m.IsFableModel() {
+		if m.IsReasonTier() {
 			n++
 		}
 	}
 	return n, nil
+}
+
+// FableCount returns the number of dispatches using a fable-class model.
+// Deprecated: prefer ReasonCount for v2 code.
+func FableCount(runDir string) (int, error) {
+	return ReasonCount(runDir)
 }

@@ -40,7 +40,8 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 
 	var (
 		role       = fs.String("role", "", "agent role (required)")
-		model      = fs.String("model", "", "model override (optional, downgrade only)")
+		tier       = fs.String("tier", "", "tier override: reason|scrutiny|execute (optional, downgrade only)")
+		modelAlias = fs.String("model", "", "deprecated: use --tier; fable→reason, opus→scrutiny, sonnet/haiku→execute")
 		briefFlag  = fs.String("brief", "", "brief: '-' for stdin, a file path, or literal text")
 		background = fs.Bool("background", false, "return immediately after spawn")
 		timeout    = fs.String("timeout", "8m", "wait timeout (e.g. 8m, 30s)")
@@ -53,6 +54,22 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 
 	if *role == "" {
 		return fmt.Errorf("--role is required")
+	}
+
+	// Handle deprecated --model alias: map vendor model names to tiers.
+	if *modelAlias != "" && *tier == "" {
+		fmt.Fprintf(os.Stderr, "tiller dispatch: --model is deprecated; use --tier instead\n")
+		switch *modelAlias {
+		case "fable":
+			*tier = "reason"
+		case "opus":
+			*tier = "scrutiny"
+		case "sonnet", "haiku":
+			*tier = "execute"
+		default:
+			// Unknown model: pass through as tier string (best effort).
+			*tier = *modelAlias
+		}
 	}
 
 	// Resolve run directory and open store.
@@ -83,18 +100,18 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 		return fmt.Errorf("dispatch: read brief: %w", err)
 	}
 
-	// Load run record for fable_budget.
+	// Load run record for reason_budget.
 	runRec, err := st.ReadRun(runID)
 	if err != nil {
 		return fmt.Errorf("dispatch: read run: %w", err)
 	}
 
-	fableBudget := runRec.FableBudget
-	if fableBudget == 0 {
-		fableBudget = 2
+	reasonBudget := runRec.FableBudget // FableBudget field stores reason_budget (renamed in v2)
+	if reasonBudget == 0 {
+		reasonBudget = 2
 	}
 
-	// Get active + fable counts via DispatchFacts (subsumes ActiveCount + FableCount).
+	// Get active + reason counts via DispatchFacts (subsumes ActiveCount + ReasonCount).
 	facts, err := st.DispatchFacts(runID)
 	if err != nil {
 		return fmt.Errorf("dispatch: dispatch facts: %w", err)
@@ -102,17 +119,17 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 
 	// Build dispatch request.
 	req := policy.DispatchRequest{
-		Role:        *role,
-		Model:       *model,
-		Background:  *background,
-		BriefBytes:  len(briefContent),
-		CallerRole:  callerRole,
-		CallerDepth: callerDepth,
-		CallerID:    callerID,
-		RunID:       runID,
-		ActiveCount: facts.Active,
-		FableCount:  facts.ReasonCount,
-		FableBudget: fableBudget,
+		Role:         *role,
+		Tier:         *tier,
+		Background:   *background,
+		BriefBytes:   len(briefContent),
+		CallerRole:   callerRole,
+		CallerDepth:  callerDepth,
+		CallerID:     callerID,
+		RunID:        runID,
+		ActiveCount:  facts.Active,
+		ReasonCount:  facts.ReasonCount,
+		ReasonBudget: reasonBudget,
 	}
 
 	// Load and evaluate dispatch policy.
@@ -136,13 +153,13 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 
 	// Build matched rules from result for the audit event.
 	var stratRes *audit.StrategyDecision
-	if result.Verdict == policy.VerdictAllow && result.Route.Model != "" {
+	if result.Verdict == policy.VerdictAllow && result.Route.Tier != "" {
 		stratRes = &audit.StrategyDecision{
 			Strategy: "DispatchRoute",
 			Selected: *role,
 			Outcome:  result.Route.Profile,
 			Params: map[string]any{
-				"model":           result.Route.Model,
+				"tier":            result.Route.Tier,
 				"profile":         result.Route.Profile,
 				"max_turns":       result.Route.MaxTurns,
 				"timeout_minutes": result.Route.TimeoutMinutes,
@@ -168,9 +185,9 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 		return &DenialError{Rule: result.Rule, Reason: result.Reason}
 	}
 
-	// Check for Reject route (empty model).
-	if result.Route.Model == "" {
-		return fmt.Errorf("dispatch: policy returned empty model for role %q (Reject route)", *role)
+	// Check for Reject route (empty tier).
+	if result.Route.Tier == "" {
+		return fmt.Errorf("dispatch: policy returned empty tier for role %q (Reject route)", *role)
 	}
 
 	// Allocate dispatch id atomically.
@@ -194,21 +211,22 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 	}
 
 	// Build the DispatchSpec for the adapter.
+	// Tier is set from policy route; Model is derived from Tier for the adapter
+	// until P2.6 wires full tier-to-model resolution via models.toml.
 	childDepth := callerDepth + 1
 	spec := &adapter.DispatchSpec{
 		Store:      st,
 		RunID:      runID,
 		DispatchID: dispatchID,
 		Role:       *role,
-		// Tier: empty — Prepare will derive it from Model via deriveTier.
-		// P2.5/P2.6 will set Tier from tier.Resolve here.
-		Provider: "anthropic",
-		Model:    result.Route.Model,
-		Profile:  result.Route.Profile,
-		WorkDir:  runDir,
-		Depth:    childDepth,
-		MaxTurns: result.Route.MaxTurns,
-		Timeout:  time.Duration(result.Route.TimeoutMinutes) * time.Minute,
+		Tier:       result.Route.Tier,
+		Provider:   "anthropic",
+		Model:      tierToDefaultModel(result.Route.Tier), // P2.6 replaces with tier.Resolve
+		Profile:    result.Route.Profile,
+		WorkDir:    runDir,
+		Depth:      childDepth,
+		MaxTurns:   result.Route.MaxTurns,
+		Timeout:    time.Duration(result.Route.TimeoutMinutes) * time.Minute,
 	}
 
 	// Prepare: writes settings.json via the Store (present-brief verb is already
@@ -224,7 +242,7 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 		ID:             dispatchID,
 		Parent:         callerID,
 		Role:           *role,
-		Model:          result.Route.Model,
+		Model:          spec.Model, // derived from tier until P2.6
 		Profile:        result.Route.Profile,
 		Status:         "running",
 		Depth:          childDepth,
@@ -248,7 +266,7 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 			Depth:      callerDepth,
 			ChildID:    dispatchID,
 			Role:       *role,
-			Model:      result.Route.Model,
+			Model:      spec.Model,
 			Profile:    result.Route.Profile,
 		}
 		if appendErr := st.AppendTraceEvent(runID, callerID, ev); appendErr != nil {
@@ -256,7 +274,7 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 		}
 	}
 
-	// Hypha trace tick: "<did> <role>(<model>) dispatched by <parent>" (soft-fail).
+	// Hypha trace tick: "<did> <role>(<tier>) dispatched by <parent>" (soft-fail).
 	{
 		hyp := hyphae.New(func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, "tiller dispatch [hypha]: "+format+"\n", args...)
@@ -267,14 +285,14 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 				if parent == "" {
 					parent = "user"
 				}
-				tick := fmt.Sprintf("%s %s(%s) dispatched by %s", dispatchID, *role, result.Route.Model, parent)
+				tick := fmt.Sprintf("%s %s(%s) dispatched by %s", dispatchID, *role, result.Route.Tier, parent)
 				hyp.TraceTick(runRec.HyphaTraceID, tick)
 			}
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "dispatched %s as %s (role=%s, model=%s)\n",
-		dispatchID, *role, *role, result.Route.Model)
+	fmt.Fprintf(os.Stderr, "dispatched %s as %s (role=%s, tier=%s)\n",
+		dispatchID, *role, *role, result.Route.Tier)
 
 	// --background or --no-wait: spawn only (process mechanic) and return.
 	// adp.Run is not called in background/no-wait modes; the caller is
@@ -360,4 +378,20 @@ func parseDuration(s string) (time.Duration, error) {
 		return time.Duration(n) * time.Minute, nil
 	}
 	return 0, fmt.Errorf("invalid duration: %q", s)
+}
+
+// tierToDefaultModel maps a tier name to a default model identifier.
+// This is a temporary bridge until P2.6 wires tier.Resolve from models.toml.
+// The adapter (claudeheadless) also has deriveTier(model) which is the inverse.
+func tierToDefaultModel(tier string) string {
+	switch tier {
+	case "reason":
+		return "fable"
+	case "scrutiny":
+		return "opus"
+	case "execute":
+		return "sonnet"
+	default:
+		return "sonnet" // safe default
+	}
 }

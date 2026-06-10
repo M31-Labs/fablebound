@@ -2,13 +2,13 @@
 # Depth semantics: spawn capability exists at exactly two levels — depth 0
 # (root orchestrator) and depth 1. Depth >= 2 is terminal (fail-closed).
 #
-# Canonical model assignments (flat defaults, no canary):
-#   orchestrator → fable   chief-architect → fable   deep-report → fable
-#   investigator → opus    reviewer        → opus
-#   worker       → sonnet  debugger        → sonnet
+# Canonical tier assignments (flat defaults, no canary):
+#   orchestrator → reason   chief-architect → reason   deep-report → reason
+#   investigator → scrutiny  reviewer        → scrutiny
+#   worker       → execute   debugger        → execute
 
-segment fable_request {
-    dispatch.model == "fable"
+segment reason_request {
+    dispatch.tier == "reason"
 }
 segment insight_role {
     dispatch.role in ["orchestrator", "chief-architect", "deep-report"]
@@ -23,16 +23,16 @@ rule HaltAll priority 0 {
     then Deny { reason: "tiller emergency halt" }
 }
 
-rule DenyFableForExecution priority 1 {
-    when segment fable_request {
+rule DenyReasonTierForExecution priority 1 {
+    when segment reason_request {
         not (dispatch.role in ["orchestrator", "chief-architect", "deep-report"])
     }
-    then Deny { reason: "fable is reserved for orchestrator/chief-architect/deep-report; execution roles route to opus or sonnet" }
+    then Deny { reason: "reason tier is reserved for orchestrator/chief-architect/deep-report; execution roles route to scrutiny or execute" }
 }
 
-rule DenyFableFromNonRoot priority 1 {
-    when segment fable_request { caller.role != "orchestrator" }
-    then Deny { reason: "only the root orchestrator may summon fable" }
+rule DenyReasonFromNonRoot priority 1 {
+    when segment reason_request { caller.role != "orchestrator" }
+    then Deny { reason: "only the root orchestrator may summon the reason tier" }
 }
 
 rule DenyTerminalDepth priority 1 {
@@ -40,9 +40,9 @@ rule DenyTerminalDepth priority 1 {
     then Deny { reason: "depth-2 agents are terminal; spawn capability exists only at depths 0 and 1" }
 }
 
-rule DenyFableBudget priority 2 {
-    when segment fable_request { run.fable_dispatches >= run.fable_budget }
-    then Deny { reason: "fable budget exhausted for this run" }
+rule DenyReasonBudget priority 2 {
+    when segment reason_request { run.reason_dispatches >= run.reason_budget }
+    then Deny { reason: "reason budget exhausted for this run" }
 }
 
 rule DenyConcurrencyCap priority 2 {
@@ -91,7 +91,7 @@ rule AllowDispatch priority 99 {
 }
 
 outcome Route {
-    model: string
+    tier: string
     profile: string
     max_turns: number
     timeout_minutes: number
@@ -99,16 +99,16 @@ outcome Route {
 
 strategy DispatchRoute returns Route {
     when segment insight_role { dispatch.role == "chief-architect" }
-        then Architect { model: "fable", profile: "insight", max_turns: 80, timeout_minutes: 30 }
+        then Architect { tier: "reason", profile: "insight", max_turns: 80, timeout_minutes: 30 }
     when { dispatch.role == "deep-report" }
-        then DeepReport { model: "fable", profile: "insight", max_turns: 60, timeout_minutes: 30 }
+        then DeepReport { tier: "reason", profile: "insight", max_turns: 60, timeout_minutes: 30 }
     when { dispatch.role == "investigator" }
-        then Investigator { model: "opus", profile: "readonly", max_turns: 40, timeout_minutes: 15 }
+        then Investigator { tier: "scrutiny", profile: "readonly", max_turns: 40, timeout_minutes: 15 }
     when { dispatch.role == "reviewer" }
-        then Reviewer { model: "opus", profile: "readonly", max_turns: 30, timeout_minutes: 15 }
+        then Reviewer { tier: "scrutiny", profile: "readonly", max_turns: 30, timeout_minutes: 15 }
     when { dispatch.role == "worker" }
-        then Worker { model: "sonnet", profile: "execution", max_turns: 60, timeout_minutes: 45 }
+        then Worker { tier: "execute", profile: "execution", max_turns: 60, timeout_minutes: 45 }
     when { dispatch.role == "debugger" }
-        then Debugger { model: "sonnet", profile: "execution", max_turns: 60, timeout_minutes: 45 }
-    else Reject { model: "", profile: "", max_turns: 0, timeout_minutes: 0 }
+        then Debugger { tier: "execute", profile: "execution", max_turns: 60, timeout_minutes: 45 }
+    else Reject { tier: "", profile: "", max_turns: 0, timeout_minutes: 0 }
 }

@@ -52,14 +52,17 @@ func BuildArgs(a ClaudeArgs) ([]string, error) {
 	if a.SettingsPath == "" {
 		return nil, fmt.Errorf("spawn: SettingsPath is required")
 	}
-	if a.Route.Model == "" {
-		return nil, fmt.Errorf("spawn: Route.Model is required")
+	if a.Route.Tier == "" {
+		return nil, fmt.Errorf("spawn: Route.Tier is required")
 	}
+
+	// Derive model from tier until P2.6 wires tier.Resolve from models.toml.
+	model := tierToModel(a.Route.Tier)
 
 	args := []string{
 		ClaudeBin(),
 		"-p", a.BriefPath,
-		"--model", a.Route.Model,
+		"--model", model,
 		"--settings", a.SettingsPath,
 		"--permission-mode", "dontAsk",
 		"--output-format", "json",
@@ -74,6 +77,21 @@ func BuildArgs(a ClaudeArgs) ([]string, error) {
 	}
 
 	return args, nil
+}
+
+// tierToModel maps a tier name to the canonical claude model identifier.
+// This is a temporary bridge until P2.6 wires tier.Resolve from models.toml.
+func tierToModel(tier string) string {
+	switch tier {
+	case "reason":
+		return "fable"
+	case "scrutiny":
+		return "opus"
+	case "execute":
+		return "sonnet"
+	default:
+		return "sonnet"
+	}
 }
 
 // BuildEnv returns the environment for the spawned claude process.

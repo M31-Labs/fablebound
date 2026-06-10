@@ -58,17 +58,17 @@ rule BogusRule priority 1 {
 // yields the expected nested dispatch.*/caller.*/run.* keys.
 func TestContextMapDispatch(t *testing.T) {
 	req := DispatchRequest{
-		Role:        "worker",
-		Model:       "sonnet",
-		Background:  false,
-		BriefBytes:  1024,
-		CallerRole:  "orchestrator",
-		CallerDepth: 0,
-		CallerID:    "root",
-		RunID:       "20260609-123456-ab12",
-		ActiveCount: 1,
-		FableCount:  0,
-		FableBudget: 2,
+		Role:         "worker",
+		Tier:         "execute",
+		Background:   false,
+		BriefBytes:   1024,
+		CallerRole:   "orchestrator",
+		CallerDepth:  0,
+		CallerID:     "root",
+		RunID:        "20260609-123456-ab12",
+		ActiveCount:  1,
+		ReasonCount:  0,
+		ReasonBudget: 2,
 	}
 
 	m := ContextMap(req)
@@ -81,8 +81,8 @@ func TestContextMapDispatch(t *testing.T) {
 	if got := dispatch["role"]; got != "worker" {
 		t.Errorf("dispatch.role = %v, want worker", got)
 	}
-	if got := dispatch["model"]; got != "sonnet" {
-		t.Errorf("dispatch.model = %v, want sonnet", got)
+	if got := dispatch["tier"]; got != "execute" {
+		t.Errorf("dispatch.tier = %v, want execute", got)
 	}
 	if got := dispatch["brief_bytes"]; got != 1024 {
 		t.Errorf("dispatch.brief_bytes = %v, want 1024", got)
@@ -111,8 +111,8 @@ func TestContextMapDispatch(t *testing.T) {
 	if got := run["id"]; got != "20260609-123456-ab12" {
 		t.Errorf("run.id = %v, want 20260609-123456-ab12", got)
 	}
-	if got := run["fable_budget"]; got != 2 {
-		t.Errorf("run.fable_budget = %v, want 2", got)
+	if got := run["reason_budget"]; got != 2 {
+		t.Errorf("run.reason_budget = %v, want 2", got)
 	}
 }
 

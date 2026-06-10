@@ -66,6 +66,7 @@ func Main(args []string) {
 		{"runs", runRuns},
 		{"promote", runPromote},
 		{"policy", runPolicy},
+		{"store", runStore},
 		{"hook", runHook},
 		{"install", runInstall},
 		{"uninstall", runUninstall},
@@ -110,6 +111,7 @@ Subcommands:
   runs list|show <id>    list or inspect runs
   promote <run-id>       distill run into a hyphae spore
   policy vet             compile+typecheck both policies
+  store init|status      bootstrap or inspect the PostgreSQL scratch store
   hook                   internal: PreToolUse/PostToolUse gate (stdin JSON)
   install [--print]      install PreToolUse/PostToolUse hooks in ~/.claude/settings.json
   uninstall [--print]    remove tiller hooks from ~/.claude/settings.json

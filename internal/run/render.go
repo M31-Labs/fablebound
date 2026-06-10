@@ -85,14 +85,14 @@ func formatMetaWithReport(m *Meta, runDir string) string {
 
 // RunSummary is the derived structure emitted by `runs show --json`.
 type RunSummary struct {
-	RunID       string             `json:"run_id"`
-	Task        string             `json:"task"`
-	Status      string             `json:"status"`
-	CreatedAt   string             `json:"created_at,omitempty"`
-	EndedAt     string             `json:"ended_at,omitempty"`
-	FableBudget int                `json:"fable_budget"`
-	PolicySHAs  map[string]string  `json:"policy_shas,omitempty"`
-	Dispatches  []*DispatchSummary `json:"dispatches"`
+	RunID        string             `json:"run_id"`
+	Task         string             `json:"task"`
+	Status       string             `json:"status"`
+	CreatedAt    string             `json:"created_at,omitempty"`
+	EndedAt      string             `json:"ended_at,omitempty"`
+	ReasonBudget int                `json:"reason_budget"`
+	PolicySHAs   map[string]string  `json:"policy_shas,omitempty"`
+	Dispatches   []*DispatchSummary `json:"dispatches"`
 }
 
 // DispatchSummary is one node in the derived dispatch tree for --json output.
@@ -125,12 +125,12 @@ func BuildRunSummary(runDir string) (*RunSummary, error) {
 	dispatches := buildDispatchSummaries(root, runDir)
 
 	summary := &RunSummary{
-		RunID:       manifest.RunID,
-		Task:        manifest.Task,
-		Status:      manifest.Status,
-		FableBudget: manifest.FableBudget,
-		PolicySHAs:  manifest.PolicySHAs,
-		Dispatches:  dispatches,
+		RunID:        manifest.RunID,
+		Task:         manifest.Task,
+		Status:       manifest.Status,
+		ReasonBudget: manifest.FableBudget,
+		PolicySHAs:   manifest.PolicySHAs,
+		Dispatches:   dispatches,
 	}
 	if !manifest.CreatedAt.IsZero() {
 		summary.CreatedAt = manifest.CreatedAt.UTC().Format("2006-01-02T15:04:05Z")

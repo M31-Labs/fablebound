@@ -86,8 +86,14 @@ func Supervise(a SuperviseArgs) error {
 		timeoutMins = a.TimeoutMinutes
 	}
 
+	// Derive tier from dispatch record: prefer Tier field (v2), fall back to
+	// deriving from model string for v1 compatibility.
+	tier := d.Tier
+	if tier == "" {
+		tier = modelToTier(d.Model)
+	}
 	metaRoute := policy.Route{
-		Model:          d.Model,
+		Tier:           tier,
 		Profile:        d.Profile,
 		MaxTurns:       d.MaxTurns,
 		TimeoutMinutes: timeoutMins,
@@ -336,4 +342,18 @@ func trimOutput(data []byte) []byte {
 		start = lineEnd + 1
 	}
 	return data
+}
+
+// modelToTier derives a tier name from a v1 model string.
+// Used for backward compatibility when reading v1 dispatch records that have
+// a model field but no tier field.
+func modelToTier(model string) string {
+	switch model {
+	case "fable":
+		return "reason"
+	case "opus":
+		return "scrutiny"
+	default:
+		return "execute"
+	}
 }

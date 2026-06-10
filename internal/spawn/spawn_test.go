@@ -274,9 +274,10 @@ func TestDispatchAllowPath(t *testing.T) {
 	}
 }
 
-// TestDispatchDenyWorkerFable verifies that dispatching a worker with model=fable
-// results in exit 3 and "DenyFableForExecution" on stderr.
-func TestDispatchDenyWorkerFable(t *testing.T) {
+// TestDispatchDenyWorkerReason verifies that dispatching a worker with tier=reason
+// results in exit 3 and "DenyReasonTierForExecution" on stderr.
+// Also verifies that the deprecated --model=fable alias maps to tier=reason.
+func TestDispatchDenyWorkerReason(t *testing.T) {
 	runDir, binary, stub := setupFixtureRun(t)
 
 	// Create a root dispatch so context trace has somewhere to write.
@@ -290,7 +291,8 @@ func TestDispatchDenyWorkerFable(t *testing.T) {
 		"TILLER_CLAUDE_BIN="+stub,
 	)
 
-	cmd := exec.Command(binary, "dispatch", "--role", "worker", "--model", "fable", "--brief", "test")
+	// Use --tier=reason (the new flag).
+	cmd := exec.Command(binary, "dispatch", "--role", "worker", "--tier", "reason", "--brief", "test")
 	cmd.Env = env
 	var stderrBuf strings.Builder
 	cmd.Stderr = &stderrBuf
@@ -305,8 +307,8 @@ func TestDispatchDenyWorkerFable(t *testing.T) {
 	}
 
 	stderr := stderrBuf.String()
-	if !strings.Contains(stderr, "DenyFableForExecution") {
-		t.Errorf("stderr missing DenyFableForExecution, got: %s", stderr)
+	if !strings.Contains(stderr, "DenyReasonTierForExecution") {
+		t.Errorf("stderr missing DenyReasonTierForExecution, got: %s", stderr)
 	}
 }
 

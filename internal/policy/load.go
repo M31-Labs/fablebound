@@ -136,3 +136,9 @@ func EmbeddedDefaults() fs.ReadDirFS {
 func EmbeddedSchemasGo() ([]byte, error) {
 	return embeddedFS.ReadFile("schemas.go")
 }
+
+// EmbeddedDefaultSource returns the raw .arb source bytes for the embedded
+// default policy of the given kind. Used by policyvet for the vendor-stray detector.
+func EmbeddedDefaultSource(kind string) ([]byte, error) {
+	return embeddedFS.ReadFile("defaults/" + kind + ".arb")
+}

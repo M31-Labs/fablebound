@@ -1,12 +1,12 @@
 # Tests for dispatch.arb — tiller dispatch gate.
 #
-# Canonical model combos (flat defaults):
-#   orchestrator → fable   chief-architect → fable   deep-report → fable
-#   investigator → opus    reviewer        → opus
-#   worker       → sonnet  debugger        → sonnet
+# Canonical tier combos (flat defaults):
+#   orchestrator → reason   chief-architect → reason   deep-report → reason
+#   investigator → scrutiny  reviewer        → scrutiny
+#   worker       → execute   debugger        → execute
 #
-# Coverage targets: every rule (HaltAll, DenyFableForExecution,
-# DenyFableFromNonRoot, DenyTerminalDepth, DenyFableBudget,
+# Coverage targets: every rule (HaltAll, DenyReasonTierForExecution,
+# DenyReasonFromNonRoot, DenyTerminalDepth, DenyReasonBudget,
 # DenyConcurrencyCap, DenyExecutionSpawnsInsight, DenyReviewerDispatch,
 # DenyInvestigatorScope, DenyInsightScope, DenyWorkerScope, AllowDispatch)
 # and every DispatchRoute strategy arm (Architect, DeepReport,
@@ -17,7 +17,7 @@
 test "worker dispatch by orchestrator at depth 0 is allowed" {
     given {
         dispatch.role: "worker"
-        dispatch.model: "sonnet"
+        dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 512
         caller.role: "orchestrator"
@@ -25,18 +25,18 @@ test "worker dispatch by orchestrator at depth 0 is allowed" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule AllowDispatch matched
-    expect rule DenyFableForExecution not matched
+    expect rule DenyReasonTierForExecution not matched
     expect rule DenyTerminalDepth not matched
 }
 
 test "debugger dispatch by orchestrator at depth 0 is allowed" {
     given {
         dispatch.role: "debugger"
-        dispatch.model: "sonnet"
+        dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 256
         caller.role: "orchestrator"
@@ -44,8 +44,8 @@ test "debugger dispatch by orchestrator at depth 0 is allowed" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 1
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule AllowDispatch matched
 }
@@ -53,7 +53,7 @@ test "debugger dispatch by orchestrator at depth 0 is allowed" {
 test "reviewer dispatch by orchestrator at depth 0 is allowed" {
     given {
         dispatch.role: "reviewer"
-        dispatch.model: "opus"
+        dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -61,8 +61,8 @@ test "reviewer dispatch by orchestrator at depth 0 is allowed" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule AllowDispatch matched
 }
@@ -70,7 +70,7 @@ test "reviewer dispatch by orchestrator at depth 0 is allowed" {
 test "investigator dispatch by orchestrator at depth 0 is allowed" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "opus"
+        dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 400
         caller.role: "orchestrator"
@@ -78,8 +78,8 @@ test "investigator dispatch by orchestrator at depth 0 is allowed" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule AllowDispatch matched
 }
@@ -87,7 +87,7 @@ test "investigator dispatch by orchestrator at depth 0 is allowed" {
 test "chief-architect dispatch by orchestrator at depth 0 is allowed" {
     given {
         dispatch.role: "chief-architect"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 1024
         caller.role: "orchestrator"
@@ -95,18 +95,18 @@ test "chief-architect dispatch by orchestrator at depth 0 is allowed" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule AllowDispatch matched
-    expect rule DenyFableForExecution not matched
-    expect rule DenyFableFromNonRoot not matched
+    expect rule DenyReasonTierForExecution not matched
+    expect rule DenyReasonFromNonRoot not matched
 }
 
 test "worker dispatch by depth-1 agent is allowed" {
     given {
         dispatch.role: "worker"
-        dispatch.model: "sonnet"
+        dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 300
         caller.role: "worker"
@@ -114,8 +114,8 @@ test "worker dispatch by depth-1 agent is allowed" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule AllowDispatch matched
     expect rule DenyTerminalDepth not matched
@@ -126,7 +126,7 @@ test "worker dispatch by depth-1 agent is allowed" {
 test "HaltAll kill switch is off by default — normal dispatch proceeds" {
     given {
         dispatch.role: "worker"
-        dispatch.model: "sonnet"
+        dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -134,18 +134,18 @@ test "HaltAll kill switch is off by default — normal dispatch proceeds" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule HaltAll not matched
 }
 
-# ── DenyFableForExecution ────────────────────────────────────────────────────
+# ── DenyReasonTierForExecution ────────────────────────────────────────────────
 
-test "fable model requested for worker is denied (DenyFableForExecution)" {
+test "reason tier requested for worker is denied (DenyReasonTierForExecution)" {
     given {
         dispatch.role: "worker"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -153,16 +153,16 @@ test "fable model requested for worker is denied (DenyFableForExecution)" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
-    expect rule DenyFableForExecution matched
+    expect rule DenyReasonTierForExecution matched
 }
 
-test "fable model requested for debugger is denied (DenyFableForExecution)" {
+test "reason tier requested for debugger is denied (DenyReasonTierForExecution)" {
     given {
         dispatch.role: "debugger"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -170,16 +170,16 @@ test "fable model requested for debugger is denied (DenyFableForExecution)" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
-    expect rule DenyFableForExecution matched
+    expect rule DenyReasonTierForExecution matched
 }
 
-test "fable model requested for investigator is denied (DenyFableForExecution)" {
+test "reason tier requested for investigator is denied (DenyReasonTierForExecution)" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -187,16 +187,16 @@ test "fable model requested for investigator is denied (DenyFableForExecution)" 
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
-    expect rule DenyFableForExecution matched
+    expect rule DenyReasonTierForExecution matched
 }
 
-test "fable model requested for reviewer is denied (DenyFableForExecution)" {
+test "reason tier requested for reviewer is denied (DenyReasonTierForExecution)" {
     given {
         dispatch.role: "reviewer"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -204,16 +204,16 @@ test "fable model requested for reviewer is denied (DenyFableForExecution)" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
-    expect rule DenyFableForExecution matched
+    expect rule DenyReasonTierForExecution matched
 }
 
-test "fable model for chief-architect does NOT fire DenyFableForExecution" {
+test "reason tier for chief-architect does NOT fire DenyReasonTierForExecution" {
     given {
         dispatch.role: "chief-architect"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -221,16 +221,16 @@ test "fable model for chief-architect does NOT fire DenyFableForExecution" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
-    expect rule DenyFableForExecution not matched
+    expect rule DenyReasonTierForExecution not matched
 }
 
-test "fable model for deep-report does NOT fire DenyFableForExecution" {
+test "reason tier for deep-report does NOT fire DenyReasonTierForExecution" {
     given {
         dispatch.role: "deep-report"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -238,18 +238,18 @@ test "fable model for deep-report does NOT fire DenyFableForExecution" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
-    expect rule DenyFableForExecution not matched
+    expect rule DenyReasonTierForExecution not matched
 }
 
-# ── DenyFableFromNonRoot ─────────────────────────────────────────────────────
+# ── DenyReasonFromNonRoot ─────────────────────────────────────────────────────
 
-test "fable model from worker caller is denied (DenyFableFromNonRoot)" {
+test "reason tier from worker caller is denied (DenyReasonFromNonRoot)" {
     given {
         dispatch.role: "chief-architect"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "worker"
@@ -257,16 +257,16 @@ test "fable model from worker caller is denied (DenyFableFromNonRoot)" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
-    expect rule DenyFableFromNonRoot matched
+    expect rule DenyReasonFromNonRoot matched
 }
 
-test "fable model from investigator caller is denied (DenyFableFromNonRoot)" {
+test "reason tier from investigator caller is denied (DenyReasonFromNonRoot)" {
     given {
         dispatch.role: "chief-architect"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "investigator"
@@ -274,16 +274,16 @@ test "fable model from investigator caller is denied (DenyFableFromNonRoot)" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
-    expect rule DenyFableFromNonRoot matched
+    expect rule DenyReasonFromNonRoot matched
 }
 
-test "fable model from orchestrator does NOT fire DenyFableFromNonRoot" {
+test "reason tier from orchestrator does NOT fire DenyReasonFromNonRoot" {
     given {
         dispatch.role: "chief-architect"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -291,10 +291,10 @@ test "fable model from orchestrator does NOT fire DenyFableFromNonRoot" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
-    expect rule DenyFableFromNonRoot not matched
+    expect rule DenyReasonFromNonRoot not matched
 }
 
 # ── DenyTerminalDepth ─────────────────────────────────────────────────────────
@@ -302,7 +302,7 @@ test "fable model from orchestrator does NOT fire DenyFableFromNonRoot" {
 test "depth-2 caller is denied (DenyTerminalDepth)" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "opus"
+        dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "worker"
@@ -310,8 +310,8 @@ test "depth-2 caller is denied (DenyTerminalDepth)" {
         caller.dispatch_id: "d02"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyTerminalDepth matched
 }
@@ -319,7 +319,7 @@ test "depth-2 caller is denied (DenyTerminalDepth)" {
 test "depth-3 caller is also denied (DenyTerminalDepth)" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "opus"
+        dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "investigator"
@@ -327,8 +327,8 @@ test "depth-3 caller is also denied (DenyTerminalDepth)" {
         caller.dispatch_id: "d03"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyTerminalDepth matched
 }
@@ -336,7 +336,7 @@ test "depth-3 caller is also denied (DenyTerminalDepth)" {
 test "depth-1 caller does NOT fire DenyTerminalDepth" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "opus"
+        dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "worker"
@@ -344,18 +344,18 @@ test "depth-1 caller does NOT fire DenyTerminalDepth" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyTerminalDepth not matched
 }
 
-# ── DenyFableBudget ───────────────────────────────────────────────────────────
+# ── DenyReasonBudget ───────────────────────────────────────────────────────────
 
-test "fable budget exhausted denies fable dispatch (DenyFableBudget)" {
+test "reason budget exhausted denies reason dispatch (DenyReasonBudget)" {
     given {
         dispatch.role: "chief-architect"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -363,16 +363,16 @@ test "fable budget exhausted denies fable dispatch (DenyFableBudget)" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 2
-        run.fable_budget: 2
+        run.reason_dispatches: 2
+        run.reason_budget: 2
     }
-    expect rule DenyFableBudget matched
+    expect rule DenyReasonBudget matched
 }
 
-test "fable dispatches exceed budget is denied (DenyFableBudget)" {
+test "reason dispatches exceed budget is denied (DenyReasonBudget)" {
     given {
         dispatch.role: "deep-report"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -380,16 +380,16 @@ test "fable dispatches exceed budget is denied (DenyFableBudget)" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 3
-        run.fable_budget: 2
+        run.reason_dispatches: 3
+        run.reason_budget: 2
     }
-    expect rule DenyFableBudget matched
+    expect rule DenyReasonBudget matched
 }
 
-test "fable budget not yet exhausted does NOT fire DenyFableBudget" {
+test "reason budget not yet exhausted does NOT fire DenyReasonBudget" {
     given {
         dispatch.role: "chief-architect"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -397,10 +397,10 @@ test "fable budget not yet exhausted does NOT fire DenyFableBudget" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 1
-        run.fable_budget: 2
+        run.reason_dispatches: 1
+        run.reason_budget: 2
     }
-    expect rule DenyFableBudget not matched
+    expect rule DenyReasonBudget not matched
 }
 
 # ── DenyConcurrencyCap ────────────────────────────────────────────────────────
@@ -408,7 +408,7 @@ test "fable budget not yet exhausted does NOT fire DenyFableBudget" {
 test "active dispatch cap of 4 reached is denied (DenyConcurrencyCap)" {
     given {
         dispatch.role: "worker"
-        dispatch.model: "sonnet"
+        dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -416,8 +416,8 @@ test "active dispatch cap of 4 reached is denied (DenyConcurrencyCap)" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 4
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyConcurrencyCap matched
 }
@@ -425,7 +425,7 @@ test "active dispatch cap of 4 reached is denied (DenyConcurrencyCap)" {
 test "active dispatches exceed cap is denied (DenyConcurrencyCap)" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "opus"
+        dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -433,8 +433,8 @@ test "active dispatches exceed cap is denied (DenyConcurrencyCap)" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 5
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyConcurrencyCap matched
 }
@@ -442,7 +442,7 @@ test "active dispatches exceed cap is denied (DenyConcurrencyCap)" {
 test "active dispatches below cap does NOT fire DenyConcurrencyCap" {
     given {
         dispatch.role: "worker"
-        dispatch.model: "sonnet"
+        dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -450,8 +450,8 @@ test "active dispatches below cap does NOT fire DenyConcurrencyCap" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 3
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyConcurrencyCap not matched
 }
@@ -461,7 +461,7 @@ test "active dispatches below cap does NOT fire DenyConcurrencyCap" {
 test "worker cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
     given {
         dispatch.role: "chief-architect"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "worker"
@@ -469,8 +469,8 @@ test "worker cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyExecutionSpawnsInsight matched
 }
@@ -478,7 +478,7 @@ test "worker cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
 test "debugger cannot spawn deep-report (DenyExecutionSpawnsInsight)" {
     given {
         dispatch.role: "deep-report"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "debugger"
@@ -486,8 +486,8 @@ test "debugger cannot spawn deep-report (DenyExecutionSpawnsInsight)" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyExecutionSpawnsInsight matched
 }
@@ -495,7 +495,7 @@ test "debugger cannot spawn deep-report (DenyExecutionSpawnsInsight)" {
 test "investigator cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
     given {
         dispatch.role: "chief-architect"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "investigator"
@@ -503,8 +503,8 @@ test "investigator cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyExecutionSpawnsInsight matched
 }
@@ -512,7 +512,7 @@ test "investigator cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
 test "reviewer cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
     given {
         dispatch.role: "chief-architect"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "reviewer"
@@ -520,8 +520,8 @@ test "reviewer cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyExecutionSpawnsInsight matched
 }
@@ -529,7 +529,7 @@ test "reviewer cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
 test "orchestrator spawning chief-architect does NOT fire DenyExecutionSpawnsInsight" {
     given {
         dispatch.role: "chief-architect"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -537,8 +537,8 @@ test "orchestrator spawning chief-architect does NOT fire DenyExecutionSpawnsIns
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyExecutionSpawnsInsight not matched
 }
@@ -548,7 +548,7 @@ test "orchestrator spawning chief-architect does NOT fire DenyExecutionSpawnsIns
 test "reviewer caller is denied all dispatches (DenyReviewerDispatch)" {
     given {
         dispatch.role: "worker"
-        dispatch.model: "sonnet"
+        dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "reviewer"
@@ -556,8 +556,8 @@ test "reviewer caller is denied all dispatches (DenyReviewerDispatch)" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyReviewerDispatch matched
 }
@@ -565,7 +565,7 @@ test "reviewer caller is denied all dispatches (DenyReviewerDispatch)" {
 test "reviewer cannot dispatch an investigator (DenyReviewerDispatch)" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "opus"
+        dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "reviewer"
@@ -573,8 +573,8 @@ test "reviewer cannot dispatch an investigator (DenyReviewerDispatch)" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyReviewerDispatch matched
 }
@@ -582,7 +582,7 @@ test "reviewer cannot dispatch an investigator (DenyReviewerDispatch)" {
 test "non-reviewer caller does NOT fire DenyReviewerDispatch" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "opus"
+        dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "worker"
@@ -590,8 +590,8 @@ test "non-reviewer caller does NOT fire DenyReviewerDispatch" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyReviewerDispatch not matched
 }
@@ -601,7 +601,7 @@ test "non-reviewer caller does NOT fire DenyReviewerDispatch" {
 test "investigator dispatching worker is denied (DenyInvestigatorScope)" {
     given {
         dispatch.role: "worker"
-        dispatch.model: "sonnet"
+        dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "investigator"
@@ -609,8 +609,8 @@ test "investigator dispatching worker is denied (DenyInvestigatorScope)" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyInvestigatorScope matched
 }
@@ -618,7 +618,7 @@ test "investigator dispatching worker is denied (DenyInvestigatorScope)" {
 test "investigator dispatching debugger is denied (DenyInvestigatorScope)" {
     given {
         dispatch.role: "debugger"
-        dispatch.model: "sonnet"
+        dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "investigator"
@@ -626,8 +626,8 @@ test "investigator dispatching debugger is denied (DenyInvestigatorScope)" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyInvestigatorScope matched
 }
@@ -635,7 +635,7 @@ test "investigator dispatching debugger is denied (DenyInvestigatorScope)" {
 test "investigator dispatching another investigator is allowed" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "opus"
+        dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "investigator"
@@ -643,8 +643,8 @@ test "investigator dispatching another investigator is allowed" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyInvestigatorScope not matched
     expect rule AllowDispatch matched
@@ -655,7 +655,7 @@ test "investigator dispatching another investigator is allowed" {
 test "chief-architect cannot dispatch a worker (DenyInsightScope)" {
     given {
         dispatch.role: "worker"
-        dispatch.model: "sonnet"
+        dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "chief-architect"
@@ -663,8 +663,8 @@ test "chief-architect cannot dispatch a worker (DenyInsightScope)" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyInsightScope matched
 }
@@ -672,7 +672,7 @@ test "chief-architect cannot dispatch a worker (DenyInsightScope)" {
 test "deep-report cannot dispatch a debugger (DenyInsightScope)" {
     given {
         dispatch.role: "debugger"
-        dispatch.model: "sonnet"
+        dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "deep-report"
@@ -680,8 +680,8 @@ test "deep-report cannot dispatch a debugger (DenyInsightScope)" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyInsightScope matched
 }
@@ -689,7 +689,7 @@ test "deep-report cannot dispatch a debugger (DenyInsightScope)" {
 test "chief-architect dispatching investigator is NOT denied by insight scope" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "opus"
+        dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "chief-architect"
@@ -697,8 +697,8 @@ test "chief-architect dispatching investigator is NOT denied by insight scope" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyInsightScope not matched
     expect rule AllowDispatch matched
@@ -709,7 +709,7 @@ test "chief-architect dispatching investigator is NOT denied by insight scope" {
 test "worker cannot dispatch a reviewer (DenyWorkerScope)" {
     given {
         dispatch.role: "reviewer"
-        dispatch.model: "opus"
+        dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "worker"
@@ -717,8 +717,8 @@ test "worker cannot dispatch a reviewer (DenyWorkerScope)" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyWorkerScope matched
 }
@@ -726,7 +726,7 @@ test "worker cannot dispatch a reviewer (DenyWorkerScope)" {
 test "debugger cannot dispatch a reviewer (DenyWorkerScope)" {
     given {
         dispatch.role: "reviewer"
-        dispatch.model: "opus"
+        dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "debugger"
@@ -734,8 +734,8 @@ test "debugger cannot dispatch a reviewer (DenyWorkerScope)" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyWorkerScope matched
 }
@@ -743,7 +743,7 @@ test "debugger cannot dispatch a reviewer (DenyWorkerScope)" {
 test "worker dispatching investigator does NOT fire DenyWorkerScope" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "opus"
+        dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "worker"
@@ -751,8 +751,8 @@ test "worker dispatching investigator does NOT fire DenyWorkerScope" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyWorkerScope not matched
 }
@@ -760,7 +760,7 @@ test "worker dispatching investigator does NOT fire DenyWorkerScope" {
 test "worker dispatching debugger does NOT fire DenyWorkerScope" {
     given {
         dispatch.role: "debugger"
-        dispatch.model: "sonnet"
+        dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "worker"
@@ -768,8 +768,8 @@ test "worker dispatching debugger does NOT fire DenyWorkerScope" {
         caller.dispatch_id: "d01"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyWorkerScope not matched
 }
@@ -779,7 +779,7 @@ test "worker dispatching debugger does NOT fire DenyWorkerScope" {
 test "unknown role dispatched by orchestrator matches nothing (combinator denies)" {
     given {
         dispatch.role: "unknown-role"
-        dispatch.model: "sonnet"
+        dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -787,18 +787,18 @@ test "unknown role dispatched by orchestrator matches nothing (combinator denies
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule AllowDispatch not matched
 }
 
 # ── DispatchRoute strategy arms ──────────────────────────────────────────────
 
-test "chief-architect routes to Architect arm (fable)" {
+test "chief-architect routes to Architect arm (reason tier)" {
     given {
         dispatch.role: "chief-architect"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 512
         caller.role: "orchestrator"
@@ -806,16 +806,16 @@ test "chief-architect routes to Architect arm (fable)" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
-    expect strategy DispatchRoute selected Architect { model: "fable", profile: "insight" }
+    expect strategy DispatchRoute selected Architect { tier: "reason", profile: "insight" }
 }
 
-test "deep-report routes to DeepReport arm (fable)" {
+test "deep-report routes to DeepReport arm (reason tier)" {
     given {
         dispatch.role: "deep-report"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 512
         caller.role: "orchestrator"
@@ -823,16 +823,16 @@ test "deep-report routes to DeepReport arm (fable)" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
-    expect strategy DispatchRoute selected DeepReport { model: "fable", profile: "insight" }
+    expect strategy DispatchRoute selected DeepReport { tier: "reason", profile: "insight" }
 }
 
-test "investigator routes to Investigator arm (opus)" {
+test "investigator routes to Investigator arm (scrutiny tier)" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: ""
+        dispatch.tier: ""
         dispatch.background: false
         dispatch.brief_bytes: 200
         caller.role: "orchestrator"
@@ -840,17 +840,17 @@ test "investigator routes to Investigator arm (opus)" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule AllowDispatch matched
-    expect strategy DispatchRoute selected Investigator { model: "opus", profile: "readonly" }
+    expect strategy DispatchRoute selected Investigator { tier: "scrutiny", profile: "readonly" }
 }
 
-test "reviewer routes to Reviewer arm (opus)" {
+test "reviewer routes to Reviewer arm (scrutiny tier)" {
     given {
         dispatch.role: "reviewer"
-        dispatch.model: ""
+        dispatch.tier: ""
         dispatch.background: false
         dispatch.brief_bytes: 200
         caller.role: "orchestrator"
@@ -858,16 +858,16 @@ test "reviewer routes to Reviewer arm (opus)" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
-    expect strategy DispatchRoute selected Reviewer { model: "opus", profile: "readonly" }
+    expect strategy DispatchRoute selected Reviewer { tier: "scrutiny", profile: "readonly" }
 }
 
-test "worker routes to Worker arm (sonnet + execution profile)" {
+test "worker routes to Worker arm (execute tier + execution profile)" {
     given {
         dispatch.role: "worker"
-        dispatch.model: ""
+        dispatch.tier: ""
         dispatch.background: false
         dispatch.brief_bytes: 300
         caller.role: "orchestrator"
@@ -875,16 +875,16 @@ test "worker routes to Worker arm (sonnet + execution profile)" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
-    expect strategy DispatchRoute selected Worker { model: "sonnet", profile: "execution" }
+    expect strategy DispatchRoute selected Worker { tier: "execute", profile: "execution" }
 }
 
-test "debugger routes to Debugger arm (sonnet + execution profile)" {
+test "debugger routes to Debugger arm (execute tier + execution profile)" {
     given {
         dispatch.role: "debugger"
-        dispatch.model: ""
+        dispatch.tier: ""
         dispatch.background: false
         dispatch.brief_bytes: 300
         caller.role: "orchestrator"
@@ -892,18 +892,18 @@ test "debugger routes to Debugger arm (sonnet + execution profile)" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
-    expect strategy DispatchRoute selected Debugger { model: "sonnet", profile: "execution" }
+    expect strategy DispatchRoute selected Debugger { tier: "execute", profile: "execution" }
 }
 
 # ── Combined / spec-quoted scenarios ─────────────────────────────────────────
 
-test "fable+worker triggers DenyFableForExecution (combined)" {
+test "reason+worker triggers DenyReasonTierForExecution (combined)" {
     given {
         dispatch.role: "worker"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -911,17 +911,17 @@ test "fable+worker triggers DenyFableForExecution (combined)" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
-    # DenyFableForExecution (priority 1) wins over AllowDispatch (priority 99)
-    expect rule DenyFableForExecution matched
+    # DenyReasonTierForExecution (priority 1) wins over AllowDispatch (priority 99)
+    expect rule DenyReasonTierForExecution matched
 }
 
 test "orchestrator dispatching chief-architect with budget remaining is fully allowed" {
     given {
         dispatch.role: "chief-architect"
-        dispatch.model: "fable"
+        dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 2048
         caller.role: "orchestrator"
@@ -929,13 +929,13 @@ test "orchestrator dispatching chief-architect with budget remaining is fully al
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 1
-        run.fable_dispatches: 1
-        run.fable_budget: 2
+        run.reason_dispatches: 1
+        run.reason_budget: 2
     }
     expect rule AllowDispatch matched
-    expect rule DenyFableForExecution not matched
-    expect rule DenyFableFromNonRoot not matched
-    expect rule DenyFableBudget not matched
+    expect rule DenyReasonTierForExecution not matched
+    expect rule DenyReasonFromNonRoot not matched
+    expect rule DenyReasonBudget not matched
     expect rule DenyTerminalDepth not matched
     expect strategy DispatchRoute selected Architect
 }
@@ -943,7 +943,7 @@ test "orchestrator dispatching chief-architect with budget remaining is fully al
 test "depth-2 worker attempting dispatch is denied by DenyTerminalDepth" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "opus"
+        dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "worker"
@@ -951,8 +951,8 @@ test "depth-2 worker attempting dispatch is denied by DenyTerminalDepth" {
         caller.dispatch_id: "d02"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     # DenyTerminalDepth (priority 1) wins; combinator denies even though AllowDispatch also matches
     expect rule DenyTerminalDepth matched
@@ -963,7 +963,7 @@ test "depth-2 worker attempting dispatch is denied by DenyTerminalDepth" {
 test "brief exceeding 256KB is denied (DenyBriefTooLarge)" {
     given {
         dispatch.role: "worker"
-        dispatch.model: "sonnet"
+        dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 262145
         caller.role: "orchestrator"
@@ -971,8 +971,8 @@ test "brief exceeding 256KB is denied (DenyBriefTooLarge)" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyBriefTooLarge matched
 }
@@ -980,7 +980,7 @@ test "brief exceeding 256KB is denied (DenyBriefTooLarge)" {
 test "brief at exactly 256KB (262144 bytes) is NOT denied by DenyBriefTooLarge" {
     given {
         dispatch.role: "worker"
-        dispatch.model: "sonnet"
+        dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 262144
         caller.role: "orchestrator"
@@ -988,8 +988,8 @@ test "brief at exactly 256KB (262144 bytes) is NOT denied by DenyBriefTooLarge" 
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyBriefTooLarge not matched
 }
@@ -997,7 +997,7 @@ test "brief at exactly 256KB (262144 bytes) is NOT denied by DenyBriefTooLarge" 
 test "normal brief does NOT fire DenyBriefTooLarge" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "opus"
+        dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 1024
         caller.role: "orchestrator"
@@ -1005,8 +1005,8 @@ test "normal brief does NOT fire DenyBriefTooLarge" {
         caller.dispatch_id: "root"
         run.id: "20260101-000000-0001"
         run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
+        run.reason_dispatches: 0
+        run.reason_budget: 2
     }
     expect rule DenyBriefTooLarge not matched
 }

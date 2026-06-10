@@ -1,20 +1,24 @@
 package hook
 
-// ambient_test.go: white-box tests for lastFableModelInTranscript hardening.
-// These tests live in package hook (not hook_test) to access the unexported
-// lastFableModelInTranscript and related helpers directly.
+// ambient_test.go: white-box tests for DetectTier hardening (via the hook
+// package, exercising the full runAmbient code path and the claudecode adapter
+// integration).
+//
+// Direct DetectTier tests live in internal/adapter/claudecode/detect_test.go.
+// Tests here exercise the public Run path (runAmbientHookWithTranscript) and
+// validate byte-identical hook output for all ambient fixtures.
 //
 // Rule 2 vs Rule 5 reconciliation:
 //   Rule 2 (isQualifyingAssistantLine): sidechain lines are filtered out entirely,
 //   so they never become "the last qualifier".
-//   Rule 5: if ONLY sidechain lines exist and no root qualifier is found, the
-//   function returns ("", false) — which causes runAmbient to passthrough
+//   Rule 5: if ONLY sidechain lines exist and no root qualifier is found,
+//   DetectTier returns ("", false) — which causes runAmbient to passthrough
 //   (fail open, no enforcement). This is the correct behavior: no root qualifier
 //   means we cannot confirm fable model → do not enforce.
 //
 //   The "sidechain_after_root_fable" case exercises the typical mixed scenario:
 //   rule 2 filters the trailing sidechain line, the root fable line is the last
-//   qualifier → returns ("claude-fable-5", true). Consistent with rules 2+5.
+//   qualifier → returns ("reason", true). Consistent with rules 2+5.
 
 import (
 	"bytes"
@@ -23,6 +27,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"m31labs.dev/tiller/internal/adapter/claudecode"
 )
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -88,15 +94,15 @@ func runAmbientHookWithTranscript(t *testing.T, transcriptFile, toolName string)
 // ─── Fix 1: <synthetic> skip ────────────────────────────────────────────────
 
 // TestSyntheticSkip: trailing <synthetic> after real fable line must NOT
-// overwrite the detected model. The fable line should be returned.
+// suppress fable detection.
 func TestSyntheticSkip(t *testing.T) {
 	p := transcriptPath(t, "fable_then_synthetic.jsonl")
-	model, isFable := lastFableModelInTranscript(p)
-	if model != "claude-fable-5" {
-		t.Errorf("got model=%q, want claude-fable-5 (synthetic must be skipped)", model)
+	tier, ok := claudecode.DetectTier(p)
+	if !ok {
+		t.Errorf("got ok=false, want true (synthetic must not suppress fable detection)")
 	}
-	if !isFable {
-		t.Errorf("got isFable=false, want true")
+	if tier != "reason" {
+		t.Errorf("got tier=%q, want reason", tier)
 	}
 }
 
@@ -120,12 +126,12 @@ func TestSyntheticSkip_AmbientEnforced(t *testing.T) {
 // line must be filtered; root fable line must win.
 func TestSidechainAfterRootFable(t *testing.T) {
 	p := transcriptPath(t, "sidechain_after_root_fable.jsonl")
-	model, isFable := lastFableModelInTranscript(p)
-	if model != "claude-fable-5" {
-		t.Errorf("got model=%q, want claude-fable-5 (sidechain sonnet must not override root fable)", model)
+	tier, ok := claudecode.DetectTier(p)
+	if !ok {
+		t.Errorf("got ok=false, want true (sidechain sonnet must not override root fable)")
 	}
-	if !isFable {
-		t.Errorf("got isFable=false, want true")
+	if tier != "reason" {
+		t.Errorf("got tier=%q, want reason", tier)
 	}
 }
 
@@ -134,12 +140,12 @@ func TestSidechainAfterRootFable(t *testing.T) {
 // This is the rule 5 behavior: no root qualifier → cannot confirm fable → passthrough.
 func TestSidechainOnly(t *testing.T) {
 	p := transcriptPath(t, "sidechain_only.jsonl")
-	model, isFable := lastFableModelInTranscript(p)
-	if model != "" {
-		t.Errorf("got model=%q, want empty (sidechain-only must yield no result)", model)
+	tier, ok := claudecode.DetectTier(p)
+	if ok {
+		t.Errorf("got ok=true, want false (sidechain-only must not trigger enforcement)")
 	}
-	if isFable {
-		t.Errorf("got isFable=true, want false (sidechain-only must not trigger enforcement)")
+	if tier != "" {
+		t.Errorf("got tier=%q, want empty (sidechain-only must yield no result)", tier)
 	}
 }
 
@@ -159,12 +165,12 @@ func TestSidechainOnly_AmbientPassthrough(t *testing.T) {
 // line must not cause the scanner to fail open. The fable line must be detected.
 func TestLargeLineThenFable(t *testing.T) {
 	p := transcriptPath(t, "large_line_then_fable.jsonl")
-	model, isFable := lastFableModelInTranscript(p)
-	if model != "claude-fable-5" {
-		t.Errorf("got model=%q, want claude-fable-5 (large line must be skipped, not abort scan)", model)
+	tier, ok := claudecode.DetectTier(p)
+	if !ok {
+		t.Errorf("got ok=false, want true (large line must be skipped, not abort scan)")
 	}
-	if !isFable {
-		t.Errorf("got isFable=false, want true")
+	if tier != "reason" {
+		t.Errorf("got tier=%q, want reason", tier)
 	}
 }
 
@@ -187,12 +193,12 @@ func TestLargeLineThenFable_AmbientEnforced(t *testing.T) {
 // qualifying line is opus → no fable enforcement.
 func TestFableThenOpus(t *testing.T) {
 	p := transcriptPath(t, "fable_then_opus.jsonl")
-	model, isFable := lastFableModelInTranscript(p)
-	if model != "claude-opus-4-8" {
-		t.Errorf("got model=%q, want claude-opus-4-8 (model switch must be detected)", model)
+	tier, ok := claudecode.DetectTier(p)
+	if ok {
+		t.Errorf("got ok=true, want false (opus is not fable)")
 	}
-	if isFable {
-		t.Errorf("got isFable=true, want false (opus is not fable)")
+	if tier != "" {
+		t.Errorf("got tier=%q, want empty (model switch to opus must clear detection)", tier)
 	}
 }
 
@@ -211,12 +217,12 @@ func TestFableThenOpus_AmbientPassthrough(t *testing.T) {
 // ("", false) — unknown → fail open.
 func TestFirstTurnNoAssistant(t *testing.T) {
 	p := transcriptPath(t, "first_turn_no_assistant.jsonl")
-	model, isFable := lastFableModelInTranscript(p)
-	if model != "" {
-		t.Errorf("got model=%q, want empty for first-turn transcript", model)
+	tier, ok := claudecode.DetectTier(p)
+	if ok {
+		t.Errorf("got ok=true, want false for first-turn transcript")
 	}
-	if isFable {
-		t.Errorf("got isFable=true, want false for first-turn transcript")
+	if tier != "" {
+		t.Errorf("got tier=%q, want empty for first-turn transcript", tier)
 	}
 }
 
@@ -231,17 +237,17 @@ func TestFirstTurnNoAssistant_AmbientPassthrough(t *testing.T) {
 
 // TestMissingTranscriptPath_Passthrough: empty transcript_path → passthrough.
 func TestMissingTranscriptPath_Passthrough(t *testing.T) {
-	model, isFable := lastFableModelInTranscript("")
-	if model != "" || isFable {
-		t.Errorf("empty path: got (%q, %v), want (\"\", false)", model, isFable)
+	tier, ok := claudecode.DetectTier("")
+	if ok || tier != "" {
+		t.Errorf("empty path: got (%q, %v), want (\"\", false)", tier, ok)
 	}
 }
 
 // TestNonexistentTranscript_Passthrough: nonexistent file → passthrough.
 func TestNonexistentTranscript_Passthrough(t *testing.T) {
-	model, isFable := lastFableModelInTranscript("/nonexistent/path/does-not-exist.jsonl")
-	if model != "" || isFable {
-		t.Errorf("nonexistent path: got (%q, %v), want (\"\", false)", model, isFable)
+	tier, ok := claudecode.DetectTier("/nonexistent/path/does-not-exist.jsonl")
+	if ok || tier != "" {
+		t.Errorf("nonexistent path: got (%q, %v), want (\"\", false)", tier, ok)
 	}
 }
 

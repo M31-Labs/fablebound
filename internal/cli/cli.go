@@ -9,6 +9,9 @@ package cli
 import (
 	"fmt"
 	"os"
+
+	"m31labs.dev/tiller/internal/adapter"
+	"m31labs.dev/tiller/internal/adapter/claudeheadless"
 )
 
 // DenialError wraps a policy-denial reason. Main exits with code 3.
@@ -30,21 +33,13 @@ type subcommand struct {
 	handler func(args []string) error
 }
 
-var subcommands = []subcommand{
-	{"init", runInit},
-	{"run", runRun},
-	{"dispatch", runDispatch},
-	{"poll", runPoll},
-	{"await", runAwait},
-	{"note", runNote},
-	{"runs", runRuns},
-	{"promote", runPromote},
-	{"policy", runPolicy},
-	{"hook", runHook},
-	{"install", runInstall},
-	{"uninstall", runUninstall},
-	{"_supervise", runSupervise},
-	{"version", runVersion},
+// buildRegistry constructs the adapter registry used by the dispatch handler.
+// P2.6 will add tier resolution here; for now only claude-headless is registered.
+// binary is the tiller executable path (empty = resolve at Run time via os.Executable).
+func buildRegistry(binary string) *adapter.Registry {
+	reg := adapter.NewRegistry()
+	reg.Register(claudeheadless.New(binary))
+	return reg
 }
 
 // Main is the entry point called from cmd/tiller/main.go.
@@ -52,6 +47,30 @@ func Main(args []string) {
 	if len(args) < 2 {
 		printUsage()
 		os.Exit(2)
+	}
+
+	// Build the adapter registry for this invocation.
+	// binary is resolved at Run time by claudeheadless (os.Executable).
+	reg := buildRegistry("")
+
+	// Subcommands that need the registry are wired here via closure; all others
+	// remain as plain function references. P2.6 will swap "claude-headless" for
+	// the tier-resolved adapter name inside makeDispatchHandler.
+	subcommands := []subcommand{
+		{"init", runInit},
+		{"run", runRun},
+		{"dispatch", makeDispatchHandler(reg)},
+		{"poll", runPoll},
+		{"await", runAwait},
+		{"note", runNote},
+		{"runs", runRuns},
+		{"promote", runPromote},
+		{"policy", runPolicy},
+		{"hook", runHook},
+		{"install", runInstall},
+		{"uninstall", runUninstall},
+		{"_supervise", runSupervise},
+		{"version", runVersion},
 	}
 
 	sub := args[1]

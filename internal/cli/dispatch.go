@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"m31labs.dev/arbiter/audit"
+	"m31labs.dev/tiller/internal/adapter"
 	"m31labs.dev/tiller/internal/auditlog"
 	"m31labs.dev/tiller/internal/hyphae"
 	"m31labs.dev/tiller/internal/policy"
@@ -19,9 +21,20 @@ import (
 	"m31labs.dev/tiller/internal/spawn"
 )
 
-// runDispatch is the handler for `tiller dispatch`.
+// makeDispatchHandler returns a handler for `tiller dispatch` that uses the
+// provided adapter registry for spawn+poll. P2.6 will replace the hard-coded
+// "claude-headless" adapter name with tier-resolved routing; the registry
+// lookup point is already in place here so P2.6 only needs to change one line.
+func makeDispatchHandler(reg *adapter.Registry) func([]string) error {
+	return func(args []string) error {
+		return runDispatchWithRegistry(args, reg)
+	}
+}
+
+
+// runDispatchWithRegistry is the handler for `tiller dispatch`.
 // Caller identity comes from environment; absent ⇒ role="user", depth=0.
-func runDispatch(args []string) error {
+func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 	fs := flag.NewFlagSet("dispatch", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
@@ -171,16 +184,41 @@ func runDispatch(args []string) error {
 		return fmt.Errorf("dispatch: write brief.md: %w", err)
 	}
 
-	// Write settings.json via the Store.
-	settingsJSON, err := spawn.Settings(result.Route.Profile, callerDepth+1)
+	// Resolve adapter for this dispatch.
+	// P2.6 will replace the constant "claude-headless" with tier.Resolve output;
+	// the registry lookup is already here so P2.6 only changes the name string.
+	const adapterName = "claude-headless"
+	adp, err := reg.Get(adapterName)
 	if err != nil {
-		return fmt.Errorf("dispatch: generate settings: %w", err)
+		return fmt.Errorf("dispatch: resolve adapter %q: %w", adapterName, err)
 	}
-	if err := st.WriteAdapterConfig(runID, dispatchID, settingsJSON); err != nil {
-		return fmt.Errorf("dispatch: write settings.json: %w", err)
+
+	// Build the DispatchSpec for the adapter.
+	childDepth := callerDepth + 1
+	spec := &adapter.DispatchSpec{
+		Store:      st,
+		RunID:      runID,
+		DispatchID: dispatchID,
+		Role:       *role,
+		// Tier: empty — Prepare will derive it from Model via deriveTier.
+		// P2.5/P2.6 will set Tier from tier.Resolve here.
+		Provider: "anthropic",
+		Model:    result.Route.Model,
+		Profile:  result.Route.Profile,
+		WorkDir:  runDir,
+		Depth:    childDepth,
+		MaxTurns: result.Route.MaxTurns,
+		Timeout:  time.Duration(result.Route.TimeoutMinutes) * time.Minute,
+	}
+
+	// Prepare: writes settings.json via the Store (present-brief verb is already
+	// fulfilled by WriteBrief above; Prepare writes the adapter config).
+	if err := adp.Prepare(context.Background(), spec); err != nil {
+		return fmt.Errorf("dispatch: prepare adapter: %w", err)
 	}
 
 	// Write dispatch record (status: running).
+	// Tier and Enforcement are set from the adapter contract (spec §2.1).
 	now := time.Now()
 	d := &scratch.Dispatch{
 		ID:             dispatchID,
@@ -189,10 +227,12 @@ func runDispatch(args []string) error {
 		Model:          result.Route.Model,
 		Profile:        result.Route.Profile,
 		Status:         "running",
-		Depth:          callerDepth + 1,
+		Depth:          childDepth,
 		MaxTurns:       result.Route.MaxTurns,
 		TimeoutMinutes: result.Route.TimeoutMinutes,
 		StartedAt:      now,
+		Tier:           spec.Tier,        // set by Prepare (deriveTier)
+		Enforcement:    adp.Enforcement(), // "full" for claude-headless
 	}
 	if err := st.WriteDispatch(runID, d); err != nil {
 		return fmt.Errorf("dispatch: write dispatch record: %w", err)
@@ -216,17 +256,6 @@ func runDispatch(args []string) error {
 		}
 	}
 
-	// Find tiller binary for spawning.
-	binary, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("dispatch: find executable: %w", err)
-	}
-
-	// Spawn detached supervisor.
-	if err := spawn.SpawnDetached(binary, runDir, dispatchID); err != nil {
-		return fmt.Errorf("dispatch: spawn supervisor: %w", err)
-	}
-
 	// Hypha trace tick: "<did> <role>(<model>) dispatched by <parent>" (soft-fail).
 	{
 		hyp := hyphae.New(func(format string, args ...any) {
@@ -247,51 +276,53 @@ func runDispatch(args []string) error {
 	fmt.Fprintf(os.Stderr, "dispatched %s as %s (role=%s, model=%s)\n",
 		dispatchID, *role, *role, result.Route.Model)
 
-	// --background: return immediately.
-	if *background {
+	// --background or --no-wait: spawn only (process mechanic) and return.
+	// adp.Run is not called in background/no-wait modes; the caller is
+	// responsible for observing the dispatch via tiller poll/await.
+	if *background || !*wait {
+		binary, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("dispatch: find executable: %w", err)
+		}
+		if err := spawn.SpawnDetached(binary, runDir, dispatchID); err != nil {
+			return fmt.Errorf("dispatch: spawn supervisor: %w", err)
+		}
 		fmt.Printf("%s %s\n", dispatchID, runDir)
 		return nil
 	}
 
-	// --wait (default): poll until terminal or timeout.
-	if !*wait {
-		fmt.Printf("%s %s\n", dispatchID, runDir)
-		return nil
-	}
-
-	return waitForDispatch(st, runID, runDir, dispatchID, *timeout)
-}
-
-// waitForDispatch polls dispatch record until terminal status or timeout.
-// On timeout, exits 0 printing status "running" per spec §2.3.
-func waitForDispatch(st scratch.Store, runID, runDir, dispatchID, timeoutStr string) error {
-	dur, err := parseDuration(timeoutStr)
-	if err != nil {
+	// --wait (default): delegate spawn + poll to the adapter.
+	// adp.Run spawns _supervise and polls until terminal. A timeout context is
+	// derived from spec.Timeout (0 = no adapter-level timeout; the --timeout flag
+	// below provides the user-facing deadline independently).
+	//
+	// We use the CLI-level timeout as the context deadline for Run so that an
+	// adapter that overruns can be cancelled cleanly.
+	dur, parseErr := parseDuration(*timeout)
+	if parseErr != nil {
 		dur = 8 * time.Minute
 	}
+	runCtx, runCancel := context.WithTimeout(context.Background(), dur)
+	defer runCancel()
 
-	deadline := time.Now().Add(dur)
-	pollInterval := 200 * time.Millisecond
-
-	for {
-		d, err := st.ReadDispatch(runID, dispatchID)
-		if err == nil {
-			if d.IsTerminal() {
-				reportPath := filepath.Join(runDir, "dispatches", dispatchID, "report.md")
-				fmt.Printf("%s %s %s\n", dispatchID, d.Status, reportPath)
-				return nil
-			}
-		}
-
-		if time.Now().After(deadline) {
-			// Timeout: exit 0, print running.
+	runResult, runErr := adp.Run(runCtx, spec)
+	if runErr != nil {
+		if runCtx.Err() != nil {
+			// Context timed out: print running status per spec §2.3 (exit 0).
 			reportPath := filepath.Join(runDir, "dispatches", dispatchID, "report.md")
 			fmt.Printf("%s running %s\n", dispatchID, reportPath)
 			return nil
 		}
-
-		time.Sleep(pollInterval)
+		return fmt.Errorf("dispatch: run adapter: %w", runErr)
 	}
+
+	reportPath := filepath.Join(runDir, "dispatches", dispatchID, "report.md")
+	status := "completed"
+	if runResult != nil {
+		status = runResult.Status
+	}
+	fmt.Printf("%s %s %s\n", dispatchID, status, reportPath)
+	return nil
 }
 
 // readBrief reads brief content from: "-" (stdin), a file path, or literal text.

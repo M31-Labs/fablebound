@@ -11,19 +11,21 @@
 package hook
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	arbiter "m31labs.dev/arbiter"
 	"m31labs.dev/arbiter/govern"
 	"m31labs.dev/arbiter/vm"
+	"m31labs.dev/tiller/internal/adapter/claudecode"
 	"m31labs.dev/tiller/internal/auditlog"
 	"m31labs.dev/tiller/internal/policy"
+	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/scratch/fsstore"
 )
 
@@ -358,12 +360,6 @@ func canonPath(p string) string {
 	return filepath.Clean(p)
 }
 
-// fableModels is the set of model IDs considered "fable" for ambient gating.
-var fableModels = map[string]bool{
-	"claude-fable-5": true,
-	"fable":          true,
-}
-
 // HookEventFull is a superset HookEvent that also captures ambient-mode fields.
 type HookEventFull struct {
 	HookEventName  string          `json:"hook_event_name"`
@@ -372,146 +368,6 @@ type HookEventFull struct {
 	ToolResponse   json.RawMessage `json:"tool_response"`
 	TranscriptPath string          `json:"transcript_path"`
 	AgentID        string          `json:"agent_id"`
-}
-
-// transcriptAssistantLine is the minimal struct we need from a transcript line.
-type transcriptAssistantLine struct {
-	Type        string `json:"type"`
-	IsSidechain *bool  `json:"isSidechain"`
-	AgentID     string `json:"agentId"`
-	Message     struct {
-		Model string `json:"model"`
-	} `json:"message"`
-}
-
-// isQualifyingAssistantLine returns true if the parsed line counts as a
-// qualifying root-session assistant line for model detection.
-//
-// Qualifying conditions (ALL must hold):
-//  1. type == "assistant"
-//  2. message.model is non-empty
-//  3. message.model != "<synthetic>" (session-limit / interrupted turns)
-//  4. isSidechain is absent (nil) or false (root session line)
-func isQualifyingAssistantLine(tl transcriptAssistantLine) bool {
-	if tl.Type != "assistant" {
-		return false
-	}
-	if tl.Message.Model == "" || tl.Message.Model == "<synthetic>" {
-		return false
-	}
-	if tl.IsSidechain != nil && *tl.IsSidechain {
-		return false
-	}
-	return true
-}
-
-// scanTranscriptLines scans r line-by-line with a 4 MiB buffer, calling fn
-// for each raw line text. If a single line exceeds the buffer cap it is
-// skipped (fn is not called for it) but scanning continues. Returns the
-// scanner error if the failure was NOT a token-too-large error.
-func scanTranscriptLines(r io.Reader, fn func(line string)) error {
-	sc := bufio.NewScanner(r)
-	// Fix 3: enlarge buffer to 4 MiB so large tool_use/tool_result lines don't
-	// trigger sc.Err() and cause a fail-open on the whole scan.
-	sc.Buffer(make([]byte, 0, 1<<20), 1<<22)
-	for sc.Scan() {
-		fn(sc.Text())
-	}
-	err := sc.Err()
-	if err == bufio.ErrTooLong {
-		// Single line exceeded the 4 MiB cap — treat as a skipped line;
-		// the caller gets no error so it can continue or retry from start.
-		return nil
-	}
-	return err
-}
-
-// lastQualifyingModel scans lines (in order) and returns the model of the
-// last qualifying assistant line, or "" if none found.
-// A returned model of "" from isSidechain==true is suppressed by the filter,
-// so if this returns a non-empty model it is always a root line.
-func lastQualifyingModel(lines []string) string {
-	var last string
-	for _, l := range lines {
-		var tl transcriptAssistantLine
-		if err := json.Unmarshal([]byte(l), &tl); err != nil {
-			continue
-		}
-		if isQualifyingAssistantLine(tl) {
-			last = tl.Message.Model
-		}
-	}
-	return last
-}
-
-// lastFableModelInTranscript reads up to the last 400 lines of the transcript
-// at transcriptPath and returns the model of the last qualifying root assistant
-// turn, plus whether that model is in the fable set.
-//
-// Hardening applied:
-//   - Fix 1: skips lines where message.model == "<synthetic>".
-//   - Fix 2: skips lines where isSidechain == true.
-//   - Fix 3: uses a 4 MiB scanner buffer; oversized lines are skipped, not fatal.
-//   - Fix 4: if the 400-line tail contains no qualifying line, falls back to a
-//     full-file scan before returning unknown.
-//   - Fix 5: if the most-recent qualifying line is a sidechain line it would be
-//     filtered by Fix 2, so any returned model is always a root line. Rule 5
-//     (passthrough for sidechain context) is enforced in runAmbient by the
-//     caller checking the returned isFable flag only when model detection succeeds.
-//
-// On any error or no qualifier found returns ("", false) — fail open.
-func lastFableModelInTranscript(transcriptPath string) (model string, isFable bool) {
-	if transcriptPath == "" {
-		return "", false
-	}
-	f, err := os.Open(transcriptPath)
-	if err != nil {
-		return "", false
-	}
-	defer f.Close()
-
-	// Fix 3 + Fix 4: Collect up to the last 400 lines using the enlarged scanner.
-	// If the tail scan encounters a too-large line it is simply skipped (scanTranscriptLines
-	// returns nil for ErrTooLong), and we still get the lines that did fit.
-	const maxLines = 400
-	tail := make([]string, 0, maxLines)
-	_ = scanTranscriptLines(f, func(line string) {
-		if len(tail) >= maxLines {
-			tail = tail[1:]
-		}
-		tail = append(tail, line)
-	})
-
-	// Scan backwards in the tail for the last qualifying assistant line.
-	for i := len(tail) - 1; i >= 0; i-- {
-		var tl transcriptAssistantLine
-		if err := json.Unmarshal([]byte(tail[i]), &tl); err != nil {
-			continue
-		}
-		if isQualifyingAssistantLine(tl) {
-			m := tl.Message.Model
-			return m, fableModels[m]
-		}
-	}
-
-	// Fix 4 fallback: tail had no qualifying line — re-scan the whole file.
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return "", false
-	}
-	var lastModel string
-	_ = scanTranscriptLines(f, func(line string) {
-		var tl transcriptAssistantLine
-		if err := json.Unmarshal([]byte(line), &tl); err != nil {
-			return
-		}
-		if isQualifyingAssistantLine(tl) {
-			lastModel = tl.Message.Model
-		}
-	})
-	if lastModel == "" {
-		return "", false
-	}
-	return lastModel, fableModels[lastModel]
 }
 
 // handleAmbientPreToolUse evaluates the ambient policy for a fable session.
@@ -658,11 +514,19 @@ func runAmbient(stdin io.Reader, stdout io.Writer) error {
 		return nil
 	}
 
-	// Determine model from transcript.
-	_, isFable := lastFableModelInTranscript(full.TranscriptPath)
+	// Determine model tier from transcript (vendor model IDs confined to claudecode package).
+	tier, isFable := claudecode.DetectTier(full.TranscriptPath)
+	_ = tier // tier is "reason" when isFable is true; reserved for future use
 	if !isFable {
 		// Not fable — ambient mode is invisible.
 		return nil
+	}
+
+	// D4 observe-only: when the gated tool is Task or Agent AND a run context
+	// exists (TILLER_RUN_DIR resolvable), append a dispatch TraceEvent.
+	// Any error is silently swallowed — NEVER affects the hook decision.
+	if full.ToolName == "Task" || full.ToolName == "Agent" {
+		appendAmbientDispatchTrace(full)
 	}
 
 	// Model is fable: evaluate ambient orchestrator-only policy.
@@ -674,6 +538,42 @@ func runAmbient(stdin io.Reader, stdout io.Writer) error {
 		ToolResponse:  full.ToolResponse,
 	}
 	return handleAmbientPreToolUse(event, stdout)
+}
+
+// appendAmbientDispatchTrace appends a kind:"dispatch" TraceEvent when a
+// Task/Agent tool call is observed in the ambient fable session AND a run
+// context is resolvable from TILLER_RUN_DIR.
+//
+// D4 observe-only: this is purely informational. Errors are silently swallowed;
+// this function MUST NOT affect hook decisions or break fail-open.
+func appendAmbientDispatchTrace(full HookEventFull) {
+	runDir := os.Getenv("TILLER_RUN_DIR")
+	if runDir == "" {
+		// No run context — no-op (D4 observe-only).
+		return
+	}
+	runID := filepath.Base(runDir)
+	runsBase := filepath.Dir(runDir)
+	st := fsstore.Open(runsBase)
+
+	// Best-effort input summary for the dispatch event.
+	var input ToolInput
+	if len(full.ToolInput) > 0 {
+		_ = json.Unmarshal(full.ToolInput, &input)
+	}
+	summary := inputSummary(full.ToolName, input)
+
+	ev := scratch.TraceEvent{
+		Ts:           time.Now().UTC().Format(time.RFC3339Nano),
+		Kind:         "dispatch",
+		RunID:        runID,
+		DispatchID:   "", // ambient: no dispatch ID
+		Role:         "ambient-orchestrator",
+		Tool:         full.ToolName,
+		InputSummary: summary,
+	}
+	// Swallow the error — D4 observe-only, must never block.
+	_ = st.AppendTraceEvent(runID, "", ev)
 }
 
 // WorkspaceDir returns the workspace directory for path containment checks.

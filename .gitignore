@@ -1,0 +1,5 @@
+# fablebound run scratch — never commit run artifacts
+.fablebound/runs/
+
+# built binary (root only, not cmd/fablebound/)
+/fablebound

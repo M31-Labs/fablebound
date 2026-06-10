@@ -34,6 +34,44 @@ rule AllowWebFetch priority 10 {
     then Allow { reason: "web reading is permitted for the ambient orchestrator" }
 }
 
+# AllowHyphaKnowledge — allows the ambient orchestrator to call the hypha CLI
+# directly for knowledge work (recall, trace, spore, pulse, graph, show, index,
+# assess, analyze, graft, spaces, receipts).
+#
+# Conservative by design:
+#   • Command must start with "hypha " (note the trailing space) — prevents a
+#     bare "hypha" or a different binary named "hyphaX…" from matching.
+#   • Persistent-daemon subcommands are hard-excluded via regex: any command
+#     matching "hypha (mcp|hub) serve" stays denied (mirrors toolgate's
+#     DenyHyphaDaemons; org-wide prohibition on per-session serve daemons).
+#   • Shell metacharacter guard: commands containing ; | ` < > $ & are rejected
+#     via regex even if they otherwise look like a valid hypha call. A chained
+#     command such as "hypha recall x; rm -rf /" must NOT match — only
+#     literal, single-statement hypha invocations are permitted.
+#     Each not() clause is explicitly parenthesised to avoid right-associative
+#     precedence ambiguity in arbiter's not_expr (PrecRight(3)).
+rule AllowHyphaKnowledge priority 15 {
+    when {
+        (tool.name == "Bash") and
+        (tool.command starts_with "hypha ") and
+        (not (tool.command matches "hypha +(mcp|hub) +serve.*")) and
+        (not (tool.command matches ".*[;|`<>$&].*"))
+    }
+    then Allow { reason: "hypha CLI knowledge commands are permitted for the ambient orchestrator (recall, trace, spore, pulse, graph, show, assess, analyze)" }
+}
+
+# AllowMarkdownAuthoring — allows the ambient orchestrator to Write or Edit
+# markdown files (specs, plans, prompts, directives, briefs).
+# Only .md paths are permitted; code files, notebooks, and no-extension paths
+# remain denied by DenyExecution below.
+rule AllowMarkdownAuthoring priority 15 {
+    when {
+        tool.name in ["Write", "Edit"] and
+        tool.file_path ends_with ".md"
+    }
+    then Allow { reason: "markdown authoring (specs, plans, prompts, directives) is permitted for the ambient orchestrator" }
+}
+
 rule DenyExecution priority 20 {
     when segment denied_tools { true }
     then Deny { reason: "tiller: ambient orchestrator runs in read/dispatch mode — delegate with the Task tool: code changes → tiller-worker, debugging → tiller-debugger, investigation → tiller-investigator, review → tiller-reviewer; reserve tiller-architect/tiller-deep-report for deep design and research. {tool.name} is not permitted for the root orchestrator agent." }

@@ -74,6 +74,11 @@ rule DenyWorkerScope priority 3 {
     then Deny { reason: "execution roles may dispatch only investigators and debuggers" }
 }
 
+rule DenyBriefTooLarge priority 5 {
+    when { dispatch.brief_bytes > 262144 }
+    then Deny { reason: "brief exceeds 256KB limit; summarise the task before dispatching" }
+}
+
 rule AllowDispatch priority 99 {
     when { dispatch.role in ["chief-architect", "deep-report", "investigator",
                              "worker", "debugger", "reviewer"] }

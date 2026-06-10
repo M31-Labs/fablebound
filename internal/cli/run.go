@@ -229,10 +229,16 @@ func finalizeManifest(runDir, runID string, fableBudget int) error {
 	for _, m := range metas {
 		if m.Status == "running" {
 			anyRunning = true
-			// Grace kill: send SIGTERM to any fablebound processes watching this run.
-			// The simplest approach: mark them failed in meta directly.
-			// (Actual process kill is best-effort via process group.)
-			graceFail(runDir, m)
+			if m.IsOrphan() {
+				// Supervisor is dead (orphan): mark as stale → then failed at finalize.
+				now := time.Now()
+				m.Status = "stale"
+				m.EndedAt = &now
+				_ = run.WriteMeta(runDir, m)
+			} else {
+				// Grace kill: send SIGTERM to any fablebound processes watching this run.
+				graceFail(runDir, m)
+			}
 		}
 	}
 

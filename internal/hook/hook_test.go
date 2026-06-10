@@ -90,6 +90,7 @@ func TestOrchestratorDenyLS(t *testing.T) {
 	runDir := setupFixtureRun(t)
 	dispatchDir := filepath.Join(runDir, "dispatches", "root")
 	os.MkdirAll(dispatchDir, 0o755)
+	writeTestMeta(t, runDir, "root", "orchestrator", 0)
 
 	setEnv(t,
 		"FABLEBOUND_ROLE", "orchestrator",
@@ -124,6 +125,7 @@ func TestOrchestratorAllowDispatch(t *testing.T) {
 	runDir := setupFixtureRun(t)
 	dispatchDir := filepath.Join(runDir, "dispatches", "root")
 	os.MkdirAll(dispatchDir, 0o755)
+	writeTestMeta(t, runDir, "root", "orchestrator", 0)
 
 	setEnv(t,
 		"FABLEBOUND_ROLE", "orchestrator",
@@ -158,6 +160,7 @@ func TestWorkerEditAllow(t *testing.T) {
 	runDir := setupFixtureRun(t)
 	dispatchDir := filepath.Join(runDir, "dispatches", "d01")
 	os.MkdirAll(dispatchDir, 0o755)
+	writeTestMeta(t, runDir, "d01", "worker", 1)
 
 	setEnv(t,
 		"FABLEBOUND_ROLE", "worker",
@@ -192,6 +195,7 @@ func TestReviewerWriteOutsideDeny(t *testing.T) {
 	runDir := setupFixtureRun(t)
 	dispatchDir := filepath.Join(runDir, "dispatches", "d01")
 	os.MkdirAll(dispatchDir, 0o755)
+	writeTestMeta(t, runDir, "d01", "reviewer", 1)
 
 	setEnv(t,
 		"FABLEBOUND_ROLE", "reviewer",
@@ -227,6 +231,7 @@ func TestArchitectWriteInsideAllow(t *testing.T) {
 	runDir := setupFixtureRun(t)
 	dispatchDir := filepath.Join(runDir, "dispatches", "d01")
 	os.MkdirAll(dispatchDir, 0o755)
+	writeTestMeta(t, runDir, "d01", "chief-architect", 0)
 
 	setEnv(t,
 		"FABLEBOUND_ROLE", "chief-architect",
@@ -263,6 +268,7 @@ func TestDepth2DispatchDeny(t *testing.T) {
 	runDir := setupFixtureRun(t)
 	dispatchDir := filepath.Join(runDir, "dispatches", "d02")
 	os.MkdirAll(dispatchDir, 0o755)
+	writeTestMeta(t, runDir, "d02", "worker", 2)
 
 	setEnv(t,
 		"FABLEBOUND_ROLE", "worker",
@@ -301,6 +307,7 @@ func TestPreToolUseAuditLine(t *testing.T) {
 	runDir := setupFixtureRun(t)
 	dispatchDir := filepath.Join(runDir, "dispatches", "root")
 	os.MkdirAll(dispatchDir, 0o755)
+	writeTestMeta(t, runDir, "root", "orchestrator", 0)
 
 	setEnv(t,
 		"FABLEBOUND_ROLE", "orchestrator",
@@ -362,6 +369,7 @@ func TestPostToolUseToolTrace(t *testing.T) {
 	runDir := setupFixtureRun(t)
 	dispatchDir := filepath.Join(runDir, "dispatches", "d01")
 	os.MkdirAll(dispatchDir, 0o755)
+	// No meta needed for PostToolUse (identity verification only happens on PreToolUse).
 
 	setEnv(t,
 		"FABLEBOUND_ROLE", "worker",
@@ -439,6 +447,7 @@ func TestToolTraceRoleDepthMatch(t *testing.T) {
 	runDir := setupFixtureRun(t)
 	dispatchDir := filepath.Join(runDir, "dispatches", "d03")
 	os.MkdirAll(dispatchDir, 0o755)
+	// No meta needed for PostToolUse (identity verification only happens on PreToolUse).
 
 	setEnv(t,
 		"FABLEBOUND_ROLE", "investigator",
@@ -475,6 +484,166 @@ func TestToolTraceRoleDepthMatch(t *testing.T) {
 	}
 	if ev["status"] != "ok" {
 		t.Errorf("status = %q, want %q", ev["status"], "ok")
+	}
+}
+
+// TestIdentityVerification_ForgedRole verifies that a forged FABLEBOUND_ROLE
+// (different from meta.json) causes the hook to fail closed (return error, exit 2).
+func TestIdentityVerification_ForgedRole(t *testing.T) {
+	runDir := setupFixtureRun(t)
+	dispatchDir := filepath.Join(runDir, "dispatches", "d01")
+	os.MkdirAll(dispatchDir, 0o755)
+
+	// Write a meta that says role=worker
+	writeTestMeta(t, runDir, "d01", "worker", 1)
+
+	// But claim role=investigator in env (forged).
+	setEnv(t,
+		"FABLEBOUND_ROLE", "investigator", // FORGED
+		"FABLEBOUND_DEPTH", "1",
+		"FABLEBOUND_DISPATCH_ID", "d01",
+		"FABLEBOUND_RUN_DIR", runDir,
+	)
+
+	_, err := runHookWithWorkspace(t,
+		`{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"/workspace/main.go"}}`,
+		"/workspace",
+	)
+	if err == nil {
+		t.Error("expected error for forged role, got nil (hook should fail closed)")
+	}
+}
+
+// TestIdentityVerification_ForgedDepth verifies that a forged FABLEBOUND_DEPTH
+// (different from meta.json) causes the hook to fail closed.
+func TestIdentityVerification_ForgedDepth(t *testing.T) {
+	runDir := setupFixtureRun(t)
+	dispatchDir := filepath.Join(runDir, "dispatches", "d01")
+	os.MkdirAll(dispatchDir, 0o755)
+
+	// meta says depth=1
+	writeTestMeta(t, runDir, "d01", "worker", 1)
+
+	// but env claims depth=0 (forged to escape terminal-depth restrictions)
+	setEnv(t,
+		"FABLEBOUND_ROLE", "worker",
+		"FABLEBOUND_DEPTH", "0", // FORGED
+		"FABLEBOUND_DISPATCH_ID", "d01",
+		"FABLEBOUND_RUN_DIR", runDir,
+	)
+
+	_, err := runHookWithWorkspace(t,
+		`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"fablebound dispatch --role investigator --brief test"}}`,
+		"",
+	)
+	if err == nil {
+		t.Error("expected error for forged depth, got nil (hook should fail closed)")
+	}
+}
+
+// TestIdentityVerification_NonexistentDispatch verifies that a nonexistent
+// FABLEBOUND_DISPATCH_ID causes the hook to fail closed (can't read meta).
+func TestIdentityVerification_NonexistentDispatch(t *testing.T) {
+	runDir := setupFixtureRun(t)
+
+	setEnv(t,
+		"FABLEBOUND_ROLE", "worker",
+		"FABLEBOUND_DEPTH", "1",
+		"FABLEBOUND_DISPATCH_ID", "d-does-not-exist",
+		"FABLEBOUND_RUN_DIR", runDir,
+	)
+
+	_, err := runHookWithWorkspace(t,
+		`{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"/workspace/main.go"}}`,
+		"/workspace",
+	)
+	if err == nil {
+		t.Error("expected error for nonexistent dispatch id, got nil (hook should fail closed)")
+	}
+	if err != nil && !strings.Contains(err.Error(), "identity mismatch") {
+		t.Errorf("expected 'identity mismatch' in error, got: %v", err)
+	}
+}
+
+// TestIdentityVerification_ValidIdentity verifies that matching env and meta passes.
+func TestIdentityVerification_ValidIdentity(t *testing.T) {
+	runDir := setupFixtureRun(t)
+	dispatchDir := filepath.Join(runDir, "dispatches", "d01")
+	os.MkdirAll(dispatchDir, 0o755)
+
+	writeTestMeta(t, runDir, "d01", "worker", 1)
+
+	setEnv(t,
+		"FABLEBOUND_ROLE", "worker",
+		"FABLEBOUND_DEPTH", "1",
+		"FABLEBOUND_DISPATCH_ID", "d01",
+		"FABLEBOUND_RUN_DIR", runDir,
+	)
+
+	out, err := runHookWithWorkspace(t,
+		`{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"/workspace/main.go"}}`,
+		"/workspace",
+	)
+	if err != nil {
+		t.Errorf("expected nil error for valid identity, got: %v", err)
+	}
+	if len(bytes.TrimSpace(out)) == 0 {
+		t.Error("expected non-empty output for valid PreToolUse")
+	}
+}
+
+// writeTestMeta writes a minimal meta.json for testing identity verification.
+func writeTestMeta(t *testing.T, runDir, dispatchID, role string, depth int) {
+	t.Helper()
+	type minMeta struct {
+		ID        string `json:"id"`
+		Role      string `json:"role"`
+		Model     string `json:"model"`
+		Profile   string `json:"profile"`
+		Status    string `json:"status"`
+		Depth     int    `json:"depth"`
+		StartedAt string `json:"started_at"`
+	}
+	m := minMeta{
+		ID: dispatchID, Role: role, Model: "sonnet", Profile: "execution",
+		Status: "running", Depth: depth, StartedAt: "2026-01-01T00:00:00Z",
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(runDir, "dispatches", dispatchID, "meta.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestUnknownHookEventWarning verifies that an unknown hook_event_name exits 0
+// but emits a warning to stderr.
+func TestUnknownHookEventWarning(t *testing.T) {
+	runDir := setupFixtureRun(t)
+	dispatchDir := filepath.Join(runDir, "dispatches", "d01")
+	os.MkdirAll(dispatchDir, 0o755)
+	writeTestMeta(t, runDir, "d01", "worker", 1)
+
+	setEnv(t,
+		"FABLEBOUND_ROLE", "worker",
+		"FABLEBOUND_DEPTH", "1",
+		"FABLEBOUND_DISPATCH_ID", "d01",
+		"FABLEBOUND_RUN_DIR", runDir,
+	)
+
+	// Capture stderr via a pipe trick — hook.Run writes to os.Stderr directly.
+	// We test only that no error is returned (exit 0) for unknown events.
+	out, err := runHookWithWorkspace(t,
+		`{"hook_event_name":"SomeNewEvent","tool_name":"Bash","tool_input":{"command":"ls"}}`,
+		"/workspace",
+	)
+	if err != nil {
+		t.Errorf("expected nil error (exit 0) for unknown hook event, got: %v", err)
+	}
+	if len(bytes.TrimSpace(out)) != 0 {
+		t.Errorf("expected empty stdout for unknown event, got: %s", out)
 	}
 }
 

@@ -66,10 +66,12 @@ func formatMetaWithReport(m *Meta, runDir string) string {
 		cost = fmt.Sprintf(" $%.4f", m.CostUSD)
 	}
 
-	base := fmt.Sprintf("%s %s(%s) [%s%s]", m.ID, m.Role, model, m.Status, cost)
+	// Use EffectiveStatus so orphan running dispatches show as "stale".
+	status := m.EffectiveStatus()
+	base := fmt.Sprintf("%s %s(%s) [%s%s]", m.ID, m.Role, model, status, cost)
 
 	// Append → dispatches/<id>/report.md if the file exists.
-	if runDir != "" && m.Status == "completed" {
+	if runDir != "" && status == "completed" {
 		reportPath := filepath.Join(runDir, "dispatches", m.ID, "report.md")
 		if _, err := os.Stat(reportPath); err == nil {
 			// Use relative path for display.
@@ -164,7 +166,7 @@ func nodeToDispatchSummary(n *Node, runDir string) *DispatchSummary {
 		Role:     m.Role,
 		Model:    m.Model,
 		Profile:  m.Profile,
-		Status:   m.Status,
+		Status:   m.EffectiveStatus(),
 		Depth:    m.Depth,
 		CostUSD:  m.CostUSD,
 		NumTurns: m.NumTurns,

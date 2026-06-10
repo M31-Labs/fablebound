@@ -1,4 +1,4 @@
-.PHONY: build test vet clean policy-sync
+.PHONY: build test vet clean policy-sync policy-replay
 
 BIN := fablebound
 
@@ -18,3 +18,21 @@ clean:
 policy-sync:
 	cp policy/dispatch.arb internal/policy/defaults/dispatch.arb
 	cp policy/toolgate.arb internal/policy/defaults/toolgate.arb
+
+# Replay both policies against a run's audit files (T3.2).
+# Usage: make policy-replay RUN=<run-id>
+# Replays policy/toolgate.arb against .fablebound/runs/<RUN>/audit/toolgate.jsonl
+# and policy/dispatch.arb against .fablebound/runs/<RUN>/audit/dispatch.jsonl.
+# Exits non-zero if any audit event differs from what the current policy would decide.
+# Requires: arbiter CLI on PATH (or ARBITER_BIN=<path>).
+ARBITER_BIN ?= arbiter
+RUNDIR := .fablebound/runs/$(RUN)
+
+policy-replay:
+	@if [ -z "$(RUN)" ]; then echo "error: RUN is required (make policy-replay RUN=<run-id>)" >&2; exit 1; fi
+	@if [ ! -d "$(RUNDIR)" ]; then echo "error: run directory $(RUNDIR) not found" >&2; exit 1; fi
+	@echo "=== replaying toolgate.arb against $(RUNDIR)/audit/toolgate.jsonl ==="
+	$(ARBITER_BIN) replay policy/toolgate.arb --audit $(RUNDIR)/audit/toolgate.jsonl
+	@echo "=== replaying dispatch.arb against $(RUNDIR)/audit/dispatch.jsonl ==="
+	$(ARBITER_BIN) replay policy/dispatch.arb --audit $(RUNDIR)/audit/dispatch.jsonl
+	@echo "replay complete: no diffs"

@@ -35,7 +35,8 @@
     "ask": [],
     "deny": [
       "Agent",
-      "NotebookEdit"
+      "NotebookEdit",
+      "Bash(fablebound dispatch*)"
     ]
   }
 }

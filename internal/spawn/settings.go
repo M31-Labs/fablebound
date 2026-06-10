@@ -156,19 +156,23 @@ func readonlyPerms(fableEntry string) map[string]interface{} {
 // executionPerms builds the permission set for the execution profile.
 // execution is broad (Read/Glob/Grep/Edit/Write/Bash) with only Agent and
 // NotebookEdit denied.
+// At depth >= 2 (terminal), Bash(fablebound dispatch*) is added to the deny
+// list as a settings-layer guardrail. The toolgate policy also enforces
+// DenyTerminalDispatch, but defence-in-depth means the settings layer should
+// be explicit. Broad Bash is still allowed so terminal workers can execute
+// arbitrary commands — they just cannot spawn child dispatches.
 func executionPerms(fableEntry string) map[string]interface{} {
-	// At depth >= 2 the fable entry is "Bash(fablebound note *)" which is
-	// a subset of the general "Bash" already allowed; we still include it
-	// explicitly so terminal agents have the same hook-visible surface.
-	// At depth < 2 it's "Bash(fablebound *)" which is likewise covered by
-	// the broad "Bash" allow.  The entry is retained for consistency and
-	// so settings.json introspection makes the capability explicit.
 	_ = fableEntry // included via broad Bash below; kept for hook clarity
+	deny := []interface{}{
+		"Agent",
+		"NotebookEdit",
+	}
+	if fableEntry == "Bash(fablebound note *)" {
+		// depth >= 2: add settings-layer dispatch deny as defence-in-depth
+		deny = append(deny, "Bash(fablebound dispatch*)")
+	}
 	return map[string]interface{}{
-		"deny": []interface{}{
-			"Agent",
-			"NotebookEdit",
-		},
+		"deny": deny,
 		"allow": []interface{}{
 			"Read",
 			"Glob",

@@ -257,7 +257,8 @@ func Supervise(a SuperviseArgs) error {
 // <dispatchDir>/supervise.log.
 //
 // Returns immediately after the child is spawned — the caller does NOT wait
-// for the supervisor.
+// for the supervisor. The supervisor PID is written into meta.json so that
+// orphan detection can verify whether the process is still alive.
 func SpawnDetached(fablebound, runDir, dispatchID string) error {
 	dispatchDir := filepath.Join(runDir, "dispatches", dispatchID)
 	logPath := filepath.Join(dispatchDir, "supervise.log")
@@ -283,33 +284,51 @@ func SpawnDetached(fablebound, runDir, dispatchID string) error {
 
 	logFile.Close()
 
+	// Write the supervisor PID into meta.json for orphan detection.
+	// Best-effort: failure here does not block the dispatch.
+	if meta, readErr := run.ReadMeta(runDir, dispatchID); readErr == nil {
+		meta.SupervisorPID = cmd.Process.Pid
+		if writeErr := run.WriteMeta(runDir, meta); writeErr != nil {
+			// Non-fatal: log to dispatch dir would be nice but we don't have a logger here.
+			// Orphan detection will simply not have a PID to check.
+			_ = writeErr
+		}
+	}
+
 	// Release the process — we are not waiting.
 	go func() { _ = cmd.Wait() }()
 
 	return nil
 }
 
-// trimOutput trims leading/trailing whitespace and returns the first
-// JSON object line from stdout (claude may emit other lines before the JSON).
+// trimOutput returns the first line whose first non-whitespace byte is '{'.
+// This avoids false positives from lines that contain '{' mid-line (e.g. log
+// lines like "processing {thing}"). Falls back to the full buffer if no such
+// line is found.
 func trimOutput(data []byte) []byte {
-	// Find the first line that starts with '{'
 	start := 0
-	for i, b := range data {
-		if b == '{' {
-			start = i
-			break
+	for start < len(data) {
+		// Find end of current line.
+		lineEnd := start
+		for lineEnd < len(data) && data[lineEnd] != '\n' {
+			lineEnd++
 		}
-	}
-	// Find end of that JSON object (find the closing newline after it)
-	end := len(data)
-	for i := start; i < len(data); i++ {
-		if data[i] == '\n' {
-			end = i + 1
-			break
+		line := data[start:lineEnd]
+		// Trim leading whitespace to find the first non-space byte.
+		trimmed := line
+		for len(trimmed) > 0 && (trimmed[0] == ' ' || trimmed[0] == '\t' || trimmed[0] == '\r') {
+			trimmed = trimmed[1:]
 		}
+		if len(trimmed) > 0 && trimmed[0] == '{' {
+			// Return up to and including the newline.
+			end := lineEnd
+			if end < len(data) {
+				end++ // include the '\n'
+			}
+			return data[start:end]
+		}
+		// Advance past the newline.
+		start = lineEnd + 1
 	}
-	if start >= end {
-		return data
-	}
-	return data[start:end]
+	return data
 }

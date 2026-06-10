@@ -60,6 +60,10 @@ func Main(args []string) {
 					fmt.Fprintf(os.Stderr, "RULE: %s\n", de.Error())
 					os.Exit(3)
 				}
+				if _, ok := err.(*StaledError); ok {
+					fmt.Fprintf(os.Stderr, "error: %v\n", err)
+					os.Exit(3)
+				}
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(2)
 			}

@@ -973,3 +973,56 @@ test "depth-2 worker attempting dispatch is denied by DenyTerminalDepth" {
     # DenyTerminalDepth (priority 1) wins; combinator denies even though AllowDispatch also matches
     expect rule DenyTerminalDepth matched
 }
+
+# ── DenyBriefTooLarge ─────────────────────────────────────────────────────────
+
+test "brief exceeding 256KB is denied (DenyBriefTooLarge)" {
+    given {
+        dispatch.role: "worker"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 262145
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyBriefTooLarge matched
+}
+
+test "brief at exactly 256KB (262144 bytes) is NOT denied by DenyBriefTooLarge" {
+    given {
+        dispatch.role: "worker"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 262144
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyBriefTooLarge not matched
+}
+
+test "normal brief does NOT fire DenyBriefTooLarge" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 1024
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyBriefTooLarge not matched
+}

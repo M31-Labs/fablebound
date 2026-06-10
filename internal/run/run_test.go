@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -319,6 +320,123 @@ func TestRender(t *testing.T) {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("rendered tree missing %q:\n%s", want, rendered)
 		}
+	}
+}
+
+// ── Orphan detection tests ────────────────────────────────────────────────────
+
+// TestIsOrphan_NoSupervisorPID verifies that a meta with SupervisorPID==0 is
+// never treated as an orphan (older dispatches that predated PID recording).
+func TestIsOrphan_NoSupervisorPID(t *testing.T) {
+	m := &run.Meta{
+		ID:            "d01",
+		Status:        "running",
+		SupervisorPID: 0,
+	}
+	if m.IsOrphan() {
+		t.Error("meta with SupervisorPID=0 should not be an orphan")
+	}
+}
+
+// TestIsOrphan_TerminalStatus verifies that non-running dispatches are not orphans.
+func TestIsOrphan_TerminalStatus(t *testing.T) {
+	for _, status := range []string{"completed", "failed", "halted", "stale"} {
+		m := &run.Meta{
+			ID:            "d01",
+			Status:        status,
+			SupervisorPID: 99999,
+		}
+		if m.IsOrphan() {
+			t.Errorf("meta with status=%q should not be an orphan", status)
+		}
+	}
+}
+
+// TestIsOrphan_AliveProcess verifies that a running dispatch with a live PID
+// is not considered an orphan. Uses the current process's PID (guaranteed alive).
+func TestIsOrphan_AliveProcess(t *testing.T) {
+	m := &run.Meta{
+		ID:            "d01",
+		Status:        "running",
+		SupervisorPID: os.Getpid(),
+	}
+	if m.IsOrphan() {
+		t.Error("dispatch with live PID (self) should not be an orphan")
+	}
+}
+
+// TestIsOrphan_KilledSupervisor verifies that a running dispatch whose supervisor
+// has been killed is detected as an orphan (the kill -9 acceptance test per plan T3.3).
+func TestIsOrphan_KilledSupervisor(t *testing.T) {
+	// Start a real short-lived process we can then kill.
+	// Use `sleep 60` so it stays alive until we kill it.
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	pid := cmd.Process.Pid
+
+	// The process is alive — not an orphan yet.
+	m := &run.Meta{
+		ID:            "d99",
+		Status:        "running",
+		SupervisorPID: pid,
+	}
+	if m.IsOrphan() {
+		t.Fatal("dispatch should not be orphan while supervisor is alive")
+	}
+
+	// Kill it with -9.
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill supervisor: %v", err)
+	}
+	_ = cmd.Wait() // reap to avoid zombie
+
+	// Now it should be an orphan.
+	if !m.IsOrphan() {
+		t.Error("dispatch should be orphan after supervisor killed with -9")
+	}
+}
+
+// TestEffectiveStatus_Orphan verifies EffectiveStatus returns "stale" for orphans.
+func TestEffectiveStatus_Orphan(t *testing.T) {
+	// Start and kill a process.
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	pid := cmd.Process.Pid
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+
+	m := &run.Meta{
+		ID:            "d99",
+		Status:        "running",
+		SupervisorPID: pid,
+	}
+	if got := m.EffectiveStatus(); got != "stale" {
+		t.Errorf("EffectiveStatus after kill = %q, want stale", got)
+	}
+}
+
+// TestEffectiveStatus_Normal verifies EffectiveStatus returns the recorded
+// status when the supervisor is alive or no PID is recorded.
+func TestEffectiveStatus_Normal(t *testing.T) {
+	m := &run.Meta{
+		ID:     "d01",
+		Status: "completed",
+	}
+	if got := m.EffectiveStatus(); got != "completed" {
+		t.Errorf("EffectiveStatus for completed = %q, want completed", got)
+	}
+
+	m2 := &run.Meta{
+		ID:            "d01",
+		Status:        "running",
+		SupervisorPID: os.Getpid(),
+	}
+	if got := m2.EffectiveStatus(); got != "running" {
+		t.Errorf("EffectiveStatus for running+alive = %q, want running", got)
 	}
 }
 

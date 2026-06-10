@@ -23,6 +23,7 @@ import (
 	"m31labs.dev/arbiter/vm"
 	"m31labs.dev/fablebound/internal/auditlog"
 	"m31labs.dev/fablebound/internal/policy"
+	"m31labs.dev/fablebound/internal/run"
 )
 
 // HookEvent is the JSON stdin payload from Claude Code.
@@ -107,6 +108,36 @@ func ReadIdentity() (Identity, bool) {
 		RunDir:     runDir,
 		RunID:      runID,
 	}, true
+}
+
+// verifyIdentity cross-checks the env-sourced Identity against the dispatch's
+// meta.json to detect spoofed FABLEBOUND_ROLE or FABLEBOUND_DEPTH values.
+// Returns an error (fail closed) if meta is missing, unreadable, or mismatches.
+// The root dispatch has ID "root"; it must also exist in meta.json.
+func verifyIdentity(id Identity) error {
+	if id.RunDir == "" {
+		// No run dir — can't verify; allow (non-run hook invocation).
+		return nil
+	}
+	if id.DispatchID == "" {
+		// No dispatch id — can't verify.
+		return nil
+	}
+
+	meta, err := run.ReadMeta(id.RunDir, id.DispatchID)
+	if err != nil {
+		return fmt.Errorf("identity mismatch: cannot read meta for dispatch %q: %w", id.DispatchID, err)
+	}
+
+	if meta.Role != id.Role {
+		return fmt.Errorf("identity mismatch: env role %q != meta role %q for dispatch %q",
+			id.Role, meta.Role, id.DispatchID)
+	}
+	if meta.Depth != id.Depth {
+		return fmt.Errorf("identity mismatch: env depth %d != meta depth %d for dispatch %q",
+			id.Depth, meta.Depth, id.DispatchID)
+	}
+	return nil
 }
 
 // HandlePreToolUse processes a PreToolUse event.
@@ -271,6 +302,10 @@ func Run(stdin io.Reader, stdout io.Writer, workspaceDir string) error {
 
 	switch event.HookEventName {
 	case "PreToolUse":
+		// Verify identity against meta.json (fail closed on mismatch).
+		if err := verifyIdentity(id); err != nil {
+			return err
+		}
 		out, err := HandlePreToolUse(id, event, workspaceDir)
 		if err != nil {
 			return err
@@ -288,7 +323,8 @@ func Run(stdin io.Reader, stdout io.Writer, workspaceDir string) error {
 		return nil
 
 	default:
-		// Unknown event type — silently succeed (forward-compatible).
+		// Unknown event type — emit a warning to stderr but still exit 0 (forward-compatible).
+		fmt.Fprintf(os.Stderr, "fablebound hook: warning: unknown hook_event_name %q (ignored)\n", event.HookEventName)
 		return nil
 	}
 }

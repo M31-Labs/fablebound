@@ -5,6 +5,7 @@ import (
 
 	arbiter "m31labs.dev/arbiter"
 	"m31labs.dev/arbiter/govern"
+	"m31labs.dev/arbiter/vm"
 )
 
 // Route is the routing outcome from the DispatchRoute strategy.
@@ -21,6 +22,7 @@ type DispatchResult struct {
 	Rule      string
 	Reason    string
 	Route     Route
+	Matched   []vm.MatchedRule
 	Arbitrace *govern.Arbitrace
 }
 
@@ -51,6 +53,7 @@ func EvalDispatch(loaded *Loaded, req DispatchRequest) (DispatchResult, error) {
 		Verdict:   verdict,
 		Rule:      rule,
 		Reason:    reason,
+		Matched:   matched,
 		Arbitrace: trace,
 	}
 

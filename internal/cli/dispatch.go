@@ -139,15 +139,12 @@ func runDispatch(args []string) error {
 		}
 	}
 
-	// Re-derive matched rules via the stored arbitrace for auditing.
-	// We use the rule and reason from the result for a simple audit entry.
-	// The full trace is in result.Arbitrace.
 	auditErr := auditlog.DispatchEvent(
 		sinks.Dispatch,
 		runID+"/"+*role,
 		loaded.SHA256,
 		req,
-		nil, // matched rules — nil is acceptable for audit format
+		result.Matched,
 		stratRes,
 		result.Arbitrace,
 	)
@@ -221,6 +218,7 @@ func runDispatch(args []string) error {
 			"kind":        "dispatch",
 			"run_id":      runID,
 			"dispatch_id": callerID,
+			"depth":       callerDepth,
 			"child_id":    dispatchID,
 			"role":        *role,
 			"model":       result.Route.Model,

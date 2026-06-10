@@ -131,9 +131,11 @@ func TestSettings_HookBlocks(t *testing.T) {
 	}
 }
 
-// TestSettings_Depth2NoDispatch verifies that no depth-2 golden file contains
-// "Bash(fablebound *)" or "Bash(fablebound dispatch*)" — terminal agents
-// must not have dispatch capability.
+// TestSettings_Depth2NoDispatch verifies that no depth-2 golden file's allow
+// list contains "Bash(fablebound *)" or "Bash(fablebound dispatch*)" — terminal
+// agents must not have dispatch capability in the allow list.
+// Note: "Bash(fablebound dispatch*)" may appear in the deny list for execution
+// profile as a defence-in-depth guardrail; that is expected and correct.
 func TestSettings_Depth2NoDispatch(t *testing.T) {
 	for _, tc := range goldenCases {
 		if tc.depth < 2 {
@@ -146,15 +148,30 @@ func TestSettings_Depth2NoDispatch(t *testing.T) {
 				t.Fatalf("Settings: %v", err)
 			}
 
-			text := string(got)
-
-			// Must not contain the unrestricted fablebound allow.
-			if strings.Contains(text, `"Bash(fablebound *)"`) {
-				t.Errorf("depth-2 settings for %q still contains Bash(fablebound *)", tc.profile)
+			var doc map[string]interface{}
+			if err := json.Unmarshal(got, &doc); err != nil {
+				t.Fatalf("invalid JSON: %v", err)
 			}
-			// Must not contain a dispatch-specific allow.
-			if strings.Contains(text, `"Bash(fablebound dispatch`) {
-				t.Errorf("depth-2 settings for %q still contains Bash(fablebound dispatch*)", tc.profile)
+			perms, ok := doc["permissions"].(map[string]interface{})
+			if !ok {
+				t.Fatal("missing permissions object")
+			}
+			allowRaw, _ := perms["allow"].([]interface{})
+			var allowStrings []string
+			for _, a := range allowRaw {
+				if s, ok := a.(string); ok {
+					allowStrings = append(allowStrings, s)
+				}
+			}
+
+			// The allow list must not contain the unrestricted fablebound allow.
+			for _, a := range allowStrings {
+				if a == "Bash(fablebound *)" {
+					t.Errorf("depth-2 allow list for %q contains Bash(fablebound *)", tc.profile)
+				}
+				if strings.HasPrefix(a, "Bash(fablebound dispatch") {
+					t.Errorf("depth-2 allow list for %q contains %q", tc.profile, a)
+				}
 			}
 		})
 	}
@@ -234,5 +251,54 @@ func TestSettings_Depth2HasNoteForm(t *testing.T) {
 				t.Errorf("depth-2 %q missing Bash(fablebound note *)", p)
 			}
 		})
+	}
+}
+
+// TestSettings_Depth2ExecutionDenyDispatch verifies that the execution profile at
+// depth >= 2 contains "Bash(fablebound dispatch*)" in the deny list, providing a
+// settings-layer guardrail against terminal workers spawning dispatches.
+func TestSettings_Depth2ExecutionDenyDispatch(t *testing.T) {
+	got, err := spawn.Settings("execution", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var doc map[string]interface{}
+	if err := json.Unmarshal(got, &doc); err != nil {
+		t.Fatal(err)
+	}
+
+	perms, ok := doc["permissions"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing permissions")
+	}
+	denyRaw, ok := perms["deny"].([]interface{})
+	if !ok {
+		t.Fatal("deny list is not an array")
+	}
+
+	found := false
+	for _, d := range denyRaw {
+		if d == "Bash(fablebound dispatch*)" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("execution depth-2 deny list missing \"Bash(fablebound dispatch*)\"; got: %v", denyRaw)
+	}
+}
+
+// TestSettings_Depth1ExecutionNoDenyDispatch verifies that execution at depth 1
+// does NOT have "Bash(fablebound dispatch*)" in the deny list (depth-1 workers
+// may dispatch).
+func TestSettings_Depth1ExecutionNoDenyDispatch(t *testing.T) {
+	got, err := spawn.Settings("execution", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(string(got), `"Bash(fablebound dispatch*)"`) {
+		t.Error("execution depth-1 deny list unexpectedly contains Bash(fablebound dispatch*)")
 	}
 }

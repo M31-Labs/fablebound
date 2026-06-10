@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -14,8 +15,9 @@ type Meta struct {
 	Role           string     `json:"role"`
 	Model          string     `json:"model"`
 	Profile        string     `json:"profile"` // settings/toolgate class
-	Status         string     `json:"status"`  // running|completed|failed|halted
+	Status         string     `json:"status"`  // running|completed|failed|halted|stale
 	Depth          int        `json:"depth"`
+	SupervisorPID  int        `json:"supervisor_pid,omitempty"` // PID of the _supervise process
 	MaxTurns       int        `json:"max_turns,omitempty"`
 	TimeoutMinutes int        `json:"timeout_minutes,omitempty"`
 	StartedAt      time.Time  `json:"started_at"`
@@ -29,10 +31,36 @@ type Meta struct {
 // IsTerminal returns true if the meta status is a terminal state.
 func (m *Meta) IsTerminal() bool {
 	switch m.Status {
-	case "completed", "failed", "halted":
+	case "completed", "failed", "halted", "stale":
 		return true
 	}
 	return false
+}
+
+// IsOrphan returns true if this is a "running" dispatch whose supervisor
+// process no longer exists. SupervisorPID == 0 means the PID was never
+// recorded (older dispatches); those are not treated as orphans.
+func (m *Meta) IsOrphan() bool {
+	if m.Status != "running" {
+		return false
+	}
+	if m.SupervisorPID <= 0 {
+		return false
+	}
+	// kill -0 checks whether the process exists without sending a signal.
+	err := syscall.Kill(m.SupervisorPID, 0)
+	// ESRCH = no such process → orphan.
+	return err == syscall.ESRCH
+}
+
+// EffectiveStatus returns "stale" if the dispatch is an orphan, otherwise
+// the recorded Status.  This is used by display code to show up-to-date state
+// without mutating the on-disk meta.
+func (m *Meta) EffectiveStatus() string {
+	if m.IsOrphan() {
+		return "stale"
+	}
+	return m.Status
 }
 
 // IsFableModel returns true if the dispatch used a fable-class model.

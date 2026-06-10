@@ -94,6 +94,12 @@ func runAwait(args []string) error {
 	for {
 		m, err := run.ReadMeta(runDir, dispatchID)
 		if err == nil {
+			// Check for orphan (supervisor dead) — treat as stale, exit 3.
+			if m.IsOrphan() {
+				reportPath := filepath.Join(runDir, "dispatches", dispatchID, "report.md")
+				fmt.Printf("%s stale %s\n", dispatchID, reportPath)
+				return &StaledError{DispatchID: dispatchID}
+			}
 			if m.IsTerminal() {
 				reportPath := filepath.Join(runDir, "dispatches", dispatchID, "report.md")
 				printMetaOneLiner(m, reportPath)
@@ -113,6 +119,16 @@ func runAwait(args []string) error {
 
 		time.Sleep(pollInterval)
 	}
+}
+
+// StaledError is returned by await when a dispatch is detected as orphaned
+// (supervisor PID is dead). It causes exit code 3 per the spec.
+type StaledError struct {
+	DispatchID string
+}
+
+func (e *StaledError) Error() string {
+	return fmt.Sprintf("dispatch %s is stale: supervisor process is no longer running", e.DispatchID)
 }
 
 // printMetaOneLiner prints "<id> <status> <report-path>" to stdout.

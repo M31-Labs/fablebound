@@ -1,7 +1,7 @@
 // Package agents provides the default ambient subagent definition files for
-// fablebound's ambient mode. The fb-* persona files are installed into
+// tiller's ambient mode. The tiller-* persona files are installed into
 // ~/.claude/agents/ (or ./.claude/agents/ for project scope) by
-// `fablebound install` so that the fable orchestrator can delegate to
+// `tiller install` so that the fable orchestrator can delegate to
 // cheaper models automatically via the built-in Agent/Task tool.
 package agents
 
@@ -14,7 +14,7 @@ import (
 var embeddedFS embed.FS
 
 // EmbeddedDefaults returns an FS view of the defaults/ subtree.
-// Each file is an fb-*.md Claude Code subagent definition.
+// Each file is a tiller-*.md Claude Code subagent definition.
 func EmbeddedDefaults() fs.ReadDirFS {
 	sub, err := fs.Sub(embeddedFS, "defaults")
 	if err != nil {
@@ -24,7 +24,7 @@ func EmbeddedDefaults() fs.ReadDirFS {
 }
 
 // AgentFileNames returns the list of embedded agent definition filenames
-// (without directory prefix), e.g. ["fb-architect.md", ...].
+// (without directory prefix), e.g. ["tiller-architect.md", ...].
 func AgentFileNames() []string {
 	entries, err := embeddedFS.ReadDir("defaults")
 	if err != nil {

@@ -1,4 +1,4 @@
-// Package cli implements the fablebound command-line interface.
+// Package cli implements the tiller command-line interface.
 // Exit-code contract (§9):
 //
 //	0 — ok (including wait-timeout with status running)
@@ -47,7 +47,7 @@ var subcommands = []subcommand{
 	{"version", runVersion},
 }
 
-// Main is the entry point called from cmd/fablebound/main.go.
+// Main is the entry point called from cmd/tiller/main.go.
 func Main(args []string) {
 	if len(args) < 2 {
 		printUsage()
@@ -73,16 +73,16 @@ func Main(args []string) {
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "fablebound: unknown subcommand %q\n", sub)
+	fmt.Fprintf(os.Stderr, "tiller: unknown subcommand %q\n", sub)
 	printUsage()
 	os.Exit(2)
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `Usage: fablebound <subcommand> [args]
+	fmt.Fprintf(os.Stderr, `Usage: tiller <subcommand> [args]
 
 Subcommands:
-  init                   materialize .fablebound/{policy,roles}, gitignore runs/
+  init                   materialize .tiller/{policy,roles}, gitignore runs/
   run "<task>"           start a governed RLM run
   dispatch               dispatch a child agent (governed by dispatch.arb)
   poll <id>              print dispatch status
@@ -93,7 +93,7 @@ Subcommands:
   policy vet             compile+typecheck both policies
   hook                   internal: PreToolUse/PostToolUse gate (stdin JSON)
   install [--print]      install PreToolUse/PostToolUse hooks in ~/.claude/settings.json
-  uninstall [--print]    remove fablebound hooks from ~/.claude/settings.json
+  uninstall [--print]    remove tiller hooks from ~/.claude/settings.json
   _supervise <run> <id>  internal: detached child supervisor
   version                print version
 
@@ -102,6 +102,6 @@ Exit codes: 0 ok; 2 internal error; 3 policy denial
 }
 
 func runVersion(_ []string) error {
-	fmt.Printf("fablebound %s\n", Version)
+	fmt.Printf("tiller %s\n", Version)
 	return nil
 }

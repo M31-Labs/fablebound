@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"m31labs.dev/fablebound/internal/hook"
+	"m31labs.dev/tiller/internal/hook"
 )
 
 // setupFixtureRun creates a properly structured run dir under a temp workspace
 // and returns the run dir path.
-// The structure is <workspace>/.fablebound/runs/<run-id>/ with a manifest.json
+// The structure is <workspace>/.tiller/runs/<run-id>/ with a manifest.json
 // so that verifyIdentity's run-dir containment check passes.
 func setupFixtureRun(t *testing.T) string {
 	t.Helper()
@@ -61,9 +61,9 @@ func runHookWithWorkspace(t *testing.T, inputJSON, workspaceDir string) ([]byte,
 	return out.Bytes(), err
 }
 
-// TestMissingRole verifies that missing FABLEBOUND_ROLE exits 0 silently.
+// TestMissingRole verifies that missing TILLER_ROLE exits 0 silently.
 func TestMissingRole(t *testing.T) {
-	setEnv(t, "FABLEBOUND_ROLE", "", "FABLEBOUND_DEPTH", "", "FABLEBOUND_DISPATCH_ID", "", "FABLEBOUND_RUN_DIR", "")
+	setEnv(t, "TILLER_ROLE", "", "TILLER_DEPTH", "", "TILLER_DISPATCH_ID", "", "TILLER_RUN_DIR", "")
 	out, err := runHook(t, `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}`)
 	if err != nil {
 		t.Errorf("expected nil error for missing role, got: %v", err)
@@ -75,7 +75,7 @@ func TestMissingRole(t *testing.T) {
 
 // TestMalformedJSON verifies that malformed JSON returns an error (exit 2).
 func TestMalformedJSON(t *testing.T) {
-	setEnv(t, "FABLEBOUND_ROLE", "worker", "FABLEBOUND_DEPTH", "1", "FABLEBOUND_DISPATCH_ID", "d01", "FABLEBOUND_RUN_DIR", "")
+	setEnv(t, "TILLER_ROLE", "worker", "TILLER_DEPTH", "1", "TILLER_DISPATCH_ID", "d01", "TILLER_RUN_DIR", "")
 	_, err := runHook(t, `{not valid json`)
 	if err == nil {
 		t.Error("expected error for malformed JSON, got nil")
@@ -90,10 +90,10 @@ func TestOrchestratorDenyLS(t *testing.T) {
 	writeTestMeta(t, runDir, "root", "orchestrator", 0)
 
 	setEnv(t,
-		"FABLEBOUND_ROLE", "orchestrator",
-		"FABLEBOUND_DEPTH", "0",
-		"FABLEBOUND_DISPATCH_ID", "root",
-		"FABLEBOUND_RUN_DIR", runDir,
+		"TILLER_ROLE", "orchestrator",
+		"TILLER_DEPTH", "0",
+		"TILLER_DISPATCH_ID", "root",
+		"TILLER_RUN_DIR", runDir,
 	)
 
 	out, err := runHookWithWorkspace(t,
@@ -117,7 +117,7 @@ func TestOrchestratorDenyLS(t *testing.T) {
 	}
 }
 
-// TestOrchestratorAllowDispatch verifies orchestrator fablebound dispatch → allow.
+// TestOrchestratorAllowDispatch verifies orchestrator tiller dispatch → allow.
 func TestOrchestratorAllowDispatch(t *testing.T) {
 	runDir := setupFixtureRun(t)
 	dispatchDir := filepath.Join(runDir, "dispatches", "root")
@@ -125,14 +125,14 @@ func TestOrchestratorAllowDispatch(t *testing.T) {
 	writeTestMeta(t, runDir, "root", "orchestrator", 0)
 
 	setEnv(t,
-		"FABLEBOUND_ROLE", "orchestrator",
-		"FABLEBOUND_DEPTH", "0",
-		"FABLEBOUND_DISPATCH_ID", "root",
-		"FABLEBOUND_RUN_DIR", runDir,
+		"TILLER_ROLE", "orchestrator",
+		"TILLER_DEPTH", "0",
+		"TILLER_DISPATCH_ID", "root",
+		"TILLER_RUN_DIR", runDir,
 	)
 
 	out, err := runHookWithWorkspace(t,
-		`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"fablebound dispatch --role investigator --brief -"}}`,
+		`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"tiller dispatch --role investigator --brief -"}}`,
 		"",
 	)
 	if err != nil {
@@ -160,10 +160,10 @@ func TestWorkerEditAllow(t *testing.T) {
 	writeTestMeta(t, runDir, "d01", "worker", 1)
 
 	setEnv(t,
-		"FABLEBOUND_ROLE", "worker",
-		"FABLEBOUND_DEPTH", "1",
-		"FABLEBOUND_DISPATCH_ID", "d01",
-		"FABLEBOUND_RUN_DIR", runDir,
+		"TILLER_ROLE", "worker",
+		"TILLER_DEPTH", "1",
+		"TILLER_DISPATCH_ID", "d01",
+		"TILLER_RUN_DIR", runDir,
 	)
 
 	out, err := runHookWithWorkspace(t,
@@ -195,10 +195,10 @@ func TestReviewerWriteOutsideDeny(t *testing.T) {
 	writeTestMeta(t, runDir, "d01", "reviewer", 1)
 
 	setEnv(t,
-		"FABLEBOUND_ROLE", "reviewer",
-		"FABLEBOUND_DEPTH", "1",
-		"FABLEBOUND_DISPATCH_ID", "d01",
-		"FABLEBOUND_RUN_DIR", runDir,
+		"TILLER_ROLE", "reviewer",
+		"TILLER_DEPTH", "1",
+		"TILLER_DISPATCH_ID", "d01",
+		"TILLER_RUN_DIR", runDir,
 	)
 
 	// File is outside the run dir (scratch).
@@ -231,10 +231,10 @@ func TestArchitectWriteInsideAllow(t *testing.T) {
 	writeTestMeta(t, runDir, "d01", "chief-architect", 0)
 
 	setEnv(t,
-		"FABLEBOUND_ROLE", "chief-architect",
-		"FABLEBOUND_DEPTH", "0",
-		"FABLEBOUND_DISPATCH_ID", "d01",
-		"FABLEBOUND_RUN_DIR", runDir,
+		"TILLER_ROLE", "chief-architect",
+		"TILLER_DEPTH", "0",
+		"TILLER_DISPATCH_ID", "d01",
+		"TILLER_RUN_DIR", runDir,
 	)
 
 	// File is inside the run dir (scratch).
@@ -260,7 +260,7 @@ func TestArchitectWriteInsideAllow(t *testing.T) {
 	}
 }
 
-// TestDepth2DispatchDeny verifies depth-2 fablebound dispatch → DenyTerminalDispatch.
+// TestDepth2DispatchDeny verifies depth-2 tiller dispatch → DenyTerminalDispatch.
 func TestDepth2DispatchDeny(t *testing.T) {
 	runDir := setupFixtureRun(t)
 	dispatchDir := filepath.Join(runDir, "dispatches", "d02")
@@ -268,14 +268,14 @@ func TestDepth2DispatchDeny(t *testing.T) {
 	writeTestMeta(t, runDir, "d02", "worker", 2)
 
 	setEnv(t,
-		"FABLEBOUND_ROLE", "worker",
-		"FABLEBOUND_DEPTH", "2",
-		"FABLEBOUND_DISPATCH_ID", "d02",
-		"FABLEBOUND_RUN_DIR", runDir,
+		"TILLER_ROLE", "worker",
+		"TILLER_DEPTH", "2",
+		"TILLER_DISPATCH_ID", "d02",
+		"TILLER_RUN_DIR", runDir,
 	)
 
 	out, err := runHookWithWorkspace(t,
-		`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"fablebound dispatch --role investigator --brief investigate this"}}`,
+		`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"tiller dispatch --role investigator --brief investigate this"}}`,
 		"",
 	)
 	if err != nil {
@@ -307,15 +307,15 @@ func TestPreToolUseAuditLine(t *testing.T) {
 	writeTestMeta(t, runDir, "root", "orchestrator", 0)
 
 	setEnv(t,
-		"FABLEBOUND_ROLE", "orchestrator",
-		"FABLEBOUND_DEPTH", "0",
-		"FABLEBOUND_DISPATCH_ID", "root",
-		"FABLEBOUND_RUN_DIR", runDir,
+		"TILLER_ROLE", "orchestrator",
+		"TILLER_DEPTH", "0",
+		"TILLER_DISPATCH_ID", "root",
+		"TILLER_RUN_DIR", runDir,
 	)
 
 	cases := []string{
 		`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}`,
-		`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"fablebound dispatch --role investigator --brief -"}}`,
+		`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"tiller dispatch --role investigator --brief -"}}`,
 		`{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"/workspace/main.go"}}`,
 	}
 
@@ -369,10 +369,10 @@ func TestPostToolUseToolTrace(t *testing.T) {
 	// No meta needed for PostToolUse (identity verification only happens on PreToolUse).
 
 	setEnv(t,
-		"FABLEBOUND_ROLE", "worker",
-		"FABLEBOUND_DEPTH", "1",
-		"FABLEBOUND_DISPATCH_ID", "d01",
-		"FABLEBOUND_RUN_DIR", runDir,
+		"TILLER_ROLE", "worker",
+		"TILLER_DEPTH", "1",
+		"TILLER_DISPATCH_ID", "d01",
+		"TILLER_RUN_DIR", runDir,
 	)
 
 	cases := []string{
@@ -422,10 +422,10 @@ func TestPostToolUseTraceFailureSilent(t *testing.T) {
 	runDir := setupFixtureRun(t)
 
 	setEnv(t,
-		"FABLEBOUND_ROLE", "worker",
-		"FABLEBOUND_DEPTH", "1",
-		"FABLEBOUND_DISPATCH_ID", "d-nonexistent",
-		"FABLEBOUND_RUN_DIR", runDir+"/nonexistent-run",
+		"TILLER_ROLE", "worker",
+		"TILLER_DEPTH", "1",
+		"TILLER_DISPATCH_ID", "d-nonexistent",
+		"TILLER_RUN_DIR", runDir+"/nonexistent-run",
 	)
 
 	// Even with a broken run dir, PostToolUse must not return error.
@@ -447,10 +447,10 @@ func TestToolTraceRoleDepthMatch(t *testing.T) {
 	// No meta needed for PostToolUse (identity verification only happens on PreToolUse).
 
 	setEnv(t,
-		"FABLEBOUND_ROLE", "investigator",
-		"FABLEBOUND_DEPTH", "1",
-		"FABLEBOUND_DISPATCH_ID", "d03",
-		"FABLEBOUND_RUN_DIR", runDir,
+		"TILLER_ROLE", "investigator",
+		"TILLER_DEPTH", "1",
+		"TILLER_DISPATCH_ID", "d03",
+		"TILLER_RUN_DIR", runDir,
 	)
 
 	_, err := runHookWithWorkspace(t,
@@ -484,7 +484,7 @@ func TestToolTraceRoleDepthMatch(t *testing.T) {
 	}
 }
 
-// TestIdentityVerification_ForgedRole verifies that a forged FABLEBOUND_ROLE
+// TestIdentityVerification_ForgedRole verifies that a forged TILLER_ROLE
 // (different from meta.json) causes the hook to fail closed (return error, exit 2).
 func TestIdentityVerification_ForgedRole(t *testing.T) {
 	runDir := setupFixtureRun(t)
@@ -496,10 +496,10 @@ func TestIdentityVerification_ForgedRole(t *testing.T) {
 
 	// But claim role=investigator in env (forged).
 	setEnv(t,
-		"FABLEBOUND_ROLE", "investigator", // FORGED
-		"FABLEBOUND_DEPTH", "1",
-		"FABLEBOUND_DISPATCH_ID", "d01",
-		"FABLEBOUND_RUN_DIR", runDir,
+		"TILLER_ROLE", "investigator", // FORGED
+		"TILLER_DEPTH", "1",
+		"TILLER_DISPATCH_ID", "d01",
+		"TILLER_RUN_DIR", runDir,
 	)
 
 	_, err := runHookWithWorkspace(t,
@@ -511,7 +511,7 @@ func TestIdentityVerification_ForgedRole(t *testing.T) {
 	}
 }
 
-// TestIdentityVerification_ForgedDepth verifies that a forged FABLEBOUND_DEPTH
+// TestIdentityVerification_ForgedDepth verifies that a forged TILLER_DEPTH
 // (different from meta.json) causes the hook to fail closed.
 func TestIdentityVerification_ForgedDepth(t *testing.T) {
 	runDir := setupFixtureRun(t)
@@ -523,14 +523,14 @@ func TestIdentityVerification_ForgedDepth(t *testing.T) {
 
 	// but env claims depth=0 (forged to escape terminal-depth restrictions)
 	setEnv(t,
-		"FABLEBOUND_ROLE", "worker",
-		"FABLEBOUND_DEPTH", "0", // FORGED
-		"FABLEBOUND_DISPATCH_ID", "d01",
-		"FABLEBOUND_RUN_DIR", runDir,
+		"TILLER_ROLE", "worker",
+		"TILLER_DEPTH", "0", // FORGED
+		"TILLER_DISPATCH_ID", "d01",
+		"TILLER_RUN_DIR", runDir,
 	)
 
 	_, err := runHookWithWorkspace(t,
-		`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"fablebound dispatch --role investigator --brief test"}}`,
+		`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"tiller dispatch --role investigator --brief test"}}`,
 		"",
 	)
 	if err == nil {
@@ -539,15 +539,15 @@ func TestIdentityVerification_ForgedDepth(t *testing.T) {
 }
 
 // TestIdentityVerification_NonexistentDispatch verifies that a nonexistent
-// FABLEBOUND_DISPATCH_ID causes the hook to fail closed (can't read meta).
+// TILLER_DISPATCH_ID causes the hook to fail closed (can't read meta).
 func TestIdentityVerification_NonexistentDispatch(t *testing.T) {
 	runDir := setupFixtureRun(t)
 
 	setEnv(t,
-		"FABLEBOUND_ROLE", "worker",
-		"FABLEBOUND_DEPTH", "1",
-		"FABLEBOUND_DISPATCH_ID", "d-does-not-exist",
-		"FABLEBOUND_RUN_DIR", runDir,
+		"TILLER_ROLE", "worker",
+		"TILLER_DEPTH", "1",
+		"TILLER_DISPATCH_ID", "d-does-not-exist",
+		"TILLER_RUN_DIR", runDir,
 	)
 
 	_, err := runHookWithWorkspace(t,
@@ -571,10 +571,10 @@ func TestIdentityVerification_ValidIdentity(t *testing.T) {
 	writeTestMeta(t, runDir, "d01", "worker", 1)
 
 	setEnv(t,
-		"FABLEBOUND_ROLE", "worker",
-		"FABLEBOUND_DEPTH", "1",
-		"FABLEBOUND_DISPATCH_ID", "d01",
-		"FABLEBOUND_RUN_DIR", runDir,
+		"TILLER_ROLE", "worker",
+		"TILLER_DEPTH", "1",
+		"TILLER_DISPATCH_ID", "d01",
+		"TILLER_RUN_DIR", runDir,
 	)
 
 	out, err := runHookWithWorkspace(t,
@@ -624,10 +624,10 @@ func TestUnknownHookEventWarning(t *testing.T) {
 	writeTestMeta(t, runDir, "d01", "worker", 1)
 
 	setEnv(t,
-		"FABLEBOUND_ROLE", "worker",
-		"FABLEBOUND_DEPTH", "1",
-		"FABLEBOUND_DISPATCH_ID", "d01",
-		"FABLEBOUND_RUN_DIR", runDir,
+		"TILLER_ROLE", "worker",
+		"TILLER_DEPTH", "1",
+		"TILLER_DISPATCH_ID", "d01",
+		"TILLER_RUN_DIR", runDir,
 	)
 
 	// Capture stderr via a pipe trick — hook.Run writes to os.Stderr directly.
@@ -647,12 +647,12 @@ func TestUnknownHookEventWarning(t *testing.T) {
 // ── Run-dir containment tests (Fix 1) ────────────────────────────────────────
 
 // makeRealRunDir creates a properly structured run dir under workspace
-// (i.e. <workspace>/.fablebound/runs/<run-id>/) with a manifest.json that
+// (i.e. <workspace>/.tiller/runs/<run-id>/) with a manifest.json that
 // records the workspace path.  Returns runDir.
 func makeRealRunDir(t *testing.T, workspace string) string {
 	t.Helper()
 	runID := "20260101-000000-test"
-	runDir := filepath.Join(workspace, ".fablebound", "runs", runID)
+	runDir := filepath.Join(workspace, ".tiller", "runs", runID)
 	for _, sub := range []string{"audit", "notes", "dispatches"} {
 		if err := os.MkdirAll(filepath.Join(runDir, sub), 0o755); err != nil {
 			t.Fatal(err)
@@ -681,7 +681,7 @@ func makeRealRunDir(t *testing.T, workspace string) string {
 func TestVerifyIdentity_FakeRunDir(t *testing.T) {
 	// Build a fake run dir completely outside any real workspace.
 	fakeBase := t.TempDir() // e.g. /tmp/TestVerify.../
-	fakeRunDir := filepath.Join(fakeBase, ".fablebound", "runs", "fake-run-id")
+	fakeRunDir := filepath.Join(fakeBase, ".tiller", "runs", "fake-run-id")
 	for _, sub := range []string{"audit", "notes", "dispatches", filepath.Join("dispatches", "root")} {
 		if err := os.MkdirAll(filepath.Join(fakeRunDir, sub), 0o755); err != nil {
 			t.Fatal(err)
@@ -702,20 +702,20 @@ func TestVerifyIdentity_FakeRunDir(t *testing.T) {
 	writeTestMeta(t, fakeRunDir, "root", "orchestrator", 0)
 
 	setEnv(t,
-		"FABLEBOUND_ROLE", "orchestrator",
-		"FABLEBOUND_DEPTH", "0",
-		"FABLEBOUND_DISPATCH_ID", "root",
-		"FABLEBOUND_RUN_DIR", fakeRunDir,
+		"TILLER_ROLE", "orchestrator",
+		"TILLER_DEPTH", "0",
+		"TILLER_DISPATCH_ID", "root",
+		"TILLER_RUN_DIR", fakeRunDir,
 	)
 
 	// The hook must fail closed (return an error = exit 2) because the run dir
-	// is NOT under a workspace that was produced by a real `fablebound run` invocation.
+	// is NOT under a workspace that was produced by a real `tiller run` invocation.
 	// The test itself doesn't know the "real" workspace; the hook derives it from the
 	// manifest and cross-checks the 3-levels-up derivation.
 	// Both values match in the fake dir, so the containment check passes for the
 	// fake workspace — but that is correct: the *containment* check prevents an
 	// attacker from pointing to a /tmp dir when the env already contains the real
-	// workspace path.  To test a meaningful rejection, we set FABLEBOUND_RUN_DIR
+	// workspace path.  To test a meaningful rejection, we set TILLER_RUN_DIR
 	// to a path that is NOT under its own manifest's workspace.
 	//
 	// Variant: point to a run dir whose manifest workspace does NOT match the
@@ -732,7 +732,7 @@ func TestVerifyIdentity_FakeRunDir(t *testing.T) {
 	}
 
 	_, err := runHookWithWorkspace(t,
-		`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"fablebound dispatch --role investigator --brief test"}}`,
+		`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"tiller dispatch --role investigator --brief test"}}`,
 		"",
 	)
 	if err == nil {
@@ -744,7 +744,7 @@ func TestVerifyIdentity_FakeRunDir(t *testing.T) {
 }
 
 // TestVerifyIdentity_RealRunDirStillWorks verifies that a legitimately structured
-// run dir (under <workspace>/.fablebound/runs/<id>/ with a correct manifest)
+// run dir (under <workspace>/.tiller/runs/<id>/ with a correct manifest)
 // still passes identity verification — the grandchild-dispatch flow must not break.
 func TestVerifyIdentity_RealRunDirStillWorks(t *testing.T) {
 	workspace := t.TempDir()
@@ -758,10 +758,10 @@ func TestVerifyIdentity_RealRunDirStillWorks(t *testing.T) {
 	writeTestMeta(t, runDir, "d01", "investigator", 1)
 
 	setEnv(t,
-		"FABLEBOUND_ROLE", "investigator",
-		"FABLEBOUND_DEPTH", "1",
-		"FABLEBOUND_DISPATCH_ID", "d01",
-		"FABLEBOUND_RUN_DIR", runDir,
+		"TILLER_ROLE", "investigator",
+		"TILLER_DEPTH", "1",
+		"TILLER_DISPATCH_ID", "d01",
+		"TILLER_RUN_DIR", runDir,
 	)
 
 	out, err := runHookWithWorkspace(t,

@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"m31labs.dev/fablebound/internal/cli"
+	"m31labs.dev/tiller/internal/cli"
 )
 
 func main() {

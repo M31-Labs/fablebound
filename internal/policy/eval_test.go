@@ -240,12 +240,12 @@ func TestToolCall_WorkerHyphaMcpServe_Deny(t *testing.T) {
 	}
 }
 
-func TestToolCall_Depth2FableboundDispatch_Deny(t *testing.T) {
+func TestToolCall_Depth2TillerDispatch_Deny(t *testing.T) {
 	req := ToolCallRequest{
 		Role:    "worker",
 		Depth:   2,
 		Tool:    "Bash",
-		Command: "fablebound dispatch --role investigator --brief x",
+		Command: "tiller dispatch --role investigator --brief x",
 		RunID:   "20260609-000000-tc03",
 	}
 	res, err := EvalToolCall(toolgateLoaded, req)

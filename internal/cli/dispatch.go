@@ -11,15 +11,15 @@ import (
 	"time"
 
 	"m31labs.dev/arbiter/audit"
-	"m31labs.dev/fablebound/internal/auditlog"
-	"m31labs.dev/fablebound/internal/hook"
-	"m31labs.dev/fablebound/internal/hyphae"
-	"m31labs.dev/fablebound/internal/policy"
-	"m31labs.dev/fablebound/internal/run"
-	"m31labs.dev/fablebound/internal/spawn"
+	"m31labs.dev/tiller/internal/auditlog"
+	"m31labs.dev/tiller/internal/hook"
+	"m31labs.dev/tiller/internal/hyphae"
+	"m31labs.dev/tiller/internal/policy"
+	"m31labs.dev/tiller/internal/run"
+	"m31labs.dev/tiller/internal/spawn"
 )
 
-// runDispatch is the handler for `fablebound dispatch`.
+// runDispatch is the handler for `tiller dispatch`.
 // Caller identity comes from environment; absent ⇒ role="user", depth=0.
 func runDispatch(args []string) error {
 	fs := flag.NewFlagSet("dispatch", flag.ContinueOnError)
@@ -50,15 +50,15 @@ func runDispatch(args []string) error {
 	runID := filepath.Base(runDir)
 
 	// Read caller identity from environment.
-	callerRole := os.Getenv("FABLEBOUND_ROLE")
+	callerRole := os.Getenv("TILLER_ROLE")
 	if callerRole == "" {
 		callerRole = "user"
 	}
 	callerDepth := 0
-	if d := os.Getenv("FABLEBOUND_DEPTH"); d != "" {
+	if d := os.Getenv("TILLER_DEPTH"); d != "" {
 		fmt.Sscanf(d, "%d", &callerDepth)
 	}
-	callerID := os.Getenv("FABLEBOUND_DISPATCH_ID")
+	callerID := os.Getenv("TILLER_DISPATCH_ID")
 
 	// Read brief content.
 	briefContent, err := readBrief(*briefFlag)
@@ -149,7 +149,7 @@ func runDispatch(args []string) error {
 		result.Arbitrace,
 	)
 	if auditErr != nil {
-		fmt.Fprintf(os.Stderr, "fablebound dispatch: audit write error: %v\n", auditErr)
+		fmt.Fprintf(os.Stderr, "tiller dispatch: audit write error: %v\n", auditErr)
 	}
 
 	// Handle denial.
@@ -218,25 +218,25 @@ func runDispatch(args []string) error {
 			"profile":     result.Route.Profile,
 		}
 		if appendErr := hook.AppendJSONL(callerTracePath, dispatchEvent); appendErr != nil {
-			fmt.Fprintf(os.Stderr, "fablebound dispatch: context_trace append error: %v\n", appendErr)
+			fmt.Fprintf(os.Stderr, "tiller dispatch: context_trace append error: %v\n", appendErr)
 		}
 	}
 
-	// Find fablebound binary for spawning.
-	fablebound, err := os.Executable()
+	// Find tiller binary for spawning.
+	binary, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("dispatch: find executable: %w", err)
 	}
 
 	// Spawn detached supervisor.
-	if err := spawn.SpawnDetached(fablebound, runDir, dispatchID); err != nil {
+	if err := spawn.SpawnDetached(binary, runDir, dispatchID); err != nil {
 		return fmt.Errorf("dispatch: spawn supervisor: %w", err)
 	}
 
 	// Hypha trace tick: "<did> <role>(<model>) dispatched by <parent>" (soft-fail).
 	{
 		hyp := hyphae.New(func(format string, args ...any) {
-			fmt.Fprintf(os.Stderr, "fablebound dispatch [hypha]: "+format+"\n", args...)
+			fmt.Fprintf(os.Stderr, "tiller dispatch [hypha]: "+format+"\n", args...)
 		})
 		if hyp.Available() {
 			if mf, err := run.ReadManifest(runDir); err == nil && mf.HyphaTraceID != "" {

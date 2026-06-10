@@ -1,6 +1,6 @@
-# fablebound tool gate. Input schema: ToolCallRequest. No match => deny.
+# tiller tool gate. Input schema: ToolCallRequest. No match => deny.
 # Installed as the PreToolUse hook in EVERY spawned claude process (root and
-# all child levels); agent.role / agent.depth come from env fablebound set
+# all child levels); agent.role / agent.depth come from env tiller set
 # at spawn. Per-role capability enforcement, not just root protection.
 
 segment orchestrator { agent.role == "orchestrator" }
@@ -13,7 +13,7 @@ segment execution { agent.role in ["worker", "debugger"] }
 rule HaltAllTools priority 0 {
     kill_switch
     when { true }
-    then Deny { reason: "fablebound tool halt" }
+    then Deny { reason: "tiller tool halt" }
 }
 
 rule DenyHyphaDaemons priority 1 {
@@ -28,7 +28,7 @@ rule DenyDestructive priority 1 {
 }
 rule DenyTerminalDispatch priority 2 {
     when { agent.depth >= 2 and tool.name == "Bash" and
-           tool.command starts_with "fablebound dispatch" }
+           tool.command starts_with "tiller dispatch" }
     then Deny { reason: "depth-2 agents are terminal; they cannot spawn" }
 }
 
@@ -39,7 +39,7 @@ rule OrchestratorRead priority 10 {
 rule OrchestratorEffector priority 10 {
     when segment orchestrator {
         tool.name == "Bash" and
-        (tool.command starts_with "fablebound " or tool.command starts_with "hypha ")
+        (tool.command starts_with "tiller " or tool.command starts_with "hypha ")
     }
     then Allow { reason: "orchestrator effector" }
 }
@@ -62,7 +62,7 @@ rule DenyWriteOutsideScratch priority 11 {
 rule ReadOnlyBash priority 12 {
     when segment readonly_bash_roles {
         tool.name == "Bash" and
-        (tool.command starts_with "fablebound " or tool.command starts_with "hypha "
+        (tool.command starts_with "tiller " or tool.command starts_with "hypha "
          or tool.command starts_with "rg " or tool.command starts_with "ls "
          or tool.command starts_with "git log" or tool.command starts_with "git diff"
          or tool.command starts_with "git show" or tool.command starts_with "go doc"

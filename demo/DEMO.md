@@ -1,4 +1,4 @@
-# fablebound T1.9 Live End-to-End Demo
+# tiller T1.9 Live End-to-End Demo
 
 Repeatable acceptance checklist for the T1.9 phase gate.  
 Run as a human reviewer with real `claude` on PATH in a scratch git repo.
@@ -8,9 +8,9 @@ Run as a human reviewer with real `claude` on PATH in a scratch git repo.
 ## Prerequisites
 
 ```sh
-# Build fablebound
-cd ~/work/fablebound
-go build -o /tmp/fablebound ./cmd/fablebound
+# Build tiller
+cd ~/work/tiller
+go build -o /tmp/tiller ./cmd/tiller
 
 # Verify claude is available
 which claude && claude --version
@@ -25,7 +25,7 @@ go build -o /tmp/arbiter ./cmd/arbiter
 ## Setup: scratch git repo
 
 ```sh
-DEMO_DIR=/tmp/fablebound-demo
+DEMO_DIR=/tmp/tiller-demo
 rm -rf "$DEMO_DIR" && mkdir "$DEMO_DIR"
 cd "$DEMO_DIR"
 git init
@@ -47,20 +47,20 @@ git add README.md && git commit -m "add README"
 ## Check 1 — `init` and `policy vet` exit 0
 
 ```sh
-PATH=/tmp:$PATH fablebound init
-PATH=/tmp:$PATH fablebound policy vet
+PATH=/tmp:$PATH tiller init
+PATH=/tmp:$PATH tiller policy vet
 ```
 
-**Expected**: `fablebound init: done` followed by two sha256 hashes and
+**Expected**: `tiller init: done` followed by two sha256 hashes and
 `arbiter test` suites printing `54 passed, 0 failed` / `52 passed, 0 failed`.
 Both commands exit 0.
 
 ---
 
-## Check 2 — `fablebound run` completes
+## Check 2 — `tiller run` completes
 
 ```sh
-PATH=/tmp:$PATH timeout 900 fablebound run \
+PATH=/tmp:$PATH tiller run \
   "Dispatch an investigator to summarize README.md into its report, then \
 dispatch a worker to write notes/haiku.md from that report. \
 Do not read README.md yourself beyond the first line."
@@ -70,8 +70,8 @@ Do not read README.md yourself beyond the first line."
 (e.g. `20260610-044705-shbh`) is used in subsequent checks — set it:
 
 ```sh
-RUN=$(ls .fablebound/runs/ | sort | tail -1)
-RUNDIR=".fablebound/runs/$RUN"
+RUN=$(ls .tiller/runs/ | sort | tail -1)
+RUNDIR=".tiller/runs/$RUN"
 ```
 
 **Note**: The orchestrator role prompt includes a `**Demo gate probe**` that
@@ -84,7 +84,7 @@ from `internal/roles/defaults/orchestrator.md` after the demo.
 ## Check 3 — `runs show` renders tree with models
 
 ```sh
-fablebound runs show "$RUN"
+tiller runs show "$RUN"
 ```
 
 **Expected output (dispatches section)**:
@@ -110,7 +110,7 @@ cat notes/haiku.md                          # must exist and contain haiku text
 ```
 
 **Expected**: Both `dispatches/d*/report.md` files are non-empty; `notes/haiku.md`
-exists in the workspace root (not in `.fablebound/`).
+exists in the workspace root (not in `.tiller/`).
 
 ---
 
@@ -128,7 +128,7 @@ def first_verdict(rules):
     w = max(mr, key=lambda r: rank.get(r['action'], 0))
     return w['action'], w['name']
 
-import os; RUN = os.environ['RUN']; RUNDIR = f'.fablebound/runs/{RUN}'
+import os; RUN = os.environ['RUN']; RUNDIR = f'.tiller/runs/{RUN}'
 
 print('=== toolgate.jsonl ===')
 denies, allows = [], []
@@ -167,11 +167,11 @@ dispatch ≥2 Allows (investigator + worker, rule `AllowDispatch`).
 # Build arbiter if not on PATH
 # go build -o /tmp/arbiter ~/work/arbiter/cmd/arbiter
 
-arbiter replay .fablebound/policy/toolgate.arb \
+arbiter replay .tiller/policy/toolgate.arb \
   --audit "$RUNDIR/audit/toolgate.jsonl"
 # Expected: changed: 0  unchanged: N
 
-arbiter replay .fablebound/policy/dispatch.arb \
+arbiter replay .tiller/policy/dispatch.arb \
   --audit "$RUNDIR/audit/dispatch.jsonl"
 # Expected: changed: 0  unchanged: 2
 ```
@@ -184,7 +184,7 @@ arbiter replay .fablebound/policy/dispatch.arb \
 
 ```sh
 python3 - << 'EOF'
-import json, glob, os; RUN = os.environ['RUN']; RUNDIR = f'.fablebound/runs/{RUN}'
+import json, glob, os; RUN = os.environ['RUN']; RUNDIR = f'.tiller/runs/{RUN}'
 
 # 7a: tool_trace.jsonl non-empty for every dispatch
 print('tool_trace.jsonl:')
@@ -225,7 +225,7 @@ EOF
 
 ```sh
 python3 - << 'EOF'
-import json, glob, os; RUN = os.environ['RUN']; RUNDIR = f'.fablebound/runs/{RUN}'
+import json, glob, os; RUN = os.environ['RUN']; RUNDIR = f'.tiller/runs/{RUN}'
 
 for d in ['root', 'd01', 'd02']:
     path = f'{RUNDIR}/dispatches/{d}/settings.json'
@@ -233,14 +233,14 @@ for d in ['root', 'd01', 'd02']:
     hooks = s.get('hooks', {})
     pre = hooks.get('PreToolUse', [])
     post = hooks.get('PostToolUse', [])
-    def has_fb(block):
-        return any('fablebound hook' in (h2.get('command','') if isinstance(h2,dict) else '')
+    def has_tiller(block):
+        return any('tiller hook' in (h2.get('command','') if isinstance(h2,dict) else '')
                    for h in block for h2 in (h.get('hooks',[]) if isinstance(h,dict) else []))
-    print(f'{d}: PreToolUse fablebound={has_fb(pre)}, PostToolUse fablebound={has_fb(post)}')
+    print(f'{d}: PreToolUse tiller={has_tiller(pre)}, PostToolUse tiller={has_tiller(post)}')
 EOF
 ```
 
-**Expected**: All three dispatches (root, d01, d02) print `PreToolUse fablebound=True, PostToolUse fablebound=True`.
+**Expected**: All three dispatches (root, d01, d02) print `PreToolUse tiller=True, PostToolUse tiller=True`.
 
 ---
 
@@ -253,12 +253,12 @@ regressions.
 
 ```sh
 # Basic usage: replay against the most recent run.
-RUN=$(ls .fablebound/runs/ | sort | tail -1)
+RUN=$(ls .tiller/runs/ | sort | tail -1)
 ARBITER_BIN=/tmp/arbiter make policy-replay RUN="$RUN"
 # Expected output (no regressions):
-#   === replaying toolgate.arb against .fablebound/runs/<id>/audit/toolgate.jsonl ===
+#   === replaying toolgate.arb against .tiller/runs/<id>/audit/toolgate.jsonl ===
 #   changed: 0  unchanged: N
-#   === replaying dispatch.arb against .fablebound/runs/<id>/audit/dispatch.jsonl ===
+#   === replaying dispatch.arb against .tiller/runs/<id>/audit/dispatch.jsonl ===
 #   changed: 0  unchanged: 2
 #   replay complete: no diffs
 ```

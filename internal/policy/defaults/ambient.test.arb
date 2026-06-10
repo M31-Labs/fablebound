@@ -1,5 +1,5 @@
-# Tests for ambient.arb — fablebound ambient orchestrator-only gate.
-# Applied when FABLEBOUND_ROLE is unset and the session model is fable.
+# Tests for ambient.arb — tiller ambient orchestrator-only gate.
+# Applied when TILLER_ROLE is unset and the session model is fable.
 # Denied: Edit, Write, NotebookEdit, Bash.
 # Allowed: Read, Glob, Grep, Agent, TodoWrite, WebFetch.
 # No match → deny (combinator default).

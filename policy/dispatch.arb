@@ -1,4 +1,4 @@
-# fablebound dispatch policy. Input schema: DispatchRequest (arbiter check'd).
+# tiller dispatch policy. Input schema: DispatchRequest (arbiter check'd).
 # Depth semantics: spawn capability exists at exactly two levels — depth 0
 # (root orchestrator) and depth 1. Depth >= 2 is terminal (fail-closed).
 #
@@ -20,7 +20,7 @@ segment execution_caller {
 rule HaltAll priority 0 {
     kill_switch
     when { true }
-    then Deny { reason: "fablebound emergency halt" }
+    then Deny { reason: "tiller emergency halt" }
 }
 
 rule DenyFableForExecution priority 1 {

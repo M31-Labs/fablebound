@@ -4,7 +4,7 @@
       {
         "hooks": [
           {
-            "command": "fablebound hook",
+            "command": "tiller hook",
             "type": "command"
           }
         ],
@@ -15,7 +15,7 @@
       {
         "hooks": [
           {
-            "command": "fablebound hook",
+            "command": "tiller hook",
             "type": "command"
           }
         ],
@@ -28,7 +28,7 @@
       "Read",
       "Glob",
       "Grep",
-      "Bash(fablebound note *)",
+      "Bash(tiller note *)",
       "Bash(hypha *)"
     ],
     "ask": [],

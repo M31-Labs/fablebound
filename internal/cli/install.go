@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"m31labs.dev/fablebound/internal/agents"
+	"m31labs.dev/tiller/internal/agents"
 )
 
 // settingsHookEntry is a single hook entry in the Claude Code settings JSON.
@@ -23,11 +23,11 @@ type settingsHookCommand struct {
 	Command string `json:"command"`
 }
 
-// runInstall implements `fablebound install [--print] [--project]`.
+// runInstall implements `tiller install [--print] [--project]`.
 // Idempotently:
 //
 //	(a) merges PreToolUse + PostToolUse hook entries into settings.json, and
-//	(b) writes the fb-* subagent definition files into the agents/ directory.
+//	(b) writes the tiller-* subagent definition files into the agents/ directory.
 //
 // --print: show what would change, write nothing.
 // --project: install into ./.claude/ instead of ~/.claude/ (repo-local scope).
@@ -69,15 +69,15 @@ func runInstall(args []string) error {
 
 	added := mergeHookEntries(settings, entry)
 	if len(added) == 0 {
-		fmt.Println("fablebound: hooks already installed in", settingsPath)
+		fmt.Println("tiller: hooks already installed in", settingsPath)
 	} else {
 		if err := writeSettings(settingsPath, settings); err != nil {
 			return fmt.Errorf("write settings: %w", err)
 		}
 		for _, ev := range added {
-			fmt.Printf("fablebound: added %s hook → %s\n", ev, command)
+			fmt.Printf("tiller: added %s hook → %s\n", ev, command)
 		}
-		fmt.Println("fablebound: hooks installed in", settingsPath)
+		fmt.Println("tiller: hooks installed in", settingsPath)
 	}
 
 	// ── (b) Agents ────────────────────────────────────────────────────────────
@@ -86,12 +86,12 @@ func runInstall(args []string) error {
 		return fmt.Errorf("install agents: %w", err)
 	}
 	if len(written) == 0 {
-		fmt.Println("fablebound: fb-* agents already up-to-date in", agentsDir)
+		fmt.Println("tiller: tiller-* agents already up-to-date in", agentsDir)
 	} else {
 		for _, name := range written {
-			fmt.Printf("fablebound: wrote agent → %s\n", filepath.Join(agentsDir, name))
+			fmt.Printf("tiller: wrote agent → %s\n", filepath.Join(agentsDir, name))
 		}
-		fmt.Println("fablebound: agents installed in", agentsDir)
+		fmt.Println("tiller: agents installed in", agentsDir)
 	}
 
 	return nil
@@ -99,7 +99,7 @@ func runInstall(args []string) error {
 
 // printInstallPlan prints what install would do without writing anything.
 func printInstallPlan(settingsPath, agentsDir string, entry settingsHookEntry, command string) error {
-	fmt.Println("# fablebound install --print (no files written)")
+	fmt.Println("# tiller install --print (no files written)")
 	fmt.Println()
 
 	// Hook snippet.
@@ -117,15 +117,15 @@ func printInstallPlan(settingsPath, agentsDir string, entry settingsHookEntry, c
 	agentFS := agents.EmbeddedDefaults()
 	entries, _ := fs.ReadDir(agentFS, ".")
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), "fb-") {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), "tiller-") {
 			fmt.Printf("  %s\n", filepath.Join(agentsDir, e.Name()))
 		}
 	}
 	return nil
 }
 
-// runUninstall implements `fablebound uninstall [--print] [--project]`.
-// Removes only fablebound's hook entries and fb-*.md agent files.
+// runUninstall implements `tiller uninstall [--print] [--project]`.
+// Removes only tiller's hook entries and tiller-*.md agent files.
 func runUninstall(args []string) error {
 	fset := flag.NewFlagSet("uninstall", flag.ContinueOnError)
 	printOnly := fset.Bool("print", false, "print what would be removed without writing")
@@ -145,10 +145,10 @@ func runUninstall(args []string) error {
 	}
 
 	removedHooks := removeHookEntries(settings)
-	agentFiles := fbAgentFilesIn(agentsDir)
+	agentFiles := tillerAgentFilesIn(agentsDir)
 
 	if len(removedHooks) == 0 && len(agentFiles) == 0 {
-		fmt.Println("fablebound: nothing to uninstall")
+		fmt.Println("tiller: nothing to uninstall")
 		return nil
 	}
 
@@ -168,7 +168,7 @@ func runUninstall(args []string) error {
 			return fmt.Errorf("write settings: %w", err)
 		}
 		for _, ev := range removedHooks {
-			fmt.Printf("fablebound: removed %s hook entry from %s\n", ev, settingsPath)
+			fmt.Printf("tiller: removed %s hook entry from %s\n", ev, settingsPath)
 		}
 	}
 
@@ -178,10 +178,10 @@ func runUninstall(args []string) error {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove agent %s: %w", p, err)
 		}
-		fmt.Printf("fablebound: removed agent %s\n", p)
+		fmt.Printf("tiller: removed agent %s\n", p)
 	}
 
-	fmt.Println("fablebound: uninstalled")
+	fmt.Println("tiller: uninstalled")
 	return nil
 }
 
@@ -215,7 +215,7 @@ func claudeSettingsPath() (string, error) {
 	return filepath.Join(home, ".claude", "settings.json"), nil
 }
 
-// installAgents writes the embedded fb-*.md files into agentsDir.
+// installAgents writes the embedded tiller-*.md files into agentsDir.
 // If dryRun is true it returns the list of names that would be written without
 // writing anything.  Only fb-* files are touched (non-fb files are left alone).
 // Returns the list of files actually written (or that would be written).
@@ -234,7 +234,7 @@ func installAgents(agentsDir string, dryRun bool) ([]string, error) {
 
 	var written []string
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), "fb-") {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "tiller-") {
 			continue
 		}
 		dest := filepath.Join(agentsDir, e.Name())
@@ -262,15 +262,15 @@ func installAgents(agentsDir string, dryRun bool) ([]string, error) {
 	return written, nil
 }
 
-// fbAgentFilesIn returns the list of fb-*.md filenames present in agentsDir.
-func fbAgentFilesIn(agentsDir string) []string {
+// tillerAgentFilesIn returns the list of tiller-*.md filenames present in agentsDir.
+func tillerAgentFilesIn(agentsDir string) []string {
 	entries, err := os.ReadDir(agentsDir)
 	if err != nil {
 		return nil
 	}
 	var out []string
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), "fb-") && strings.HasSuffix(e.Name(), ".md") {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), "tiller-") && strings.HasSuffix(e.Name(), ".md") {
 			out = append(out, e.Name())
 		}
 	}
@@ -307,9 +307,9 @@ func writeSettings(path string, settings map[string]interface{}) error {
 	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
-// hookCommandMatches returns true if the hook command string is a fablebound hook entry.
+// hookCommandMatches returns true if the hook command string is a tiller hook entry.
 func hookCommandMatches(cmd string) bool {
-	// cmd should end with " hook" and have "fablebound" as the binary base name.
+	// cmd should end with " hook" and have "tiller" as the binary base name.
 	if len(cmd) < 4 {
 		return false
 	}
@@ -318,7 +318,7 @@ func hookCommandMatches(cmd string) bool {
 	}
 	binary := cmd[:len(cmd)-5]
 	base := filepath.Base(binary)
-	return base == "fablebound"
+	return base == "tiller"
 }
 
 // mergeHookEntries adds entry to settings under hooks.PreToolUse and
@@ -382,7 +382,7 @@ func mergeHookList(hooks map[string]interface{}, eventName string, entry setting
 	return true
 }
 
-// removeHookEntries removes all fablebound hook entries from settings.
+// removeHookEntries removes all tiller hook entries from settings.
 // Returns the list of event names from which entries were removed.
 func removeHookEntries(settings map[string]interface{}) []string {
 	hooksRaw, ok := settings["hooks"]
@@ -404,7 +404,7 @@ func removeHookEntries(settings map[string]interface{}) []string {
 		if !ok {
 			continue
 		}
-		filtered := filterFableboundEntries(list)
+		filtered := filterTillerEntries(list)
 		if len(filtered) < len(list) {
 			removed = append(removed, eventName)
 			hooks[eventName] = filtered
@@ -414,8 +414,8 @@ func removeHookEntries(settings map[string]interface{}) []string {
 	return removed
 }
 
-// filterFableboundEntries removes hook entries whose command is a fablebound hook.
-func filterFableboundEntries(list []interface{}) []interface{} {
+// filterTillerEntries removes hook entries whose command is a tiller hook.
+func filterTillerEntries(list []interface{}) []interface{} {
 	var out []interface{}
 	for _, item := range list {
 		m, ok := item.(map[string]interface{})
@@ -428,18 +428,18 @@ func filterFableboundEntries(list []interface{}) []interface{} {
 			out = append(out, item)
 			continue
 		}
-		hasFablebound := false
+		hasTiller := false
 		for _, h := range hooksRaw {
 			hm, ok := h.(map[string]interface{})
 			if !ok {
 				continue
 			}
 			if cmd, ok := hm["command"].(string); ok && hookCommandMatches(cmd) {
-				hasFablebound = true
+				hasTiller = true
 				break
 			}
 		}
-		if !hasFablebound {
+		if !hasTiller {
 			out = append(out, item)
 		}
 	}

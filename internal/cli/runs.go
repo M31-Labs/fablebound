@@ -9,10 +9,10 @@ import (
 	"sort"
 	"text/tabwriter"
 
-	"m31labs.dev/fablebound/internal/run"
+	"m31labs.dev/tiller/internal/run"
 )
 
-// runRuns is the handler for `fablebound runs list|show|gc`.
+// runRuns is the handler for `tiller runs list|show|gc`.
 func runRuns(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("runs: subcommand required: list|show|gc")
@@ -30,7 +30,7 @@ func runRuns(args []string) error {
 	}
 }
 
-// runRunsList implements `fablebound runs list`.
+// runRunsList implements `tiller runs list`.
 func runRunsList(args []string) error {
 	fs := flag.NewFlagSet("runs list", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -43,7 +43,7 @@ func runRunsList(args []string) error {
 		return fmt.Errorf("runs list: getwd: %w", err)
 	}
 
-	runsBase := filepath.Join(workspace, ".fablebound", "runs")
+	runsBase := filepath.Join(workspace, ".tiller", "runs")
 	items, err := run.ListRuns(runsBase)
 	if err != nil {
 		return fmt.Errorf("runs list: %w", err)
@@ -69,7 +69,7 @@ func runRunsList(args []string) error {
 	return w.Flush()
 }
 
-// runRunsShow implements `fablebound runs show <id> [--json]`.
+// runRunsShow implements `tiller runs show <id> [--json]`.
 // --json may appear before or after the run id.
 func runRunsShow(args []string) error {
 	fs := flag.NewFlagSet("runs show", flag.ContinueOnError)
@@ -103,7 +103,7 @@ func runRunsShow(args []string) error {
 		return fmt.Errorf("runs show: getwd: %w", err)
 	}
 
-	runsBase := filepath.Join(workspace, ".fablebound", "runs")
+	runsBase := filepath.Join(workspace, ".tiller", "runs")
 	runDir := filepath.Join(runsBase, id)
 
 	if _, err := os.Stat(runDir); err != nil {
@@ -172,7 +172,7 @@ func runRunsShowJSON(runDir string) error {
 	return nil
 }
 
-// runRunsGC implements `fablebound runs gc --keep N [--dry-run]`.
+// runRunsGC implements `tiller runs gc --keep N [--dry-run]`.
 // It deletes the oldest TERMINAL runs beyond the N most-recent ones.
 // Running runs are never deleted. --dry-run lists victims only.
 func runRunsGC(args []string) error {
@@ -197,7 +197,7 @@ func runRunsGC(args []string) error {
 		return fmt.Errorf("runs gc: getwd: %w", err)
 	}
 
-	runsBase := filepath.Join(workspace, ".fablebound", "runs")
+	runsBase := filepath.Join(workspace, ".tiller", "runs")
 	entries, err := os.ReadDir(runsBase)
 	if err != nil {
 		if os.IsNotExist(err) {

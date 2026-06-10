@@ -6,18 +6,18 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"m31labs.dev/fablebound/internal/policy"
+	"m31labs.dev/tiller/internal/policy"
 )
 
 // ClaudeArgs holds all the parameters needed to build a claude invocation.
 type ClaudeArgs struct {
-	// RunDir is the run scratch directory (FABLEBOUND_RUN_DIR for the child).
+	// RunDir is the run scratch directory (TILLER_RUN_DIR for the child).
 	RunDir string
 	// DispatchID is the id being spawned (e.g. "d01").
 	DispatchID string
 	// Role is the agent role (e.g. "investigator").
 	Role string
-	// CallerDepth is the FABLEBOUND_DEPTH of the caller; child = caller+1.
+	// CallerDepth is the TILLER_DEPTH of the caller; child = caller+1.
 	CallerDepth int
 	// Route contains model, max_turns, timeout from the policy decision.
 	Route policy.Route
@@ -29,9 +29,9 @@ type ClaudeArgs struct {
 	RolePromptPath string
 }
 
-// ClaudeBin returns the path to the claude binary, respecting FABLEBOUND_CLAUDE_BIN.
+// ClaudeBin returns the path to the claude binary, respecting TILLER_CLAUDE_BIN.
 func ClaudeBin() string {
-	if v := os.Getenv("FABLEBOUND_CLAUDE_BIN"); v != "" {
+	if v := os.Getenv("TILLER_CLAUDE_BIN"); v != "" {
 		return v
 	}
 	return "claude"
@@ -77,15 +77,15 @@ func BuildArgs(a ClaudeArgs) ([]string, error) {
 }
 
 // BuildEnv returns the environment for the spawned claude process.
-// Inherits the current process environment and overlays fablebound-specific vars.
+// Inherits the current process environment and overlays tiller-specific vars.
 func BuildEnv(a ClaudeArgs) []string {
 	childDepth := a.CallerDepth + 1
 
 	overrides := map[string]string{
-		"FABLEBOUND_DEPTH":       strconv.Itoa(childDepth),
-		"FABLEBOUND_RUN_DIR":     a.RunDir,
-		"FABLEBOUND_DISPATCH_ID": a.DispatchID,
-		"FABLEBOUND_ROLE":        a.Role,
+		"TILLER_DEPTH":       strconv.Itoa(childDepth),
+		"TILLER_RUN_DIR":     a.RunDir,
+		"TILLER_DISPATCH_ID": a.DispatchID,
+		"TILLER_ROLE":        a.Role,
 	}
 
 	// Start with the current environment, filtering out keys we override.
@@ -121,17 +121,17 @@ func kvKey(kv string) string {
 }
 
 // RolePromptPath returns the path to the role's prompt file under the run's
-// .fablebound/roles/ directory (or the workspace roles dir).
+// .tiller/roles/ directory (or the workspace roles dir).
 // It checks the project-local override first, then falls back to the embedded
-// defaults materialized by fablebound init.
+// defaults materialized by tiller init.
 func RolePromptPath(runDir, role string) string {
 	if runDir == "" {
 		return ""
 	}
-	// runDir is <workspace>/.fablebound/runs/<run-id>
+	// runDir is <workspace>/.tiller/runs/<run-id>
 	// project dir is 3 levels up
 	projectDir := filepath.Dir(filepath.Dir(filepath.Dir(runDir)))
-	candidate := filepath.Join(projectDir, ".fablebound", "roles", role+".md")
+	candidate := filepath.Join(projectDir, ".tiller", "roles", role+".md")
 	if _, err := os.Stat(candidate); err == nil {
 		return candidate
 	}

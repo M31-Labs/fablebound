@@ -11,7 +11,7 @@ import (
 // policies compile cleanly under policyVet (no arbiter CLI required for the
 // compile+hash phase).
 func TestPolicyVet_DefaultPoliciesCompile(t *testing.T) {
-	// Run from a temp dir so there is no project-local .fablebound/policy override.
+	// Run from a temp dir so there is no project-local .tiller/policy override.
 	tmpDir := t.TempDir()
 	origDir, err := os.Getwd()
 	if err != nil {
@@ -41,7 +41,7 @@ func TestPolicyVet_CorruptPolicyFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	policyDir := filepath.Join(tmpDir, ".fablebound", "policy")
+	policyDir := filepath.Join(tmpDir, ".tiller", "policy")
 	if err := os.MkdirAll(policyDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

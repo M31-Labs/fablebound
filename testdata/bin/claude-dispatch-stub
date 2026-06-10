@@ -1,36 +1,36 @@
 #!/usr/bin/env bash
 # claude-dispatch-stub — stub that dispatches a child investigator, then reports.
-# Used by runcmd_test.go to verify the full fablebound run → dispatch → complete flow.
+# Used by runcmd_test.go to verify the full tiller run → dispatch → complete flow.
 #
 # Behaviour:
-#   - If this is the root orchestrator (FABLEBOUND_ROLE=orchestrator), dispatch
+#   - If this is the root orchestrator (TILLER_ROLE=orchestrator), dispatch
 #     an investigator with a brief, also invoke the hook to populate toolgate.jsonl.
 #   - Otherwise (any other role), just emit a canned JSON result immediately.
 #
-# FABLEBOUND_DISPATCH_STUB_NO_DISPATCH — set on children to avoid recursion.
+# TILLER_DISPATCH_STUB_NO_DISPATCH — set on children to avoid recursion.
 
 set -e
 
-role="${FABLEBOUND_ROLE:-unknown}"
+role="${TILLER_ROLE:-unknown}"
 pid=$$
 
-if [ "$role" = "orchestrator" ] && [ -z "$FABLEBOUND_DISPATCH_STUB_NO_DISPATCH" ]; then
-    # Find fablebound binary on PATH or use the override.
-    fb="${FABLEBOUND_BIN:-fablebound}"
+if [ "$role" = "orchestrator" ] && [ -z "$TILLER_DISPATCH_STUB_NO_DISPATCH" ]; then
+    # Find tiller binary on PATH or use the override.
+    fb="${TILLER_BIN:-tiller}"
 
     # Simulate a PreToolUse hook call (Bash tool) to populate toolgate.jsonl.
     hook_event=$(cat <<HOOKEOF
 {
   "hook_event_name": "PreToolUse",
   "tool_name": "Bash",
-  "tool_input": {"command": "fablebound dispatch --role investigator --brief x"}
+  "tool_input": {"command": "tiller dispatch --role investigator --brief x"}
 }
 HOOKEOF
 )
     echo "$hook_event" | "$fb" hook >/dev/null 2>&1 || true
 
     # Dispatch a child investigator.
-    export FABLEBOUND_DISPATCH_STUB_NO_DISPATCH=1
+    export TILLER_DISPATCH_STUB_NO_DISPATCH=1
     "$fb" dispatch --role investigator --brief "Investigate the run and produce a brief report." >/dev/null 2>&1 || true
 
     text="orchestrator report: dispatched investigator"

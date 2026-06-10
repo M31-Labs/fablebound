@@ -28,7 +28,7 @@ func verdictRank(v Verdict) int {
 	}
 }
 
-// Decide applies the fablebound combinator over the matched rules returned by
+// Decide applies the tiller combinator over the matched rules returned by
 // EvalGoverned:
 //
 //   - Lowest priority number wins.

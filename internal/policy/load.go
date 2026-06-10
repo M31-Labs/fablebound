@@ -25,7 +25,7 @@ type Loaded struct {
 }
 
 // Load compiles a policy of the given kind ("dispatch" or "toolgate").
-// It prefers .fablebound/policy/<kind>.arb in projectDir over the embedded
+// It prefers .tiller/policy/<kind>.arb in projectDir over the embedded
 // default. The program is schema-typechecked against the matching Go struct.
 func Load(kind, projectDir string) (*Loaded, error) {
 	var src []byte
@@ -33,7 +33,7 @@ func Load(kind, projectDir string) (*Loaded, error) {
 
 	// Prefer project-local override.
 	if projectDir != "" {
-		candidate := filepath.Join(projectDir, ".fablebound", "policy", kind+".arb")
+		candidate := filepath.Join(projectDir, ".tiller", "policy", kind+".arb")
 		if data, err := os.ReadFile(candidate); err == nil {
 			src = data
 			path = candidate
@@ -90,7 +90,7 @@ func schemaForKind(kind string) (*ir.InputSchema, error) {
 	}
 
 	// Write to a temp file (gostruct.FromStructFile requires a path).
-	tmp, err := os.CreateTemp("", "fablebound-schemas-*.go")
+	tmp, err := os.CreateTemp("", "tiller-schemas-*.go")
 	if err != nil {
 		return nil, fmt.Errorf("create temp schemas file: %w", err)
 	}
@@ -122,7 +122,7 @@ func structNameForKind(kind string) (string, error) {
 }
 
 // EmbeddedDefaults returns an FS view of just the defaults/ subtree.
-// Used by fablebound init to copy defaults into a project.
+// Used by tiller init to copy defaults into a project.
 func EmbeddedDefaults() fs.ReadDirFS {
 	sub, err := fs.Sub(embeddedFS, "defaults")
 	if err != nil {

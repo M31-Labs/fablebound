@@ -21,14 +21,14 @@ func runCmdProjectRoot(t *testing.T) string {
 	return root
 }
 
-func buildFablebound(t *testing.T) string {
+func buildTiller(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "fablebound")
-	cmd := exec.Command("go", "build", "-o", bin, "m31labs.dev/fablebound/cmd/fablebound")
+	bin := filepath.Join(dir, "tiller")
+	cmd := exec.Command("go", "build", "-o", bin, "m31labs.dev/tiller/cmd/tiller")
 	cmd.Dir = runCmdProjectRoot(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build fablebound: %v\n%s", err, out)
+		t.Fatalf("build tiller: %v\n%s", err, out)
 	}
 	return bin
 }
@@ -43,16 +43,16 @@ func dispatchClaudeStub(t *testing.T) string {
 	return stub
 }
 
-// copyPoliciesForRun copies policy/*.arb to the project's .fablebound/policy/
-// dir (which fablebound run uses after changing cwd to workspace).
+// copyPoliciesForRun copies policy/*.arb to the project's .tiller/policy/
+// dir (which tiller run uses after changing cwd to workspace).
 func copyPoliciesForRun(t *testing.T, workspace string) {
 	t.Helper()
 	root := runCmdProjectRoot(t)
-	policyDir := filepath.Join(workspace, ".fablebound", "policy")
+	policyDir := filepath.Join(workspace, ".tiller", "policy")
 	if err := os.MkdirAll(policyDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	rolesDir := filepath.Join(workspace, ".fablebound", "roles")
+	rolesDir := filepath.Join(workspace, ".tiller", "roles")
 	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func copyPoliciesForRun(t *testing.T, workspace string) {
 
 // ── T1.6 acceptance test ──────────────────────────────────────────────────────
 
-// TestRunCommand exercises the full `fablebound run "demo"` flow with a stub
+// TestRunCommand exercises the full `tiller run "demo"` flow with a stub
 // that dispatches a child investigator.
 //
 // Acceptance criteria (plan T1.6):
@@ -78,24 +78,24 @@ func copyPoliciesForRun(t *testing.T, workspace string) {
 //   - dispatches/root and d01 both exist
 //   - both audit files non-empty
 func TestRunCommand(t *testing.T) {
-	fablebound := buildFablebound(t)
+	binary := buildTiller(t)
 	stub := dispatchClaudeStub(t)
 
 	workspace := t.TempDir()
 	copyPoliciesForRun(t, workspace)
 
 	// Build the manifest runs dir.
-	runsBase := filepath.Join(workspace, ".fablebound", "runs")
+	runsBase := filepath.Join(workspace, ".tiller", "runs")
 	if err := os.MkdirAll(runsBase, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
 	env := append(os.Environ(),
-		"FABLEBOUND_CLAUDE_BIN="+stub,
-		"FABLEBOUND_BIN="+fablebound, // for claude-dispatch-stub
+		"TILLER_CLAUDE_BIN="+stub,
+		"TILLER_BIN="+binary, // for claude-dispatch-stub
 	)
 
-	cmd := exec.Command(fablebound, "run", "demo")
+	cmd := exec.Command(binary, "run", "demo")
 	cmd.Dir = workspace
 	cmd.Env = env
 
@@ -103,7 +103,7 @@ func TestRunCommand(t *testing.T) {
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
 
-	// fablebound run blocks until the orchestrator completes.
+	// binary run blocks until the orchestrator completes.
 	// Give it 30 seconds to finish.
 	done := make(chan error, 1)
 	go func() { done <- cmd.Run() }()
@@ -111,12 +111,12 @@ func TestRunCommand(t *testing.T) {
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("fablebound run failed: %v\nstdout=%s\nstderr=%s",
+			t.Fatalf("tiller run failed: %v\nstdout=%s\nstderr=%s",
 				err, stdoutBuf.String(), stderrBuf.String())
 		}
 	case <-time.After(30 * time.Second):
 		_ = cmd.Process.Kill()
-		t.Fatalf("fablebound run timed out after 30s\nstdout=%s\nstderr=%s",
+		t.Fatalf("tiller run timed out after 30s\nstdout=%s\nstderr=%s",
 			stdoutBuf.String(), stderrBuf.String())
 	}
 
@@ -193,24 +193,24 @@ func TestRunCommand(t *testing.T) {
 // TestRunsShowAndList verifies that after a run, `runs show` and `runs list`
 // produce the correct output.
 func TestRunsShowAndList(t *testing.T) {
-	fablebound := buildFablebound(t)
+	binary := buildTiller(t)
 	stub := dispatchClaudeStub(t)
 
 	workspace := t.TempDir()
 	copyPoliciesForRun(t, workspace)
 
-	runsBase := filepath.Join(workspace, ".fablebound", "runs")
+	runsBase := filepath.Join(workspace, ".tiller", "runs")
 	if err := os.MkdirAll(runsBase, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
 	env := append(os.Environ(),
-		"FABLEBOUND_CLAUDE_BIN="+stub,
-		"FABLEBOUND_BIN="+fablebound,
+		"TILLER_CLAUDE_BIN="+stub,
+		"TILLER_BIN="+binary,
 	)
 
-	// Run fablebound run.
-	runCmd := exec.Command(fablebound, "run", "show me the money")
+	// Run binary run.
+	runCmd := exec.Command(binary, "run", "show me the money")
 	runCmd.Dir = workspace
 	runCmd.Env = env
 
@@ -219,11 +219,11 @@ func TestRunsShowAndList(t *testing.T) {
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("fablebound run failed: %v", err)
+			t.Fatalf("tiller run failed: %v", err)
 		}
 	case <-time.After(30 * time.Second):
 		_ = runCmd.Process.Kill()
-		t.Fatal("fablebound run timed out")
+		t.Fatal("tiller run timed out")
 	}
 
 	// Find the run ID.
@@ -234,7 +234,7 @@ func TestRunsShowAndList(t *testing.T) {
 	runID := entries[0].Name()
 
 	// Test `runs list` — must include the run ID and status.
-	listCmd := exec.Command(fablebound, "runs", "list")
+	listCmd := exec.Command(binary, "runs", "list")
 	listCmd.Dir = workspace
 	listCmd.Env = env
 	listOut, err := listCmd.Output()
@@ -251,7 +251,7 @@ func TestRunsShowAndList(t *testing.T) {
 	}
 
 	// Test `runs show <id>`.
-	showCmd := exec.Command(fablebound, "runs", "show", runID)
+	showCmd := exec.Command(binary, "runs", "show", runID)
 	showCmd.Dir = workspace
 	showCmd.Env = env
 	showOut, err := showCmd.Output()
@@ -273,7 +273,7 @@ func TestRunsShowAndList(t *testing.T) {
 	}
 
 	// Test `runs show <id> --json`.
-	showJSONCmd := exec.Command(fablebound, "runs", "show", runID, "--json")
+	showJSONCmd := exec.Command(binary, "runs", "show", runID, "--json")
 	showJSONCmd.Dir = workspace
 	showJSONCmd.Env = env
 	showJSONOut, err := showJSONCmd.Output()

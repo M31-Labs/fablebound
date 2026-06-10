@@ -11,19 +11,19 @@ import (
 	"testing"
 	"time"
 
-	"m31labs.dev/fablebound/internal/run"
+	"m31labs.dev/tiller/internal/run"
 )
 
-// findFablebound builds the fablebound binary and returns its path.
-func findFablebound(t *testing.T) string {
+// findTiller builds the tiller binary and returns its path.
+func findTiller(t *testing.T) string {
 	t.Helper()
 	// Build into a temp dir.
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "fablebound")
-	cmd := exec.Command("go", "build", "-o", bin, "m31labs.dev/fablebound/cmd/fablebound")
+	bin := filepath.Join(dir, "tiller")
+	cmd := exec.Command("go", "build", "-o", bin, "m31labs.dev/tiller/cmd/tiller")
 	cmd.Dir = projectRoot(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build fablebound: %v\n%s", err, out)
+		t.Fatalf("build tiller: %v\n%s", err, out)
 	}
 	return bin
 }
@@ -48,17 +48,17 @@ func claudeStub(t *testing.T) string {
 	return stub
 }
 
-// setupFixtureRun creates a minimal .fablebound run structure for testing.
-func setupFixtureRun(t *testing.T) (runDir string, fablebound string, stub string) {
+// setupFixtureRun creates a minimal .tiller run structure for testing.
+func setupFixtureRun(t *testing.T) (runDir string, binary string, stub string) {
 	t.Helper()
 
-	fablebound = findFablebound(t)
+	binary = findTiller(t)
 	stub = claudeStub(t)
 
 	workspace := t.TempDir()
 
-	// Create .fablebound structure (like fablebound init would).
-	runBase := filepath.Join(workspace, ".fablebound", "runs")
+	// Create .tiller structure (like tiller init would).
+	runBase := filepath.Join(workspace, ".tiller", "runs")
 	if err := os.MkdirAll(runBase, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -84,20 +84,20 @@ func setupFixtureRun(t *testing.T) (runDir string, fablebound string, stub strin
 		t.Fatal(err)
 	}
 
-	// Copy embedded default policies to .fablebound/policy/ so dispatch can load them.
-	policyDir := filepath.Join(workspace, ".fablebound", "policy")
+	// Copy embedded default policies to .tiller/policy/ so dispatch can load them.
+	policyDir := filepath.Join(workspace, ".tiller", "policy")
 	if err := os.MkdirAll(policyDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	copyEmbeddedPolicies(t, projectRoot(t), policyDir)
 
 	// Copy embedded default roles.
-	rolesDir := filepath.Join(workspace, ".fablebound", "roles")
+	rolesDir := filepath.Join(workspace, ".tiller", "roles")
 	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	return runDir, fablebound, stub
+	return runDir, binary, stub
 }
 
 // copyEmbeddedPolicies copies policy/*.arb from the project root into the target dir.
@@ -123,7 +123,7 @@ func copyEmbeddedPolicies(t *testing.T, root, target string) {
 //   - caller's context_trace.jsonl gains kind:"dispatch" (child d01)
 //   - d01's context_trace.jsonl gains kind:"report"
 func TestDispatchAllowPath(t *testing.T) {
-	runDir, fablebound, stub := setupFixtureRun(t)
+	runDir, binary, stub := setupFixtureRun(t)
 	runID := filepath.Base(runDir)
 	_ = runID
 
@@ -147,14 +147,14 @@ func TestDispatchAllowPath(t *testing.T) {
 	}
 
 	env := append(os.Environ(),
-		"FABLEBOUND_RUN_DIR="+runDir,
-		"FABLEBOUND_ROLE=orchestrator",
-		"FABLEBOUND_DEPTH=0",
-		"FABLEBOUND_DISPATCH_ID=root",
-		"FABLEBOUND_CLAUDE_BIN="+stub,
+		"TILLER_RUN_DIR="+runDir,
+		"TILLER_ROLE=orchestrator",
+		"TILLER_DEPTH=0",
+		"TILLER_DISPATCH_ID=root",
+		"TILLER_CLAUDE_BIN="+stub,
 	)
 
-	cmd := exec.Command(fablebound, "dispatch", "--role", "investigator", "--brief", "test brief content")
+	cmd := exec.Command(binary, "dispatch", "--role", "investigator", "--brief", "test brief content")
 	cmd.Env = env
 	out, err := cmd.Output()
 	if err != nil {
@@ -254,7 +254,7 @@ func TestDispatchAllowPath(t *testing.T) {
 // TestDispatchDenyWorkerFable verifies that dispatching a worker with model=fable
 // results in exit 3 and "DenyFableForExecution" on stderr.
 func TestDispatchDenyWorkerFable(t *testing.T) {
-	runDir, fablebound, stub := setupFixtureRun(t)
+	runDir, binary, stub := setupFixtureRun(t)
 
 	// Create a root dispatch so context trace has somewhere to write.
 	rootDispatchDir := filepath.Join(runDir, "dispatches", "root")
@@ -275,14 +275,14 @@ func TestDispatchDenyWorkerFable(t *testing.T) {
 	}
 
 	env := append(os.Environ(),
-		"FABLEBOUND_RUN_DIR="+runDir,
-		"FABLEBOUND_ROLE=orchestrator",
-		"FABLEBOUND_DEPTH=0",
-		"FABLEBOUND_DISPATCH_ID=root",
-		"FABLEBOUND_CLAUDE_BIN="+stub,
+		"TILLER_RUN_DIR="+runDir,
+		"TILLER_ROLE=orchestrator",
+		"TILLER_DEPTH=0",
+		"TILLER_DISPATCH_ID=root",
+		"TILLER_CLAUDE_BIN="+stub,
 	)
 
-	cmd := exec.Command(fablebound, "dispatch", "--role", "worker", "--model", "fable", "--brief", "test")
+	cmd := exec.Command(binary, "dispatch", "--role", "worker", "--model", "fable", "--brief", "test")
 	cmd.Env = env
 	var stderrBuf strings.Builder
 	cmd.Stderr = &stderrBuf
@@ -302,10 +302,10 @@ func TestDispatchDenyWorkerFable(t *testing.T) {
 	}
 }
 
-// TestDispatchDenyTerminalDepth verifies that FABLEBOUND_DEPTH=2 results in
+// TestDispatchDenyTerminalDepth verifies that TILLER_DEPTH=2 results in
 // exit 3 with DenyTerminalDepth.
 func TestDispatchDenyTerminalDepth(t *testing.T) {
-	runDir, fablebound, stub := setupFixtureRun(t)
+	runDir, binary, stub := setupFixtureRun(t)
 
 	// Create a d01 dispatch dir to serve as the "caller" at depth 2.
 	d01Dir := filepath.Join(runDir, "dispatches", "d01")
@@ -326,14 +326,14 @@ func TestDispatchDenyTerminalDepth(t *testing.T) {
 	}
 
 	env := append(os.Environ(),
-		"FABLEBOUND_RUN_DIR="+runDir,
-		"FABLEBOUND_ROLE=worker",
-		"FABLEBOUND_DEPTH=2",
-		"FABLEBOUND_DISPATCH_ID=d01",
-		"FABLEBOUND_CLAUDE_BIN="+stub,
+		"TILLER_RUN_DIR="+runDir,
+		"TILLER_ROLE=worker",
+		"TILLER_DEPTH=2",
+		"TILLER_DISPATCH_ID=d01",
+		"TILLER_CLAUDE_BIN="+stub,
 	)
 
-	cmd := exec.Command(fablebound, "dispatch", "--role", "investigator", "--brief", "test")
+	cmd := exec.Command(binary, "dispatch", "--role", "investigator", "--brief", "test")
 	cmd.Env = env
 	var stderrBuf strings.Builder
 	cmd.Stderr = &stderrBuf
@@ -361,7 +361,7 @@ func TestDispatchTimeoutRunning(t *testing.T) {
 		t.Skip("skipping timeout test in short mode")
 	}
 
-	runDir, fablebound, _ := setupFixtureRun(t)
+	runDir, binary, _ := setupFixtureRun(t)
 
 	// Use a slow stub that sleeps 3s.
 	slowStubDir := t.TempDir()
@@ -393,14 +393,14 @@ printf '{"type":"result","result":"slow report","cost_usd":0.001,"num_turns":1,"
 	}
 
 	env := append(os.Environ(),
-		"FABLEBOUND_RUN_DIR="+runDir,
-		"FABLEBOUND_ROLE=orchestrator",
-		"FABLEBOUND_DEPTH=0",
-		"FABLEBOUND_DISPATCH_ID=root",
-		"FABLEBOUND_CLAUDE_BIN="+slowStub,
+		"TILLER_RUN_DIR="+runDir,
+		"TILLER_ROLE=orchestrator",
+		"TILLER_DEPTH=0",
+		"TILLER_DISPATCH_ID=root",
+		"TILLER_CLAUDE_BIN="+slowStub,
 	)
 
-	cmd := exec.Command(fablebound, "dispatch", "--role", "investigator", "--brief", "test slow", "--timeout", "1s")
+	cmd := exec.Command(binary, "dispatch", "--role", "investigator", "--brief", "test slow", "--timeout", "1s")
 	cmd.Env = env
 	var stdoutBuf strings.Builder
 	cmd.Stdout = &stdoutBuf
@@ -438,16 +438,16 @@ printf '{"type":"result","result":"slow report","cost_usd":0.001,"num_turns":1,"
 	}
 }
 
-// TestNoteAdd verifies that `fablebound note add "text"` creates a file in notes/.
+// TestNoteAdd verifies that `tiller note add "text"` creates a file in notes/.
 func TestNoteAdd(t *testing.T) {
-	runDir, fablebound, _ := setupFixtureRun(t)
+	runDir, binary, _ := setupFixtureRun(t)
 
 	env := append(os.Environ(),
-		"FABLEBOUND_RUN_DIR="+runDir,
-		"FABLEBOUND_ROLE=orchestrator",
+		"TILLER_RUN_DIR="+runDir,
+		"TILLER_ROLE=orchestrator",
 	)
 
-	cmd := exec.Command(fablebound, "note", "add", "hello from test")
+	cmd := exec.Command(binary, "note", "add", "hello from test")
 	cmd.Env = env
 	if out, err := cmd.Output(); err != nil {
 		t.Fatalf("note add: %v\nstdout=%s\nstderr=%s", err, out, cmdStderr(cmd))
@@ -476,7 +476,7 @@ func TestNoteAdd(t *testing.T) {
 
 // TestPollAndAwait verifies that poll and await work for a terminal dispatch.
 func TestPollAndAwait(t *testing.T) {
-	runDir, fablebound, stub := setupFixtureRun(t)
+	runDir, binary, stub := setupFixtureRun(t)
 
 	// Create a completed dispatch.
 	dispatchID := "d01"
@@ -500,12 +500,12 @@ func TestPollAndAwait(t *testing.T) {
 	}
 
 	env := append(os.Environ(),
-		"FABLEBOUND_RUN_DIR="+runDir,
-		"FABLEBOUND_CLAUDE_BIN="+stub,
+		"TILLER_RUN_DIR="+runDir,
+		"TILLER_CLAUDE_BIN="+stub,
 	)
 
 	// Test poll.
-	cmd := exec.Command(fablebound, "poll", dispatchID)
+	cmd := exec.Command(binary, "poll", dispatchID)
 	cmd.Env = env
 	out, err := cmd.Output()
 	if err != nil {
@@ -516,7 +516,7 @@ func TestPollAndAwait(t *testing.T) {
 	}
 
 	// Test await (should return immediately since already terminal).
-	cmd2 := exec.Command(fablebound, "await", dispatchID, "--timeout", "1s")
+	cmd2 := exec.Command(binary, "await", dispatchID, "--timeout", "1s")
 	cmd2.Env = env
 	out2, err := cmd2.Output()
 	if err != nil {
@@ -548,11 +548,11 @@ func TestPollAndAwait(t *testing.T) {
 	start := time.Now()
 	ctx3, cancel3 := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel3()
-	cmd3 := exec.CommandContext(ctx3, fablebound, "await", runningDispatchID, "--timeout", "300ms")
-	// Use clean env without FABLEBOUND_DISPATCH_ID to avoid any side effects.
+	cmd3 := exec.CommandContext(ctx3, binary, "await", runningDispatchID, "--timeout", "300ms")
+	// Use clean env without TILLER_DISPATCH_ID to avoid any side effects.
 	cmd3.Env = []string{
-		"FABLEBOUND_RUN_DIR=" + runDir,
-		"FABLEBOUND_CLAUDE_BIN=" + stub,
+		"TILLER_RUN_DIR=" + runDir,
+		"TILLER_CLAUDE_BIN=" + stub,
 		"HOME=" + os.Getenv("HOME"),
 		"PATH=" + os.Getenv("PATH"),
 	}
@@ -583,7 +583,7 @@ func cmdStderr(cmd *exec.Cmd) string {
 // TestAuditEventFormat verifies that a dispatch audit event has the
 // expected JSON structure (kind:"rules", non-empty arbitrace, strategy).
 func TestAuditEventFormat(t *testing.T) {
-	runDir, fablebound, stub := setupFixtureRun(t)
+	runDir, binary, stub := setupFixtureRun(t)
 	runID := filepath.Base(runDir)
 	_ = runID
 
@@ -604,14 +604,14 @@ func TestAuditEventFormat(t *testing.T) {
 	}
 
 	env := append(os.Environ(),
-		"FABLEBOUND_RUN_DIR="+runDir,
-		"FABLEBOUND_ROLE=orchestrator",
-		"FABLEBOUND_DEPTH=0",
-		"FABLEBOUND_DISPATCH_ID=root",
-		"FABLEBOUND_CLAUDE_BIN="+stub,
+		"TILLER_RUN_DIR="+runDir,
+		"TILLER_ROLE=orchestrator",
+		"TILLER_DEPTH=0",
+		"TILLER_DISPATCH_ID=root",
+		"TILLER_CLAUDE_BIN="+stub,
 	)
 
-	cmd := exec.Command(fablebound, "dispatch", "--role", "investigator", "--brief", "audit test")
+	cmd := exec.Command(binary, "dispatch", "--role", "investigator", "--brief", "audit test")
 	cmd.Env = env
 	out, err := cmd.Output()
 	if err != nil {

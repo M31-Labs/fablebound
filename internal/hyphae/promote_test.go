@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"m31labs.dev/fablebound/internal/run"
+	"m31labs.dev/tiller/internal/run"
 )
 
 // makeFixtureRun creates a minimal run fixture under tmpDir and returns the
@@ -15,7 +15,7 @@ import (
 func makeFixtureRun(t *testing.T, tmpDir string) string {
 	t.Helper()
 
-	runsBase := filepath.Join(tmpDir, ".fablebound", "runs")
+	runsBase := filepath.Join(tmpDir, ".tiller", "runs")
 	store := run.NewStore(runsBase)
 	runID, err := store.CreateRun()
 	if err != nil {
@@ -78,7 +78,7 @@ func makeFixtureRun(t *testing.T, tmpDir string) string {
 		t.Fatalf("write d01 meta: %v", err)
 	}
 	d01Report := filepath.Join(runDir, "dispatches", "d01", "report.md")
-	if err := os.WriteFile(d01Report, []byte("Investigation complete: the main entry point is cmd/fablebound/main.go.\n"), 0o644); err != nil {
+	if err := os.WriteFile(d01Report, []byte("Investigation complete: the main entry point is cmd/tiller/main.go.\n"), 0o644); err != nil {
 		t.Fatalf("write d01 report: %v", err)
 	}
 

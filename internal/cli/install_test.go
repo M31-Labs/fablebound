@@ -12,7 +12,7 @@ func TestMergeHookEntries_FreshSettings(t *testing.T) {
 	settings := map[string]interface{}{}
 	entry := settingsHookEntry{
 		Matcher: ".*",
-		Hooks:   []settingsHookCommand{{Type: "command", Command: "/usr/local/bin/fablebound hook"}},
+		Hooks:   []settingsHookCommand{{Type: "command", Command: "/usr/local/bin/tiller hook"}},
 	}
 	added := mergeHookEntries(settings, entry)
 	if len(added) != 2 {
@@ -31,7 +31,7 @@ func TestMergeHookEntries_Idempotent(t *testing.T) {
 	settings := map[string]interface{}{}
 	entry := settingsHookEntry{
 		Matcher: ".*",
-		Hooks:   []settingsHookCommand{{Type: "command", Command: "/usr/local/bin/fablebound hook"}},
+		Hooks:   []settingsHookCommand{{Type: "command", Command: "/usr/local/bin/tiller hook"}},
 	}
 	// First install.
 	added1 := mergeHookEntries(settings, entry)
@@ -62,23 +62,23 @@ func TestMergeHookEntries_PreservesExistingHooks(t *testing.T) {
 	}
 	entry := settingsHookEntry{
 		Matcher: ".*",
-		Hooks:   []settingsHookCommand{{Type: "command", Command: "/usr/local/bin/fablebound hook"}},
+		Hooks:   []settingsHookCommand{{Type: "command", Command: "/usr/local/bin/tiller hook"}},
 	}
 	added := mergeHookEntries(settings, entry)
-	// PreToolUse already has one entry; fablebound adds another.
-	// PostToolUse is empty; fablebound adds one.
+	// PreToolUse already has one entry; tiller adds another.
+	// PostToolUse is empty; tiller adds one.
 	if len(added) != 2 {
 		t.Fatalf("expected 2 additions, got %d: %v", len(added), added)
 	}
 	hooks := settings["hooks"].(map[string]interface{})
 	preList := hooks["PreToolUse"].([]interface{})
 	if len(preList) != 2 {
-		t.Errorf("PreToolUse: expected 2 entries (existing + fablebound), got %d", len(preList))
+		t.Errorf("PreToolUse: expected 2 entries (existing + tiller), got %d", len(preList))
 	}
 }
 
-func TestRemoveHookEntries_RemovesFablebound(t *testing.T) {
-	cmd := "/usr/local/bin/fablebound hook"
+func TestRemoveHookEntries_RemovesTiller(t *testing.T) {
+	cmd := "/usr/local/bin/tiller hook"
 	settings := map[string]interface{}{
 		"hooks": map[string]interface{}{
 			"PreToolUse": []interface{}{
@@ -113,7 +113,7 @@ func TestRemoveHookEntries_RemovesFablebound(t *testing.T) {
 }
 
 func TestRemoveHookEntries_PreservesOtherHooks(t *testing.T) {
-	cmd := "/usr/local/bin/fablebound hook"
+	cmd := "/usr/local/bin/tiller hook"
 	other := map[string]interface{}{
 		"matcher": ".*",
 		"hooks":   []interface{}{map[string]interface{}{"type": "command", "command": "other-tool"}},
@@ -153,7 +153,7 @@ func TestInstallUninstallRoundtrip(t *testing.T) {
 	tmpHome := t.TempDir()
 	settingsPath := filepath.Join(tmpHome, ".claude", "settings.json")
 
-	cmd := "/usr/local/bin/fablebound hook"
+	cmd := "/usr/local/bin/tiller hook"
 	entry := settingsHookEntry{
 		Matcher: ".*",
 		Hooks:   []settingsHookCommand{{Type: "command", Command: cmd}},
@@ -235,7 +235,7 @@ func TestInstallPreservesExistingKeys(t *testing.T) {
 	}
 	entry := settingsHookEntry{
 		Matcher: ".*",
-		Hooks:   []settingsHookCommand{{Type: "command", Command: "/usr/local/bin/fablebound hook"}},
+		Hooks:   []settingsHookCommand{{Type: "command", Command: "/usr/local/bin/tiller hook"}},
 	}
 	mergeHookEntries(settings, entry)
 	if err := writeSettings(settingsPath, settings); err != nil {
@@ -260,7 +260,7 @@ func TestInstallPreservesExistingKeys(t *testing.T) {
 
 // ── Agent file tests ──────────────────────────────────────────────────────────
 
-// TestInstallAgents_FreshDir verifies that installAgents writes all 6 fb-* files
+// TestInstallAgents_FreshDir verifies that installAgents writes all 6 tiller-* files
 // into an empty directory.
 func TestInstallAgents_FreshDir(t *testing.T) {
 	agentsDir := filepath.Join(t.TempDir(), "agents")
@@ -272,9 +272,9 @@ func TestInstallAgents_FreshDir(t *testing.T) {
 	if len(written) != wantCount {
 		t.Fatalf("expected %d files written, got %d: %v", wantCount, len(written), written)
 	}
-	// Verify all written files are fb-*.md and exist on disk.
+	// Verify all written files are tiller-*.md and exist on disk.
 	for _, name := range written {
-		if !strings.HasPrefix(name, "fb-") || !strings.HasSuffix(name, ".md") {
+		if !strings.HasPrefix(name, "tiller-") || !strings.HasSuffix(name, ".md") {
 			t.Errorf("unexpected filename %q", name)
 		}
 		p := filepath.Join(agentsDir, name)
@@ -306,22 +306,22 @@ func TestInstallAgents_Idempotent(t *testing.T) {
 	}
 }
 
-// TestInstallAgents_ContentCheck verifies fb-worker.md exists with model: sonnet.
+// TestInstallAgents_ContentCheck verifies tiller-worker.md exists with model: sonnet.
 func TestInstallAgents_ContentCheck(t *testing.T) {
 	agentsDir := filepath.Join(t.TempDir(), "agents")
 	if _, err := installAgents(agentsDir, false); err != nil {
 		t.Fatalf("installAgents: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(agentsDir, "fb-worker.md"))
+	data, err := os.ReadFile(filepath.Join(agentsDir, "tiller-worker.md"))
 	if err != nil {
-		t.Fatalf("fb-worker.md not found: %v", err)
+		t.Fatalf("tiller-worker.md not found: %v", err)
 	}
 	if !strings.Contains(string(data), "model: sonnet") {
-		t.Errorf("fb-worker.md missing 'model: sonnet'; content:\n%s", string(data))
+		t.Errorf("tiller-worker.md missing 'model: sonnet'; content:\n%s", string(data))
 	}
 }
 
-// TestUninstallAgents_RemovesOnlyFbFiles verifies that uninstall removes fb-*.md
+// TestUninstallAgents_RemovesOnlyFbFiles verifies that uninstall removes tiller-*.md
 // files but leaves other files untouched.
 func TestUninstallAgents_RemovesOnlyFbFiles(t *testing.T) {
 	agentsDir := filepath.Join(t.TempDir(), "agents")
@@ -329,7 +329,7 @@ func TestUninstallAgents_RemovesOnlyFbFiles(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	// Install fb-* agents.
+	// Install tiller-* agents.
 	if _, err := installAgents(agentsDir, false); err != nil {
 		t.Fatalf("installAgents: %v", err)
 	}
@@ -340,10 +340,10 @@ func TestUninstallAgents_RemovesOnlyFbFiles(t *testing.T) {
 		t.Fatalf("write other agent: %v", err)
 	}
 
-	// Uninstall: fbAgentFilesIn + remove.
-	removed := fbAgentFilesIn(agentsDir)
+	// Uninstall: tillerAgentFilesIn + remove.
+	removed := tillerAgentFilesIn(agentsDir)
 	if len(removed) == 0 {
-		t.Fatal("expected fb-* files to be found for removal")
+		t.Fatal("expected tiller-* files to be found for removal")
 	}
 	for _, name := range removed {
 		p := filepath.Join(agentsDir, name)
@@ -356,10 +356,10 @@ func TestUninstallAgents_RemovesOnlyFbFiles(t *testing.T) {
 	if _, err := os.Stat(otherPath); err != nil {
 		t.Errorf("non-fb agent was unexpectedly removed: %v", err)
 	}
-	// No fb-* files should remain.
-	remaining := fbAgentFilesIn(agentsDir)
+	// No tiller-* files should remain.
+	remaining := tillerAgentFilesIn(agentsDir)
 	if len(remaining) != 0 {
-		t.Errorf("fb-* files still present after uninstall: %v", remaining)
+		t.Errorf("tiller-* files still present after uninstall: %v", remaining)
 	}
 }
 
@@ -380,7 +380,7 @@ func TestFullInstallUninstall_WithAgents(t *testing.T) {
 	}
 
 	// Install hooks.
-	cmd := "/tmp/fablebound hook"
+	cmd := "/tmp/tiller hook"
 	entry := settingsHookEntry{
 		Matcher: ".*",
 		Hooks:   []settingsHookCommand{{Type: "command", Command: cmd}},
@@ -394,10 +394,10 @@ func TestFullInstallUninstall_WithAgents(t *testing.T) {
 		t.Fatalf("writeSettings: %v", err)
 	}
 
-	// Verify fb-worker.md exists.
-	workerPath := filepath.Join(agentsDir, "fb-worker.md")
+	// Verify tiller-worker.md exists.
+	workerPath := filepath.Join(agentsDir, "tiller-worker.md")
 	if _, err := os.Stat(workerPath); err != nil {
-		t.Fatalf("fb-worker.md not found after install: %v", err)
+		t.Fatalf("tiller-worker.md not found after install: %v", err)
 	}
 
 	// Verify settings has hooks.
@@ -423,17 +423,17 @@ func TestFullInstallUninstall_WithAgents(t *testing.T) {
 	}
 
 	// Uninstall agents.
-	agentFiles := fbAgentFilesIn(agentsDir)
+	agentFiles := tillerAgentFilesIn(agentsDir)
 	if len(agentFiles) != 6 {
-		t.Fatalf("expected 6 fb-* files for removal, got %d", len(agentFiles))
+		t.Fatalf("expected 6 tiller-* files for removal, got %d", len(agentFiles))
 	}
 	for _, name := range agentFiles {
 		os.Remove(filepath.Join(agentsDir, name))
 	}
 
 	// Verify all cleaned up.
-	remaining := fbAgentFilesIn(agentsDir)
+	remaining := tillerAgentFilesIn(agentsDir)
 	if len(remaining) != 0 {
-		t.Errorf("fb-* files remain after uninstall: %v", remaining)
+		t.Errorf("tiller-* files remain after uninstall: %v", remaining)
 	}
 }

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"m31labs.dev/fablebound/internal/run"
+	"m31labs.dev/tiller/internal/run"
 )
 
 // ── ID tests ──────────────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ func TestCurrentRunDir_FromEnv(t *testing.T) {
 	}
 	runDir := s.RunDir(id)
 
-	t.Setenv("FABLEBOUND_RUN_DIR", runDir)
+	t.Setenv("TILLER_RUN_DIR", runDir)
 	got, err := run.CurrentRunDir()
 	if err != nil {
 		t.Fatalf("CurrentRunDir: %v", err)
@@ -101,10 +101,10 @@ func TestCurrentRunDir_FromEnv(t *testing.T) {
 }
 
 func TestCurrentRunDir_Unset(t *testing.T) {
-	t.Setenv("FABLEBOUND_RUN_DIR", "")
+	t.Setenv("TILLER_RUN_DIR", "")
 	_, err := run.CurrentRunDir()
 	if err == nil {
-		t.Fatal("expected error when FABLEBOUND_RUN_DIR is unset")
+		t.Fatal("expected error when TILLER_RUN_DIR is unset")
 	}
 }
 

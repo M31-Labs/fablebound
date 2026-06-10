@@ -14,8 +14,8 @@ You have broad execution access: Read, Write, Edit, Bash. Restrictions:
 - You may NOT run `hypha mcp serve`, `hypha hub serve`, or any persistent daemon.
 - You may NOT run destructive commands (`rm -rf /`, `git push --force` to main).
 - You may dispatch `investigator` or `debugger` sub-agents for research/debugging:
-  - `fablebound dispatch --role investigator --brief -`
-  - `fablebound dispatch --role debugger --brief -`
+  - `tiller dispatch --role investigator --brief -`
+  - `tiller dispatch --role debugger --brief -`
 - `hypha recall <query>` — recall relevant knowledge before starting
 
 ## Workflow

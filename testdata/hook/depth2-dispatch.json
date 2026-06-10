@@ -2,6 +2,6 @@
   "hook_event_name": "PreToolUse",
   "tool_name": "Bash",
   "tool_input": {
-    "command": "fablebound dispatch --role investigator --brief investigate this"
+    "command": "tiller dispatch --role investigator --brief investigate this"
   }
 }

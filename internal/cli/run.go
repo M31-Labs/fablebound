@@ -9,13 +9,13 @@ import (
 	"syscall"
 	"time"
 
-	"m31labs.dev/fablebound/internal/hyphae"
-	"m31labs.dev/fablebound/internal/policy"
-	"m31labs.dev/fablebound/internal/run"
-	"m31labs.dev/fablebound/internal/spawn"
+	"m31labs.dev/tiller/internal/hyphae"
+	"m31labs.dev/tiller/internal/policy"
+	"m31labs.dev/tiller/internal/run"
+	"m31labs.dev/tiller/internal/spawn"
 )
 
-// runRun is the handler for `fablebound run "<task>"`.
+// runRun is the handler for `tiller run "<task>"`.
 // It creates the run scratch space, generates orchestrator settings,
 // spawns the orchestrator as dispatch "root", waits for it to complete,
 // then finalizes the manifest.
@@ -34,7 +34,7 @@ func runRun(args []string) error {
 
 	taskArgs := fs.Args()
 	if len(taskArgs) == 0 {
-		return fmt.Errorf("run: a task description is required (e.g. fablebound run \"my task\")")
+		return fmt.Errorf("run: a task description is required (e.g. tiller run \"my task\")")
 	}
 	task := strings.Join(taskArgs, " ")
 
@@ -50,7 +50,7 @@ func runRun(args []string) error {
 	}
 
 	// Resolve/ensure the runs directory.
-	runsBase := filepath.Join(workspace, ".fablebound", "runs")
+	runsBase := filepath.Join(workspace, ".tiller", "runs")
 	if err := os.MkdirAll(runsBase, 0o755); err != nil {
 		return fmt.Errorf("run: create runs dir: %w", err)
 	}
@@ -100,7 +100,7 @@ func runRun(args []string) error {
 	// Open a hypha trace (soft-fail: missing hypha must never fail the run).
 	{
 		hyp := hyphae.New(func(format string, args ...any) {
-			fmt.Fprintf(os.Stderr, "fablebound run [hypha]: "+format+"\n", args...)
+			fmt.Fprintf(os.Stderr, "tiller run [hypha]: "+format+"\n", args...)
 		})
 		phase := run.FirstLine(task)
 		traceID := hyp.TraceStart(runID, phase, "")
@@ -152,8 +152,8 @@ func runRun(args []string) error {
 		return fmt.Errorf("run: write root meta: %w", err)
 	}
 
-	// Find fablebound binary.
-	fablebound, err := os.Executable()
+	// Find tiller binary.
+	binary, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("run: find executable: %w", err)
 	}
@@ -161,7 +161,7 @@ func runRun(args []string) error {
 	// Spawn the root dispatch via _supervise with the orchestrator args.
 	// We use SpawnDetachedRoot which carries the orchestrator-specific args
 	// (model=fable, settings, role prompt) while also setting the root env.
-	if err := spawnRootSupervisor(fablebound, runDir, briefPath, settingsPath, rolePromptPath); err != nil {
+	if err := spawnRootSupervisor(binary, runDir, briefPath, settingsPath, rolePromptPath); err != nil {
 		return fmt.Errorf("run: spawn root supervisor: %w", err)
 	}
 
@@ -192,16 +192,16 @@ func runRun(args []string) error {
 // but we need to override the ClaudeArgs for the root — in particular the
 // role prompt path, which Supervise() builds from RolePromptPath(runDir, "orchestrator").
 // Since Supervise already handles all of this via meta.json, we just SpawnDetached.
-func spawnRootSupervisor(fablebound, runDir, briefPath, settingsPath, rolePromptPath string) error {
+func spawnRootSupervisor(binary, runDir, briefPath, settingsPath, rolePromptPath string) error {
 	_ = briefPath
 	_ = settingsPath
 	_ = rolePromptPath
-	// SpawnDetached starts `fablebound _supervise <runDir> root`.
+	// SpawnDetached starts `tiller _supervise <runDir> root`.
 	// Supervise() reads meta.json to get role/model/profile/depth,
 	// reads brief.md and settings.json from the dispatch directory,
 	// and calls RolePromptPath to find the role prompt.
 	// All of these are already written above, so a standard SpawnDetached works.
-	return spawn.SpawnDetached(fablebound, runDir, "root")
+	return spawn.SpawnDetached(binary, runDir, "root")
 }
 
 // waitForRoot polls root meta.json until terminal, with no timeout cap.
@@ -236,7 +236,7 @@ func finalizeManifest(runDir, runID string, fableBudget int) error {
 				m.EndedAt = &now
 				_ = run.WriteMeta(runDir, m)
 			} else {
-				// Grace kill: send SIGTERM to any fablebound processes watching this run.
+				// Grace kill: send SIGTERM to any tiller processes watching this run.
 				graceFail(runDir, m)
 			}
 		}
@@ -273,7 +273,7 @@ func finalizeManifest(runDir, runID string, fableBudget int) error {
 	// Close the hypha trace (soft-fail).
 	if manifest.HyphaTraceID != "" {
 		hyp := hyphae.New(func(format string, args ...any) {
-			fmt.Fprintf(os.Stderr, "fablebound run [hypha]: "+format+"\n", args...)
+			fmt.Fprintf(os.Stderr, "tiller run [hypha]: "+format+"\n", args...)
 		})
 		hyp.TraceDone(manifest.HyphaTraceID, finalStatus)
 	}
@@ -297,7 +297,7 @@ func graceFail(runDir string, m *run.Meta) {
 	_ = run.WriteMeta(runDir, m)
 }
 
-// killSupervisorProcess attempts to find and kill a fablebound _supervise
+// killSupervisorProcess attempts to find and kill a tiller _supervise
 // process for the given dispatch (Linux /proc, best effort).
 func killSupervisorProcess(runDir, dispatchID string) {
 	procDir := "/proc"

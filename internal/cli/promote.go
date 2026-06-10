@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"m31labs.dev/fablebound/internal/hyphae"
+	"m31labs.dev/tiller/internal/hyphae"
 )
 
-// runPromote is the handler for `fablebound promote <run-id> [--space] [--as] [--dry-run]`.
+// runPromote is the handler for `tiller promote <run-id> [--space] [--as] [--dry-run]`.
 func runPromote(args []string) error {
 	fs := flag.NewFlagSet("promote", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -35,7 +35,7 @@ func runPromote(args []string) error {
 		return fmt.Errorf("promote: getwd: %w", err)
 	}
 
-	runsBase := filepath.Join(workspace, ".fablebound", "runs")
+	runsBase := filepath.Join(workspace, ".tiller", "runs")
 	runDir := filepath.Join(runsBase, runID)
 
 	if _, err := os.Stat(runDir); err != nil {
@@ -49,7 +49,7 @@ func runPromote(args []string) error {
 	}
 
 	log := func(format string, args ...any) {
-		fmt.Fprintf(os.Stderr, "fablebound promote: "+format+"\n", args...)
+		fmt.Fprintf(os.Stderr, "tiller promote: "+format+"\n", args...)
 	}
 
 	sporePath, err := hyphae.Promote(runDir, opts, log)

@@ -1,4 +1,4 @@
-// Package auditlog provides per-file JSONL audit sinks for fablebound.
+// Package auditlog provides per-file JSONL audit sinks for tiller.
 // Each sink wraps arbiter's audit.JSONLSink with an exclusive flock on each write,
 // assembling DecisionEvents per spec §8.
 package auditlog
@@ -15,7 +15,7 @@ import (
 	"m31labs.dev/arbiter/audit"
 	"m31labs.dev/arbiter/govern"
 	"m31labs.dev/arbiter/vm"
-	"m31labs.dev/fablebound/internal/policy"
+	"m31labs.dev/tiller/internal/policy"
 )
 
 // RunSinks holds the two per-run audit sinks (dispatch + toolgate).

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"m31labs.dev/fablebound/internal/spawn"
+	"m31labs.dev/tiller/internal/spawn"
 )
 
 // -update rewrites the golden files from the current output.
@@ -123,8 +123,8 @@ func TestSettings_HookBlocks(t *testing.T) {
 					t.Errorf("%s inner hook[0] not an object", event)
 					continue
 				}
-				if h["command"] != "fablebound hook" {
-					t.Errorf("%s hook command = %v, want \"fablebound hook\"", event, h["command"])
+				if h["command"] != "tiller hook" {
+					t.Errorf("%s hook command = %v, want \"tiller hook\"", event, h["command"])
 				}
 			}
 		})
@@ -132,9 +132,9 @@ func TestSettings_HookBlocks(t *testing.T) {
 }
 
 // TestSettings_Depth2NoDispatch verifies that no depth-2 golden file's allow
-// list contains "Bash(fablebound *)" or "Bash(fablebound dispatch*)" — terminal
+// list contains "Bash(tiller *)" or "Bash(tiller dispatch*)" — terminal
 // agents must not have dispatch capability in the allow list.
-// Note: "Bash(fablebound dispatch*)" may appear in the deny list for execution
+// Note: "Bash(tiller dispatch*)" may appear in the deny list for execution
 // profile as a defence-in-depth guardrail; that is expected and correct.
 func TestSettings_Depth2NoDispatch(t *testing.T) {
 	for _, tc := range goldenCases {
@@ -164,12 +164,12 @@ func TestSettings_Depth2NoDispatch(t *testing.T) {
 				}
 			}
 
-			// The allow list must not contain the unrestricted fablebound allow.
+			// The allow list must not contain the unrestricted tiller allow.
 			for _, a := range allowStrings {
-				if a == "Bash(fablebound *)" {
-					t.Errorf("depth-2 allow list for %q contains Bash(fablebound *)", tc.profile)
+				if a == "Bash(tiller *)" {
+					t.Errorf("depth-2 allow list for %q contains Bash(tiller *)", tc.profile)
 				}
-				if strings.HasPrefix(a, "Bash(fablebound dispatch") {
+				if strings.HasPrefix(a, "Bash(tiller dispatch") {
 					t.Errorf("depth-2 allow list for %q contains %q", tc.profile, a)
 				}
 			}
@@ -218,9 +218,9 @@ func TestSettings_UnknownProfile(t *testing.T) {
 	}
 }
 
-// TestSettings_Depth1HasFablebound verifies that depth-1 settings include the
-// unrestricted Bash(fablebound *) entry.
-func TestSettings_Depth1HasFablebound(t *testing.T) {
+// TestSettings_Depth1HasTiller verifies that depth-1 settings include the
+// unrestricted Bash(tiller *) entry.
+func TestSettings_Depth1HasTiller(t *testing.T) {
 	profiles := []string{"orchestrator", "insight", "readonly"}
 	for _, p := range profiles {
 		p := p
@@ -229,15 +229,15 @@ func TestSettings_Depth1HasFablebound(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(got), `"Bash(fablebound *)"`) {
-				t.Errorf("depth-1 %q missing Bash(fablebound *)", p)
+			if !strings.Contains(string(got), `"Bash(tiller *)"`) {
+				t.Errorf("depth-1 %q missing Bash(tiller *)", p)
 			}
 		})
 	}
 }
 
 // TestSettings_Depth2HasNoteForm verifies that depth-2 settings include
-// "Bash(fablebound note *)" (not the full form).
+// "Bash(tiller note *)" (not the full form).
 func TestSettings_Depth2HasNoteForm(t *testing.T) {
 	profiles := []string{"orchestrator", "insight", "readonly"}
 	for _, p := range profiles {
@@ -247,15 +247,15 @@ func TestSettings_Depth2HasNoteForm(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(got), `"Bash(fablebound note *)"`) {
-				t.Errorf("depth-2 %q missing Bash(fablebound note *)", p)
+			if !strings.Contains(string(got), `"Bash(tiller note *)"`) {
+				t.Errorf("depth-2 %q missing Bash(tiller note *)", p)
 			}
 		})
 	}
 }
 
 // TestSettings_Depth2ExecutionDenyDispatch verifies that the execution profile at
-// depth >= 2 contains "Bash(fablebound dispatch*)" in the deny list, providing a
+// depth >= 2 contains "Bash(tiller dispatch*)" in the deny list, providing a
 // settings-layer guardrail against terminal workers spawning dispatches.
 func TestSettings_Depth2ExecutionDenyDispatch(t *testing.T) {
 	got, err := spawn.Settings("execution", 2)
@@ -279,18 +279,18 @@ func TestSettings_Depth2ExecutionDenyDispatch(t *testing.T) {
 
 	found := false
 	for _, d := range denyRaw {
-		if d == "Bash(fablebound dispatch*)" {
+		if d == "Bash(tiller dispatch*)" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("execution depth-2 deny list missing \"Bash(fablebound dispatch*)\"; got: %v", denyRaw)
+		t.Errorf("execution depth-2 deny list missing \"Bash(tiller dispatch*)\"; got: %v", denyRaw)
 	}
 }
 
 // TestSettings_Depth1ExecutionNoDenyDispatch verifies that execution at depth 1
-// does NOT have "Bash(fablebound dispatch*)" in the deny list (depth-1 workers
+// does NOT have "Bash(tiller dispatch*)" in the deny list (depth-1 workers
 // may dispatch).
 func TestSettings_Depth1ExecutionNoDenyDispatch(t *testing.T) {
 	got, err := spawn.Settings("execution", 1)
@@ -298,7 +298,7 @@ func TestSettings_Depth1ExecutionNoDenyDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if strings.Contains(string(got), `"Bash(fablebound dispatch*)"`) {
-		t.Error("execution depth-1 deny list unexpectedly contains Bash(fablebound dispatch*)")
+	if strings.Contains(string(got), `"Bash(tiller dispatch*)"`) {
+		t.Error("execution depth-1 deny list unexpectedly contains Bash(tiller dispatch*)")
 	}
 }

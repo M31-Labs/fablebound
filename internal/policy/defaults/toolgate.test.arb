@@ -1,4 +1,4 @@
-# Tests for toolgate.arb — fablebound PreToolUse hook gate.
+# Tests for toolgate.arb — tiller PreToolUse hook gate.
 #
 # Coverage targets: every rule (HaltAllTools, DenyHyphaDaemons,
 # DenyDestructive, DenyTerminalDispatch, OrchestratorRead,
@@ -6,7 +6,7 @@
 # DenyWriteOutsideScratch, ReadOnlyBash, ReadTools, ExecutionAllow).
 #
 # Roles and segments:
-#   orchestrator            → Read/Glob/Grep + fablebound/hypha bash only
+#   orchestrator            → Read/Glob/Grep + tiller/hypha bash only
 #   scratch_writers         → chief-architect, deep-report, reviewer
 #   readonly_bash_roles     → investigator, reviewer, chief-architect, deep-report
 #   execution               → worker, debugger
@@ -169,13 +169,13 @@ test "regular rm command does NOT fire DenyDestructive" {
 
 # ── DenyTerminalDispatch ──────────────────────────────────────────────────────
 
-test "depth-2 agent running fablebound dispatch is denied (DenyTerminalDispatch)" {
+test "depth-2 agent running tiller dispatch is denied (DenyTerminalDispatch)" {
     given {
         agent.role: "worker"
         agent.depth: 2
         agent.dispatch_id: "d02"
         tool.name: "Bash"
-        tool.command: "fablebound dispatch --role investigator --brief - <<EOF task EOF"
+        tool.command: "tiller dispatch --role investigator --brief - <<EOF task EOF"
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false
@@ -184,13 +184,13 @@ test "depth-2 agent running fablebound dispatch is denied (DenyTerminalDispatch)
     expect rule DenyTerminalDispatch matched
 }
 
-test "depth-2 investigator cannot fablebound dispatch (DenyTerminalDispatch)" {
+test "depth-2 investigator cannot tiller dispatch (DenyTerminalDispatch)" {
     given {
         agent.role: "investigator"
         agent.depth: 2
         agent.dispatch_id: "d02"
         tool.name: "Bash"
-        tool.command: "fablebound dispatch --role investigator --brief -"
+        tool.command: "tiller dispatch --role investigator --brief -"
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false
@@ -199,13 +199,13 @@ test "depth-2 investigator cannot fablebound dispatch (DenyTerminalDispatch)" {
     expect rule DenyTerminalDispatch matched
 }
 
-test "depth-1 agent running fablebound dispatch does NOT fire DenyTerminalDispatch" {
+test "depth-1 agent running tiller dispatch does NOT fire DenyTerminalDispatch" {
     given {
         agent.role: "worker"
         agent.depth: 1
         agent.dispatch_id: "d01"
         tool.name: "Bash"
-        tool.command: "fablebound dispatch --role investigator --brief -"
+        tool.command: "tiller dispatch --role investigator --brief -"
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false
@@ -214,13 +214,13 @@ test "depth-1 agent running fablebound dispatch does NOT fire DenyTerminalDispat
     expect rule DenyTerminalDispatch not matched
 }
 
-test "depth-2 agent running fablebound note is NOT denied by DenyTerminalDispatch" {
+test "depth-2 agent running tiller note is NOT denied by DenyTerminalDispatch" {
     given {
         agent.role: "worker"
         agent.depth: 2
         agent.dispatch_id: "d02"
         tool.name: "Bash"
-        tool.command: "fablebound note add - <<EOF some note EOF"
+        tool.command: "tiller note add - <<EOF some note EOF"
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false
@@ -278,13 +278,13 @@ test "orchestrator Grep tool is allowed (OrchestratorRead)" {
 
 # ── OrchestratorEffector ──────────────────────────────────────────────────────
 
-test "orchestrator running fablebound dispatch is allowed (OrchestratorEffector)" {
+test "orchestrator running tiller dispatch is allowed (OrchestratorEffector)" {
     given {
         agent.role: "orchestrator"
         agent.depth: 0
         agent.dispatch_id: "root"
         tool.name: "Bash"
-        tool.command: "fablebound dispatch --role worker --brief -"
+        tool.command: "tiller dispatch --role worker --brief -"
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false
@@ -293,13 +293,13 @@ test "orchestrator running fablebound dispatch is allowed (OrchestratorEffector)
     expect rule OrchestratorEffector matched
 }
 
-test "orchestrator running fablebound runs show is allowed (OrchestratorEffector)" {
+test "orchestrator running tiller runs show is allowed (OrchestratorEffector)" {
     given {
         agent.role: "orchestrator"
         agent.depth: 0
         agent.dispatch_id: "root"
         tool.name: "Bash"
-        tool.command: "fablebound runs show 20260101-000000-0001"
+        tool.command: "tiller runs show 20260101-000000-0001"
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false
@@ -385,7 +385,7 @@ test "orchestrator attempting Write is denied (OrchestratorDenyRest)" {
     expect rule OrchestratorDenyRest matched
 }
 
-test "orchestrator running git log is denied (orchestrator bash not in fablebound/hypha)" {
+test "orchestrator running git log is denied (orchestrator bash not in tiller/hypha)" {
     given {
         agent.role: "orchestrator"
         agent.depth: 0
@@ -618,13 +618,13 @@ test "investigator running go doc is allowed (ReadOnlyBash)" {
     expect rule ReadOnlyBash matched
 }
 
-test "investigator running fablebound poll is allowed (ReadOnlyBash)" {
+test "investigator running tiller poll is allowed (ReadOnlyBash)" {
     given {
         agent.role: "investigator"
         agent.depth: 1
         agent.dispatch_id: "d01"
         tool.name: "Bash"
-        tool.command: "fablebound poll d03"
+        tool.command: "tiller poll d03"
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false
@@ -639,7 +639,7 @@ test "investigator running hypha recall is allowed (ReadOnlyBash)" {
         agent.depth: 1
         agent.dispatch_id: "d01"
         tool.name: "Bash"
-        tool.command: "hypha recall fablebound patterns"
+        tool.command: "hypha recall tiller patterns"
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false
@@ -774,13 +774,13 @@ test "debugger using Edit tool is allowed (ExecutionAllow)" {
 
 # ── Cross-cutting / spec-quoted scenarios ─────────────────────────────────────
 
-test "depth-2 worker running fablebound dispatch is denied (DenyTerminalDispatch over ExecutionAllow)" {
+test "depth-2 worker running tiller dispatch is denied (DenyTerminalDispatch over ExecutionAllow)" {
     given {
         agent.role: "worker"
         agent.depth: 2
         agent.dispatch_id: "d02"
         tool.name: "Bash"
-        tool.command: "fablebound dispatch --role investigator --brief -"
+        tool.command: "tiller dispatch --role investigator --brief -"
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false

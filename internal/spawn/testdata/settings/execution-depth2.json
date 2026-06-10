@@ -4,7 +4,7 @@
       {
         "hooks": [
           {
-            "command": "fablebound hook",
+            "command": "tiller hook",
             "type": "command"
           }
         ],
@@ -15,7 +15,7 @@
       {
         "hooks": [
           {
-            "command": "fablebound hook",
+            "command": "tiller hook",
             "type": "command"
           }
         ],
@@ -36,7 +36,7 @@
     "deny": [
       "Agent",
       "NotebookEdit",
-      "Bash(fablebound dispatch*)"
+      "Bash(tiller dispatch*)"
     ]
   }
 }

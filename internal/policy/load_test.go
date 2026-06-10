@@ -38,7 +38,7 @@ rule BogusRule priority 1 {
 }
 `
 	tmpDir := t.TempDir()
-	policyDir := filepath.Join(tmpDir, ".fablebound", "policy")
+	policyDir := filepath.Join(tmpDir, ".tiller", "policy")
 	if err := os.MkdirAll(policyDir, 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

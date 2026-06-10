@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"m31labs.dev/fablebound/internal/run"
+	"m31labs.dev/tiller/internal/run"
 )
 
 // SporeOptions controls spore composition and submission.

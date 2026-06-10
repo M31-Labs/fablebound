@@ -1,4 +1,4 @@
-# Tests for dispatch.arb — fablebound dispatch gate.
+# Tests for dispatch.arb — tiller dispatch gate.
 #
 # Canonical model combos (flat defaults):
 #   orchestrator → fable   chief-architect → fable   deep-report → fable

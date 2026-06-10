@@ -1,5 +1,5 @@
-# fablebound run scratch — never commit run artifacts
-.fablebound/runs/
+# tiller run scratch — never commit run artifacts
+.tiller/runs/
 
-# built binary (root only, not cmd/fablebound/)
-/fablebound
+# built binary (root only, not cmd/tiller/)
+/tiller

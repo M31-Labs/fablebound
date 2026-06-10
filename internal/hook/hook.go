@@ -1,13 +1,13 @@
-// Package hook implements fablebound's PreToolUse gate and PostToolUse trace
+// Package hook implements tiller's PreToolUse gate and PostToolUse trace
 // capture. It is invoked by Claude Code as a hook command:
 //
-//	{"type": "command", "command": "fablebound hook"}
+//	{"type": "command", "command": "tiller hook"}
 //
 // stdin: Claude Code hook event JSON.
 // stdout: hookSpecificOutput JSON (PreToolUse only).
 // exit 0: allowed (or PostToolUse — always 0).
 // exit 2: internal error (fail closed).
-// Missing FABLEBOUND_ROLE: exit 0, no output (non-fablebound session).
+// Missing TILLER_ROLE: exit 0, no output (non-tiller session).
 package hook
 
 import (
@@ -22,9 +22,9 @@ import (
 	arbiter "m31labs.dev/arbiter"
 	"m31labs.dev/arbiter/govern"
 	"m31labs.dev/arbiter/vm"
-	"m31labs.dev/fablebound/internal/auditlog"
-	"m31labs.dev/fablebound/internal/policy"
-	"m31labs.dev/fablebound/internal/run"
+	"m31labs.dev/tiller/internal/auditlog"
+	"m31labs.dev/tiller/internal/policy"
+	"m31labs.dev/tiller/internal/run"
 )
 
 // HookEvent is the JSON stdin payload from Claude Code.
@@ -83,20 +83,20 @@ type Identity struct {
 }
 
 // ReadIdentity reads agent identity from environment variables.
-// Returns ok=false when FABLEBOUND_ROLE is not set (non-fablebound session).
+// Returns ok=false when TILLER_ROLE is not set (non-tiller session).
 func ReadIdentity() (Identity, bool) {
-	role := os.Getenv("FABLEBOUND_ROLE")
+	role := os.Getenv("TILLER_ROLE")
 	if role == "" {
 		return Identity{}, false
 	}
 
 	depth := 0
-	if d := os.Getenv("FABLEBOUND_DEPTH"); d != "" {
+	if d := os.Getenv("TILLER_DEPTH"); d != "" {
 		fmt.Sscanf(d, "%d", &depth)
 	}
 
-	dispatchID := os.Getenv("FABLEBOUND_DISPATCH_ID")
-	runDir := os.Getenv("FABLEBOUND_RUN_DIR")
+	dispatchID := os.Getenv("TILLER_DISPATCH_ID")
+	runDir := os.Getenv("TILLER_RUN_DIR")
 	runID := ""
 	if runDir != "" {
 		runID = filepath.Base(runDir)
@@ -112,22 +112,22 @@ func ReadIdentity() (Identity, bool) {
 }
 
 // verifyIdentity cross-checks the env-sourced Identity against the dispatch's
-// meta.json to detect spoofed FABLEBOUND_ROLE or FABLEBOUND_DEPTH values.
+// meta.json to detect spoofed TILLER_ROLE or TILLER_DEPTH values.
 // Returns an error (fail closed) if meta is missing, unreadable, or mismatches.
 // The root dispatch has ID "root"; it must also exist in meta.json.
 //
 // Run-dir containment (Fix 1): before reading any meta, this function verifies
-// that FABLEBOUND_RUN_DIR is lexically contained in
-// <workspace>/.fablebound/runs/ where <workspace> is read from the run's own
+// that TILLER_RUN_DIR is lexically contained in
+// <workspace>/.tiller/runs/ where <workspace> is read from the run's own
 // manifest.json — a file the sandboxed worker cannot forge because toolgate
 // confines writes to the worker's own scratch (dispatches/<id>/) and the
 // manifest lives one level above (in the run root).  The canonical path of
-// FABLEBOUND_RUN_DIR must also resolve back to the same workspace recorded in
+// TILLER_RUN_DIR must also resolve back to the same workspace recorded in
 // the manifest, preventing symlink-based bypasses.
 //
 // Residual trust assumption: a worker with an *execution* profile (worker/
 // debugger) has broad Bash access including the ability to write files inside
-// <workspace>/.fablebound/runs/<run-id>/dispatches/<id>/ (its own scratch).
+// <workspace>/.tiller/runs/<run-id>/dispatches/<id>/ (its own scratch).
 // It cannot write manifest.json or other dispatches' meta.json — those paths
 // are outside its scratch and denied by toolgate.  A worker that can escape
 // toolgate entirely (e.g. via an unpatched Bash escape) could forge a second
@@ -173,8 +173,8 @@ func verifyIdentity(id Identity) error {
 		canonWorkspace = filepath.Clean(manifest.Workspace)
 	}
 
-	// The expected runs/ prefix is <workspace>/.fablebound/runs/.
-	expectedRunsDir := filepath.Join(canonWorkspace, ".fablebound", "runs")
+	// The expected runs/ prefix is <workspace>/.tiller/runs/.
+	expectedRunsDir := filepath.Join(canonWorkspace, ".tiller", "runs")
 
 	// The canonical run dir must be a direct child of expectedRunsDir (one
 	// path component below) — i.e. it must start with expectedRunsDir + "/" and
@@ -191,7 +191,7 @@ func verifyIdentity(id Identity) error {
 	}
 
 	// Cross-check: the manifest's workspace, when re-derived from the canonical
-	// run dir, must agree (3 levels up: runs/<id> → runs → .fablebound → workspace).
+	// run dir, must agree (3 levels up: runs/<id> → runs → .tiller → workspace).
 	derivedWorkspace := filepath.Dir(filepath.Dir(filepath.Dir(canonRunDir)))
 	if derivedWorkspace != canonWorkspace {
 		return fmt.Errorf("untrusted run dir: derived workspace %q != manifest workspace %q",
@@ -243,7 +243,7 @@ func HandlePreToolUse(id Identity, event HookEvent, workspaceDir string) ([]byte
 	// Load toolgate policy (from run's project dir or embedded default).
 	projectDir := ""
 	if id.RunDir != "" {
-		// Run dir is <workspace>/.fablebound/runs/<id>; project dir is three levels up.
+		// Run dir is <workspace>/.tiller/runs/<id>; project dir is three levels up.
 		projectDir = filepath.Dir(filepath.Dir(filepath.Dir(id.RunDir)))
 	}
 	loaded, err := policy.Load("toolgate", projectDir)
@@ -265,7 +265,7 @@ func HandlePreToolUse(id Identity, event HookEvent, workspaceDir string) ([]byte
 	if id.RunDir != "" {
 		if auditErr := writeAuditEvent(id.RunDir, id.DispatchID, loaded, req, matched, trace); auditErr != nil {
 			// Audit failure is non-fatal for the decision but we log it.
-			fmt.Fprintf(os.Stderr, "fablebound hook: audit write error: %v\n", auditErr)
+			fmt.Fprintf(os.Stderr, "tiller hook: audit write error: %v\n", auditErr)
 		}
 	}
 
@@ -552,7 +552,7 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer) error {
 	toolName := event.ToolName
 	reason := result.Reason
 	if decision == "deny" && toolName != "" {
-		reason = fmt.Sprintf("fablebound: fable is orchestrator-only — delegate this with the Task tool: code changes → fb-worker (sonnet), debugging → fb-debugger (sonnet), investigation → fb-investigator (opus), review → fb-reviewer (opus); reserve fable for fb-architect/fb-deep-report. (%s blocked for the root fable agent.)", toolName)
+		reason = fmt.Sprintf("tiller: fable is orchestrator-only — delegate this with the Task tool: code changes → tiller-worker (sonnet), debugging → tiller-debugger (sonnet), investigation → tiller-investigator (opus), review → tiller-reviewer (opus); reserve fable for tiller-architect/tiller-deep-report. (%s blocked for the root fable agent.)", toolName)
 	}
 
 	decisionReason := fmt.Sprintf("RULE: %s: %s", result.Rule, reason)
@@ -575,14 +575,14 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer) error {
 	return err
 }
 
-// Run is the main entry point for `fablebound hook`.
+// Run is the main entry point for `tiller hook`.
 // Reads stdin, dispatches on hook_event_name, writes output and exits.
 // On internal error it writes to stderr and returns an error (caller exits 2).
-// Missing FABLEBOUND_ROLE exits 0 silently.
+// Missing TILLER_ROLE exits 0 silently.
 func Run(stdin io.Reader, stdout io.Writer, workspaceDir string) error {
 	id, ok := ReadIdentity()
 	if !ok {
-		// Not a managed fablebound session — check ambient mode.
+		// Not a managed tiller session — check ambient mode.
 		return runAmbient(stdin, stdout)
 	}
 
@@ -614,18 +614,18 @@ func Run(stdin io.Reader, stdout io.Writer, workspaceDir string) error {
 	case "PostToolUse":
 		// PostToolUse always exits 0; trace failures log to stderr.
 		if err := HandlePostToolUse(id, event); err != nil {
-			fmt.Fprintf(os.Stderr, "fablebound hook: PostToolUse trace error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "tiller hook: PostToolUse trace error: %v\n", err)
 		}
 		return nil
 
 	default:
 		// Unknown event type — emit a warning to stderr but still exit 0 (forward-compatible).
-		fmt.Fprintf(os.Stderr, "fablebound hook: warning: unknown hook_event_name %q (ignored)\n", event.HookEventName)
+		fmt.Fprintf(os.Stderr, "tiller hook: warning: unknown hook_event_name %q (ignored)\n", event.HookEventName)
 		return nil
 	}
 }
 
-// runAmbient handles the case where FABLEBOUND_ROLE is unset: ambient mode.
+// runAmbient handles the case where TILLER_ROLE is unset: ambient mode.
 // For PreToolUse, it checks the transcript model and enforces orchestrator-only
 // policy if and only if the model is fable. For all other events or models,
 // it exits 0 (passthrough / fail open).
@@ -673,13 +673,13 @@ func runAmbient(stdin io.Reader, stdout io.Writer) error {
 }
 
 // WorkspaceDir returns the workspace directory for path containment checks.
-// It walks up from the run dir to find the workspace root (the dir containing .fablebound/).
+// It walks up from the run dir to find the workspace root (the dir containing .tiller/).
 func WorkspaceDir(runDir string) string {
 	if runDir == "" {
 		wd, _ := os.Getwd()
 		return wd
 	}
-	// runDir is <workspace>/.fablebound/runs/<run-id>
+	// runDir is <workspace>/.tiller/runs/<run-id>
 	// workspace = runDir/../../../  (3 levels up)
 	candidate := filepath.Dir(filepath.Dir(filepath.Dir(runDir)))
 	if _, err := os.Stat(candidate); err == nil {

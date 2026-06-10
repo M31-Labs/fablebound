@@ -10,7 +10,7 @@ import (
 // exclusive advisory lock via syscall.Flock, calls fn to perform the write,
 // then closes (which implicitly releases the lock).
 //
-// The lock is advisory: all fablebound writers must use flockWrite / flockAppend
+// The lock is advisory: all tiller writers must use flockWrite / flockAppend
 // for the guarantee to hold.
 func flockWrite(path string, fn func(*os.File) error) error {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)

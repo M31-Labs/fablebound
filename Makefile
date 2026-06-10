@@ -1,9 +1,9 @@
 .PHONY: build test vet clean policy-sync policy-replay
 
-BIN := fablebound
+BIN := tiller
 
 build:
-	go build -o $(BIN) ./cmd/fablebound
+	go build -o $(BIN) ./cmd/tiller
 
 test:
 	go test ./...
@@ -21,12 +21,12 @@ policy-sync:
 
 # Replay both policies against a run's audit files (T3.2).
 # Usage: make policy-replay RUN=<run-id>
-# Replays policy/toolgate.arb against .fablebound/runs/<RUN>/audit/toolgate.jsonl
-# and policy/dispatch.arb against .fablebound/runs/<RUN>/audit/dispatch.jsonl.
+# Replays policy/toolgate.arb against .tiller/runs/<RUN>/audit/toolgate.jsonl
+# and policy/dispatch.arb against .tiller/runs/<RUN>/audit/dispatch.jsonl.
 # Exits non-zero if any audit event differs from what the current policy would decide.
 # Requires: arbiter CLI on PATH (or ARBITER_BIN=<path>).
 ARBITER_BIN ?= arbiter
-RUNDIR := .fablebound/runs/$(RUN)
+RUNDIR := .tiller/runs/$(RUN)
 
 policy-replay:
 	@if [ -z "$(RUN)" ]; then echo "error: RUN is required (make policy-replay RUN=<run-id>)" >&2; exit 1; fi

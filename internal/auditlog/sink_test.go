@@ -16,8 +16,8 @@ import (
 	"m31labs.dev/arbiter/audit"
 	"m31labs.dev/arbiter/govern"
 	"m31labs.dev/arbiter/vm"
-	"m31labs.dev/fablebound/internal/auditlog"
-	"m31labs.dev/fablebound/internal/policy"
+	"m31labs.dev/tiller/internal/auditlog"
+	"m31labs.dev/tiller/internal/policy"
 )
 
 // TestOpenRunSinks verifies the two sink files are created under audit/.
@@ -253,7 +253,7 @@ func TestArbiterReplay(t *testing.T) {
 	cases := []policy.ToolCallRequest{
 		{Role: "worker", Depth: 1, DispatchID: "d01", Tool: "Bash", Command: "go test ./...", RunID: "run1"},
 		{Role: "orchestrator", Depth: 0, DispatchID: "root", Tool: "Read", FilePath: "/workspace/main.go", RunID: "run1"},
-		{Role: "orchestrator", Depth: 0, DispatchID: "root", Tool: "Bash", Command: "fablebound dispatch --role investigator --brief -", RunID: "run1"},
+		{Role: "orchestrator", Depth: 0, DispatchID: "root", Tool: "Bash", Command: "tiller dispatch --role investigator --brief -", RunID: "run1"},
 		{Role: "investigator", Depth: 1, DispatchID: "d02", Tool: "Bash", Command: "rg TODO ./src", RunID: "run1"},
 	}
 
@@ -268,8 +268,8 @@ func TestArbiterReplay(t *testing.T) {
 	// Find toolgate.arb.
 	toolgatePath := ""
 	for _, candidate := range []string{
-		"/home/draco/work/fablebound/internal/policy/defaults/toolgate.arb",
-		"/home/draco/work/fablebound/policy/toolgate.arb",
+		"/home/draco/work/tiller/internal/policy/defaults/toolgate.arb",
+		"/home/draco/work/tiller/policy/toolgate.arb",
 	} {
 		if _, err := os.Stat(candidate); err == nil {
 			toolgatePath = candidate

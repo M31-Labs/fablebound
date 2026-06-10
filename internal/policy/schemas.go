@@ -1,5 +1,5 @@
 // Package policy provides Arbiter policy loading, schema definitions,
-// context mapping, and evaluation for fablebound dispatch and tool-call gates.
+// context mapping, and evaluation for tiller dispatch and tool-call gates.
 package policy
 
 // DispatchRequest is the input schema for dispatch.arb.
@@ -9,8 +9,8 @@ type DispatchRequest struct {
 	Background  bool   `arb:"dispatch.background"`
 	BriefBytes  int    `arb:"dispatch.brief_bytes"`
 	CallerRole  string `arb:"caller.role"`        // "user" when invoked outside a run
-	CallerDepth int    `arb:"caller.depth"`       // FABLEBOUND_DEPTH of requester
-	CallerID    string `arb:"caller.dispatch_id"` // FABLEBOUND_DISPATCH_ID (lineage)
+	CallerDepth int    `arb:"caller.depth"`       // TILLER_DEPTH of requester
+	CallerID    string `arb:"caller.dispatch_id"` // TILLER_DISPATCH_ID (lineage)
 	RunID       string `arb:"run.id"`
 	ActiveCount int    `arb:"run.active_dispatches"` // scan of meta.json status==running
 	FableCount  int    `arb:"run.fable_dispatches"`  // dispatches where model resolved fable

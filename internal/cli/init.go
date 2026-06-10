@@ -8,13 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"m31labs.dev/fablebound/internal/policy"
-	"m31labs.dev/fablebound/internal/roles"
+	"m31labs.dev/tiller/internal/policy"
+	"m31labs.dev/tiller/internal/roles"
 )
 
-// runInit implements `fablebound init`.
-// It materializes .fablebound/policy/*.arb and .fablebound/roles/*.md,
-// creates runs/, and appends .fablebound/runs/ to the project .gitignore
+// runInit implements `tiller init`.
+// It materializes .tiller/policy/*.arb and .tiller/roles/*.md,
+// creates runs/, and appends .tiller/runs/ to the project .gitignore
 // (idempotent — no duplicate lines).
 func runInit(_ []string) error {
 	projectDir, err := os.Getwd()
@@ -22,7 +22,7 @@ func runInit(_ []string) error {
 		return fmt.Errorf("getwd: %w", err)
 	}
 
-	fbDir := filepath.Join(projectDir, ".fablebound")
+	fbDir := filepath.Join(projectDir, ".tiller")
 
 	// Materialize policy defaults.
 	if err := materializeDefaults(
@@ -46,12 +46,12 @@ func runInit(_ []string) error {
 		return fmt.Errorf("create runs dir: %w", err)
 	}
 
-	// Append .fablebound/runs/ to .gitignore (idempotent).
-	if err := appendGitignore(projectDir, ".fablebound/runs/"); err != nil {
+	// Append .tiller/runs/ to .gitignore (idempotent).
+	if err := appendGitignore(projectDir, ".tiller/runs/"); err != nil {
 		return fmt.Errorf("update .gitignore: %w", err)
 	}
 
-	fmt.Println("fablebound init: done")
+	fmt.Println("tiller init: done")
 	return nil
 }
 

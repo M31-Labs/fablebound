@@ -36,7 +36,7 @@ func transcriptPath(t *testing.T, name string) string {
 	return p
 }
 
-// runAmbientHook simulates running the ambient code path (FABLEBOUND_ROLE unset)
+// runAmbientHook simulates running the ambient code path (TILLER_ROLE unset)
 // with a hook event that includes transcript_path.
 func runAmbientHookWithTranscript(t *testing.T, transcriptFile, toolName string) (decision string, output []byte) {
 	t.Helper()
@@ -53,12 +53,12 @@ func runAmbientHookWithTranscript(t *testing.T, transcriptFile, toolName string)
 		t.Fatalf("marshal event: %v", err)
 	}
 
-	// Ensure no FABLEBOUND_ROLE is set so we take the ambient path.
-	old := os.Getenv("FABLEBOUND_ROLE")
-	os.Unsetenv("FABLEBOUND_ROLE")
+	// Ensure no TILLER_ROLE is set so we take the ambient path.
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
 	t.Cleanup(func() {
 		if old != "" {
-			os.Setenv("FABLEBOUND_ROLE", old)
+			os.Setenv("TILLER_ROLE", old)
 		}
 	})
 
@@ -261,11 +261,11 @@ func TestAgentIDPassthrough(t *testing.T) {
 	}
 	data, _ := json.Marshal(event)
 
-	old := os.Getenv("FABLEBOUND_ROLE")
-	os.Unsetenv("FABLEBOUND_ROLE")
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
 	t.Cleanup(func() {
 		if old != "" {
-			os.Setenv("FABLEBOUND_ROLE", old)
+			os.Setenv("TILLER_ROLE", old)
 		}
 	})
 

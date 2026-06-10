@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"m31labs.dev/fablebound/internal/run"
+	"m31labs.dev/tiller/internal/run"
 )
 
-// runNote is the handler for `fablebound note add [-|"text"]`.
+// runNote is the handler for `tiller note add [-|"text"]`.
 // Writes a timestamped markdown note to notes/<utc-stamp>-<role>.md.
-// Role comes from FABLEBOUND_ROLE env; "user" when outside a run.
+// Role comes from TILLER_ROLE env; "user" when outside a run.
 func runNote(args []string) error {
 	fs := flag.NewFlagSet("note", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -44,7 +44,7 @@ func runNote(args []string) error {
 	}
 
 	// Role from env; "user" when outside a run.
-	role := os.Getenv("FABLEBOUND_ROLE")
+	role := os.Getenv("TILLER_ROLE")
 	if role == "" {
 		role = "user"
 	}

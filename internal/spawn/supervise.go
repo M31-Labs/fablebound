@@ -9,10 +9,10 @@ import (
 	"syscall"
 	"time"
 
-	"m31labs.dev/fablebound/internal/hook"
-	"m31labs.dev/fablebound/internal/hyphae"
-	"m31labs.dev/fablebound/internal/policy"
-	"m31labs.dev/fablebound/internal/run"
+	"m31labs.dev/tiller/internal/hook"
+	"m31labs.dev/tiller/internal/hyphae"
+	"m31labs.dev/tiller/internal/policy"
+	"m31labs.dev/tiller/internal/run"
 )
 
 // ClaudeResult is the parsed --output-format json output from claude.
@@ -252,14 +252,14 @@ func Supervise(a SuperviseArgs) error {
 	return nil
 }
 
-// SpawnDetached starts a detached fablebound _supervise process.
+// SpawnDetached starts a detached tiller _supervise process.
 // The child gets its own session (setsid) and its stdio goes to
 // <dispatchDir>/supervise.log.
 //
 // Returns immediately after the child is spawned — the caller does NOT wait
 // for the supervisor. The supervisor PID is written into meta.json so that
 // orphan detection can verify whether the process is still alive.
-func SpawnDetached(fablebound, runDir, dispatchID string) error {
+func SpawnDetached(binary, runDir, dispatchID string) error {
 	dispatchDir := filepath.Join(runDir, "dispatches", dispatchID)
 	logPath := filepath.Join(dispatchDir, "supervise.log")
 
@@ -270,7 +270,7 @@ func SpawnDetached(fablebound, runDir, dispatchID string) error {
 	// We intentionally don't defer close here — the file handle will be
 	// duplicated into the child; the parent closes after Start().
 
-	cmd := exec.Command(fablebound, "_supervise", runDir, dispatchID)
+	cmd := exec.Command(binary, "_supervise", runDir, dispatchID)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{

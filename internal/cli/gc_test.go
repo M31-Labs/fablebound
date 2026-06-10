@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"m31labs.dev/fablebound/internal/run"
+	"m31labs.dev/tiller/internal/run"
 )
 
 // makeTestRun creates a run fixture with the given status and age offset.
@@ -52,7 +52,7 @@ func TestRunsGC_KeepsRunningRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runsBase := filepath.Join(tmpDir, ".fablebound", "runs")
+	runsBase := filepath.Join(tmpDir, ".tiller", "runs")
 	if err := os.MkdirAll(runsBase, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestRunsGC_DryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runsBase := filepath.Join(tmpDir, ".fablebound", "runs")
+	runsBase := filepath.Join(tmpDir, ".tiller", "runs")
 	if err := os.MkdirAll(runsBase, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestRunsGC_NoVictims(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runsBase := filepath.Join(tmpDir, ".fablebound", "runs")
+	runsBase := filepath.Join(tmpDir, ".tiller", "runs")
 	if err := os.MkdirAll(runsBase, 0o755); err != nil {
 		t.Fatal(err)
 	}

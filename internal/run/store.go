@@ -8,8 +8,8 @@ import (
 	"syscall"
 )
 
-// Store represents a fablebound run store rooted at a base directory
-// (typically <workspace>/.fablebound/runs/).
+// Store represents a tiller run store rooted at a base directory
+// (typically <workspace>/.tiller/runs/).
 type Store struct {
 	Base string // absolute path to the runs/ directory
 }
@@ -80,7 +80,7 @@ var dispatchAllocMu sync.Mutex
 // directory, and returns the ID and directory path.  It holds an in-process
 // mutex AND an exclusive flock on <runDir>/.dispatch-alloc.lock across the
 // scan+mkdir sequence so that concurrent callers (goroutines within the same
-// process, or separate fablebound processes) cannot compute the same ID.
+// process, or separate tiller processes) cannot compute the same ID.
 //
 // The dispatch directory is created with os.Mkdir (not MkdirAll) so that a
 // collision between separate processes not sharing the lock file — an
@@ -124,21 +124,21 @@ func (s *Store) AllocDispatch(runID string) (dispatchID, dispatchDir string, err
 	return id, dir, nil
 }
 
-// CurrentRunDir resolves the active run directory from the FABLEBOUND_RUN_DIR
+// CurrentRunDir resolves the active run directory from the TILLER_RUN_DIR
 // environment variable.  Returns an error if the variable is unset or the path
 // does not exist.
 func CurrentRunDir() (string, error) {
-	d := os.Getenv("FABLEBOUND_RUN_DIR")
+	d := os.Getenv("TILLER_RUN_DIR")
 	if d == "" {
-		return "", fmt.Errorf("FABLEBOUND_RUN_DIR is not set")
+		return "", fmt.Errorf("TILLER_RUN_DIR is not set")
 	}
 	if _, err := os.Stat(d); err != nil {
-		return "", fmt.Errorf("FABLEBOUND_RUN_DIR %q: %w", d, err)
+		return "", fmt.Errorf("TILLER_RUN_DIR %q: %w", d, err)
 	}
 	return d, nil
 }
 
-// CurrentRunID returns the run id from FABLEBOUND_RUN_DIR (the last path
+// CurrentRunID returns the run id from TILLER_RUN_DIR (the last path
 // component).
 func CurrentRunID() (string, error) {
 	d, err := CurrentRunDir()

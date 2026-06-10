@@ -13,11 +13,11 @@ import (
 )
 
 const (
-	// HyphaSpace is the default hyphae space for fablebound traces/spores.
-	HyphaSpace = "hypha://m31labs/fablebound"
+	// HyphaSpace is the default hyphae space for tiller traces/spores.
+	HyphaSpace = "hypha://m31labs/tiller"
 
 	// HyphaAgent is the agent URI used for trace start.
-	HyphaAgent = "hypha://agents/fablebound"
+	HyphaAgent = "hypha://agents/tiller"
 )
 
 // Logger is a function that logs a formatted message; used so callers can
@@ -73,7 +73,7 @@ func (h *Hypha) run(args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// TraceStart opens a new hypha trace for a fablebound run.
+// TraceStart opens a new hypha trace for a tiller run.
 // Returns the trace id (stdout of hypha trace start) or "" on failure.
 // Args: --agent <agent> --task <runID> --phase <phase> --space <space>
 func (h *Hypha) TraceStart(runID, phase, space string) string {

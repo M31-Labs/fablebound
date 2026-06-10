@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"m31labs.dev/fablebound/internal/run"
+	"m31labs.dev/tiller/internal/run"
 )
 
-// runPoll is the handler for `fablebound poll <dispatch-id>`.
+// runPoll is the handler for `tiller poll <dispatch-id>`.
 // Prints a one-liner of the dispatch status; always exits 0.
 func runPoll(args []string) error {
 	fs := flag.NewFlagSet("poll", flag.ContinueOnError)
@@ -41,7 +41,7 @@ func runPoll(args []string) error {
 	return nil
 }
 
-// runAwait is the handler for `fablebound await <dispatch-id> [--timeout 8m]`.
+// runAwait is the handler for `tiller await <dispatch-id> [--timeout 8m]`.
 // Polls until terminal status or timeout; on timeout exits 0 printing "running".
 func runAwait(args []string) error {
 	fs := flag.NewFlagSet("await", flag.ContinueOnError)

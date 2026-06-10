@@ -8,13 +8,13 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"m31labs.dev/fablebound/internal/policy"
+	"m31labs.dev/tiller/internal/policy"
 )
 
-// runPolicy implements `fablebound policy <subcommand>`.
+// runPolicy implements `tiller policy <subcommand>`.
 func runPolicy(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: fablebound policy vet")
+		return fmt.Errorf("usage: tiller policy vet")
 	}
 	switch args[0] {
 	case "vet":
@@ -131,7 +131,7 @@ func runArbiterCheck(arbiterPath, schemaFile, typeName, arbFile string) error {
 
 // materializePolicyFiles resolves arb, test.arb, and schemas.go for both
 // policies into a single temp directory. Project-local files under
-// .fablebound/policy/ take precedence; embedded defaults are copied otherwise.
+// .tiller/policy/ take precedence; embedded defaults are copied otherwise.
 // Returns (tmpDir, schemaFile, arbFiles, testFiles, cleanup, error).
 func materializePolicyFiles(projectDir string) (
 	tmpDir string,
@@ -144,7 +144,7 @@ func materializePolicyFiles(projectDir string) (
 	arbFiles = make(map[string]string)
 	testFiles = make(map[string]string)
 
-	dir, err := os.MkdirTemp("", "fablebound-vet-*")
+	dir, err := os.MkdirTemp("", "tiller-vet-*")
 	if err != nil {
 		return "", "", nil, nil, nil, fmt.Errorf("create temp dir: %w", err)
 	}
@@ -166,7 +166,7 @@ func materializePolicyFiles(projectDir string) (
 
 	for _, kind := range []string{"dispatch", "toolgate"} {
 		// arb file: prefer project-local, fall back to embedded.
-		localArb := filepath.Join(projectDir, ".fablebound", "policy", kind+".arb")
+		localArb := filepath.Join(projectDir, ".tiller", "policy", kind+".arb")
 		if data, readErr := os.ReadFile(localArb); readErr == nil {
 			dst := filepath.Join(dir, kind+".arb")
 			if wErr := os.WriteFile(dst, data, 0644); wErr != nil {
@@ -189,7 +189,7 @@ func materializePolicyFiles(projectDir string) (
 		}
 
 		// test.arb file: prefer project-local, fall back to embedded.
-		localTest := filepath.Join(projectDir, ".fablebound", "policy", kind+".test.arb")
+		localTest := filepath.Join(projectDir, ".tiller", "policy", kind+".test.arb")
 		if data, readErr := os.ReadFile(localTest); readErr == nil {
 			dst := filepath.Join(dir, kind+".test.arb")
 			if wErr := os.WriteFile(dst, data, 0644); wErr != nil {

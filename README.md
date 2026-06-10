@@ -1,35 +1,35 @@
-# fablebound
+# tiller
 
 A harness that gates Claude Code sessions with compiled [Arbiter](https://github.com/M31-Labs/arbiter) policies, enforces model-cost discipline, and makes the fable model's orchestrator-only role the default ambient experience.
 
 ## Why
 
-Fable tokens are expensive. When you have fable access, the natural waste pattern is using it for mechanical execution — writing files, running commands, editing boilerplate. fablebound prevents this structurally: the fable model orchestrates and reasons; cheaper models (sonnet, opus) do the work. In ambient mode this happens automatically inside your normal `claude` session without any project setup.
+Fable tokens are expensive. When you have fable access, the natural waste pattern is using it for mechanical execution — writing files, running commands, editing boilerplate. tiller prevents this structurally: the fable model orchestrates and reasons; cheaper models (sonnet, opus) do the work. In ambient mode this happens automatically inside your normal `claude` session without any project setup.
 
 ## Quickstart: Ambient Mode (recommended)
 
-Ambient mode is the primary way to use fablebound. It self-activates whenever your Claude Code session is running the fable model and is completely invisible for every other model.
+Ambient mode is the primary way to use tiller. It self-activates whenever your Claude Code session is running the fable model and is completely invisible for every other model.
 
 ```sh
 # Install (requires Go 1.25+)
-go install m31labs.dev/fablebound/cmd/fablebound@latest
+go install m31labs.dev/tiller/cmd/tiller@latest
 
-# Install hooks and fb-* subagent personas globally
-fablebound install
+# Install hooks and tiller-* subagent personas globally
+tiller install
 
 # Preview what would be installed without writing
-fablebound install --print
+tiller install --print
 
 # Install into the current project only (repo-local)
-fablebound install --project
+tiller install --project
 
-# Remove everything fablebound installed
-fablebound uninstall
+# Remove everything tiller installed
+tiller uninstall
 ```
 
-`fablebound install` does two things:
+`tiller install` does two things:
 1. Merges `PreToolUse` and `PostToolUse` hook entries into `~/.claude/settings.json`
-2. Writes the six fb-* subagent persona files into `~/.claude/agents/`
+2. Writes the six tiller-* subagent persona files into `~/.claude/agents/`
 
 Then, in any `claude` session:
 
@@ -37,7 +37,7 @@ Then, in any `claude` session:
 /model fable
 ```
 
-Ambient mode engages immediately. The fable root is restricted to orchestration-only tools (Read, Glob, Grep, Agent/Task, TodoWrite, WebFetch). Execution is automatically delegated to fb-* subagents on cheaper models.
+Ambient mode engages immediately. The fable root is restricted to orchestration-only tools (Read, Glob, Grep, Agent/Task, TodoWrite, WebFetch). Execution is automatically delegated to tiller-* subagents on cheaper models.
 
 **How it works.** The installed `PreToolUse` hook reads the session transcript to find the model of the most recent assistant turn. If that model is `claude-fable-5` or `fable`, the hook evaluates `ambient.arb` — an orchestrator-only policy that denies Edit, Write, NotebookEdit, and Bash, while allowing Read, Glob, Grep, Agent/Task dispatch, TodoWrite, and WebFetch. For any other model the hook exits 0 immediately. Subagent calls (where `agent_id` is present) pass through unconditionally.
 
@@ -49,73 +49,73 @@ When the fable root delegates via the Agent/Task tool, these personas route work
 
 | Persona | Model | Use for |
 |---|---|---|
-| `fb-worker` | sonnet | Writing/editing code, running builds and tests, all file-mutating work |
-| `fb-debugger` | sonnet | Systematic debugging — root-cause, fix, verify |
-| `fb-investigator` | opus | Deep read-only investigation, code tracing, adversarial verification |
-| `fb-reviewer` | opus | Code review — correctness, security, quality |
-| `fb-architect` | fable | Architectural specs, deep design, complex trade-off analysis |
-| `fb-deep-report` | fable | Exhaustive multi-source research reports |
+| `tiller-worker` | sonnet | Writing/editing code, running builds and tests, all file-mutating work |
+| `tiller-debugger` | sonnet | Systematic debugging — root-cause, fix, verify |
+| `tiller-investigator` | opus | Deep read-only investigation, code tracing, adversarial verification |
+| `tiller-reviewer` | opus | Code review — correctness, security, quality |
+| `tiller-architect` | fable | Architectural specs, deep design, complex trade-off analysis |
+| `tiller-deep-report` | fable | Exhaustive multi-source research reports |
 
-The deny reason when fable tries to execute directly names these personas: `"fablebound: fable is orchestrator-only — delegate this with the Task tool: code changes → fb-worker (sonnet), debugging → fb-debugger (sonnet), investigation → fb-investigator (opus), review → fb-reviewer (opus); reserve fable for fb-architect/fb-deep-report. (<tool> blocked for the root fable agent.)"` — this steers the orchestrator toward the right persona without a second prompt.
+The deny reason when fable tries to execute directly names these personas: `"tiller: fable is orchestrator-only — delegate this with the Task tool: code changes → tiller-worker (sonnet), debugging → tiller-debugger (sonnet), investigation → tiller-investigator (opus), review → tiller-reviewer (opus); reserve fable for tiller-architect/tiller-deep-report. (<tool> blocked for the root fable agent.)"` — this steers the orchestrator toward the right persona without a second prompt.
 
 **Enforcement layering.** Ambient mode governs the root fable session only. Subagents spawned via Task are unaffected by ambient policy — they pass through. Their model is baked into the persona frontmatter (`model: sonnet`/`opus`/`fable`), which is the primary cost lever. The hook cannot inspect the target model of an Agent/Task invocation (the `tool_input` payload does not expose it), so persona frontmatter is the enforcement point for subagent model routing.
 
-## Managed Mode: `fablebound run` (optional)
+## Managed Mode: `tiller run` (optional)
 
-`fablebound run` is the heavyweight alternative: it spawns agents as separate `claude -p` processes, enforces dispatch depth, writes full audit trails, and creates a run artifact tree. Use it when you need replayable audits, process-tree isolation, or the full dispatch → report → promote workflow.
+`tiller run` is the heavyweight alternative: it spawns agents as separate `claude -p` processes, enforces dispatch depth, writes full audit trails, and creates a run artifact tree. Use it when you need replayable audits, process-tree isolation, or the full dispatch → report → promote workflow.
 
 ```sh
-# Initialize a project (materializes .fablebound/policy/*.arb and roles/*.md)
+# Initialize a project (materializes .tiller/policy/*.arb and roles/*.md)
 cd your-project
-fablebound init
+tiller init
 
 # Run a task
-fablebound run "investigate why the payment retry queue is backing up and write a findings report"
+tiller run "investigate why the payment retry queue is backing up and write a findings report"
 
 # Inspect the run
-fablebound runs list
-fablebound runs show <run-id>
+tiller runs list
+tiller runs show <run-id>
 
 # Promote findings into a hyphae knowledge spore (optional, requires hypha on PATH)
-fablebound promote <run-id>
+tiller promote <run-id>
 ```
 
-`fablebound run` blocks until the orchestrator finishes. Progress appears on stderr.
+`tiller run` blocks until the orchestrator finishes. Progress appears on stderr.
 
 ### Architecture
 
 ```
-user: fablebound run "<task>"
- └─ fablebound (root CLI)
-     ├─ creates .fablebound/runs/<run-id>/
+user: tiller run "<task>"
+ └─ tiller (root CLI)
+     ├─ creates .tiller/runs/<run-id>/
      ├─ spawns orchestrator: claude -p <task> --model fable \
      │          --settings <generated> --permission-mode dontAsk \
      │          --append-system-prompt roles/orchestrator.md
-     │  (env: FABLEBOUND_ROLE=orchestrator, FABLEBOUND_DEPTH=0,
-     │        FABLEBOUND_RUN_DIR, FABLEBOUND_DISPATCH_ID=root)
+     │  (env: TILLER_ROLE=orchestrator, TILLER_DEPTH=0,
+     │        TILLER_RUN_DIR, TILLER_DISPATCH_ID=root)
      │
-     │  every tool call ──▶ PreToolUse hook: fablebound hook
+     │  every tool call ──▶ PreToolUse hook: tiller hook
      │                       └─ toolgate.arb → allow/deny + audit
      │
-     │  orchestrator runs: Bash(fablebound dispatch --role investigator ...)
-     │    └─ fablebound dispatch (child CLI invocation in the claude process)
+     │  orchestrator runs: Bash(tiller dispatch --role investigator ...)
+     │    └─ tiller dispatch (child CLI invocation in the claude process)
      │        ├─ builds DispatchRequest → dispatch.arb (rules gate + strategy route)
      │        ├─ DENIED → exit 3, policy reason on stderr (orchestrator re-plans)
      │        └─ ALLOWED → writes dispatches/<id>/{brief.md,settings.json,meta.json}
-     │            └─ spawns detached fablebound _supervise <run> <id>
+     │            └─ spawns detached tiller _supervise <run> <id>
      │                └─ execs claude -p --model <route.model> --output-format json
      │                    captures report.md, finalizes meta.json
      │
      └─ depth-1 agents can dispatch further; depth-2 agents are terminal
         (dispatch.arb DenyTerminalDepth, toolgate DenyTerminalDispatch,
-         generated settings replace Bash(fablebound *) with Bash(fablebound note *))
+         generated settings replace Bash(tiller *) with Bash(tiller note *))
 ```
 
 ## Ambient vs Managed Mode
 
-| | Ambient | Managed (`fablebound run`) |
+| | Ambient | Managed (`tiller run`) |
 |---|---|---|
-| Setup | `fablebound install` once | `fablebound init` per project |
+| Setup | `tiller install` once | `tiller init` per project |
 | Session | Normal interactive `claude` | Spawned `claude -p` processes |
 | Enforcement | Root fable session only | Full process tree, every agent |
 | Artifacts | None | Full run dir, JSONL audit trails |
@@ -126,7 +126,7 @@ user: fablebound run "<task>"
 
 | Role | Model | Profile | Edit/Write | Bash | May dispatch |
 |---|---|---|---|---|---|
-| `orchestrator` | fable | orchestrator | denied | `fablebound *`, `hypha *` only | all roles |
+| `orchestrator` | fable | orchestrator | denied | `tiller *`, `hypha *` only | all roles |
 | `chief-architect` | fable | insight | scratch only | read-only prefixes | investigator |
 | `deep-report` | fable | insight | scratch only | read-only prefixes | investigator |
 | `investigator` | opus | readonly | denied | read-only prefixes | investigator |
@@ -150,21 +150,21 @@ role .md (cooperative)
 
 **Ambient mode** adds one enforcement point at the top of the root fable session. It governs only the root; subagents pass through. **Managed mode** applies toolgate at every level.
 
-**Fail closed.** Any internal error in `fablebound hook` (missing env, policy compile failure, unparseable input) exits 2, which Claude Code treats as a deny. Ambient mode fails open (exit 0) on transcript read errors.
+**Fail closed.** Any internal error in `tiller hook` (missing env, policy compile failure, unparseable input) exits 2, which Claude Code treats as a deny. Ambient mode fails open (exit 0) on transcript read errors.
 
 **Layering caveats.** The settings deny list and toolgate command-prefix rules are best-effort. The robust backstop is `dispatch.arb` keyed on env-derived `caller.depth`/`caller.role` combined with the hook's meta identity cross-check.
 
 ## Policy Customization
 
-Policies live in `.fablebound/policy/{dispatch.arb,toolgate.arb}`. Defaults are embedded and materialized by `fablebound init`; the project copy wins.
+Policies live in `.tiller/policy/{dispatch.arb,toolgate.arb}`. Defaults are embedded and materialized by `tiller init`; the project copy wins.
 
 ```sh
 # Compile + schema-typecheck policies
-fablebound policy vet
+tiller policy vet
 
 # Replay a past run's toolgate audit against a candidate policy
-arbiter replay .fablebound/policy/toolgate.arb \
-  --audit .fablebound/runs/<id>/audit/toolgate.jsonl
+arbiter replay .tiller/policy/toolgate.arb \
+  --audit .tiller/runs/<id>/audit/toolgate.jsonl
 ```
 
 **Kill switches** are one-line edits. Add a `HaltAll priority 0` rule to `toolgate.arb` to stop all tool calls across active runs on the next hook invocation.
@@ -172,7 +172,7 @@ arbiter replay .fablebound/policy/toolgate.arb \
 ## Run Artifact Layout
 
 ```
-.fablebound/runs/<run-id>/           # run-id = YYYYMMDD-HHMMSS-<4 base36>
+.tiller/runs/<run-id>/           # run-id = YYYYMMDD-HHMMSS-<4 base36>
   manifest.json                      # task, workspace, policy sha256s, status, fable_budget
   task.md                            # root task brief
   audit/
@@ -187,28 +187,28 @@ arbiter replay .fablebound/policy/toolgate.arb \
 ```
 
 ```sh
-fablebound runs list
-fablebound runs show <run-id>
-fablebound runs gc --keep 20 [--dry-run]
+tiller runs list
+tiller runs show <run-id>
+tiller runs gc --keep 20 [--dry-run]
 ```
 
 ## Configuration
 
 | Variable | Default | Description |
 |---|---|---|
-| `FABLEBOUND_CLAUDE_BIN` | `claude` | Path to the `claude` CLI binary |
-| `FABLEBOUND_ROLE` | — | Agent role; set by fablebound at spawn |
-| `FABLEBOUND_DEPTH` | `0` | Spawn depth; set by fablebound at spawn |
-| `FABLEBOUND_RUN_DIR` | — | Absolute path to the run scratch directory |
-| `FABLEBOUND_DISPATCH_ID` | — | Dispatch id of the current agent |
+| `TILLER_CLAUDE_BIN` | `claude` | Path to the `claude` CLI binary |
+| `TILLER_ROLE` | — | Agent role; set by tiller at spawn |
+| `TILLER_DEPTH` | `0` | Spawn depth; set by tiller at spawn |
+| `TILLER_RUN_DIR` | — | Absolute path to the run scratch directory |
+| `TILLER_DISPATCH_ID` | — | Dispatch id of the current agent |
 
 ## Hyphae Integration
 
-fablebound integrates with [hyphae](https://github.com/M31-Labs/hyphae) for live observability and knowledge promotion. If `hypha` is not on PATH, all calls degrade to logged skips.
+tiller integrates with [hyphae](https://github.com/M31-Labs/hyphae) for live observability and knowledge promotion. If `hypha` is not on PATH, all calls degrade to logged skips.
 
-- **Traces**: `fablebound run` opens a hypha trace; every dispatch emits a tick.
+- **Traces**: `tiller run` opens a hypha trace; every dispatch emits a tick.
 - **Recall**: role prompts instruct agents to `hypha recall <q>` before non-trivial work.
-- **Promotion**: `fablebound promote <run-id>` composes a spore from the run's task, dispatch tree, and report excerpts.
+- **Promotion**: `tiller promote <run-id>` composes a spore from the run's task, dispatch tree, and report excerpts.
 
 ## Policy Schemas
 

@@ -1,4 +1,4 @@
-module m31labs.dev/fablebound
+module m31labs.dev/tiller
 
 go 1.25.0
 

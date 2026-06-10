@@ -24,6 +24,32 @@ func NewDispatchID(n int) string {
 	return fmt.Sprintf("d%02d", n+1)
 }
 
+// NextDispatchID returns the next dNN id by counting existing numeric dispatch
+// metas (ids of the form dNN), ignoring non-numeric ids like "root".
+// n should be the count of existing dNN dispatches (i.e. NextDispatchID(0)="d01").
+func NextDispatchID(metas []*Meta) string {
+	count := 0
+	for _, m := range metas {
+		if isNumericDispatchID(m.ID) {
+			count++
+		}
+	}
+	return fmt.Sprintf("d%02d", count+1)
+}
+
+// isNumericDispatchID returns true for ids like "d01", "d02", etc.
+func isNumericDispatchID(id string) bool {
+	if len(id) < 2 || id[0] != 'd' {
+		return false
+	}
+	for _, c := range id[1:] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // randomBase36 returns a random lowercase base-36 string of length n.
 func randomBase36(n int) string {
 	b := make([]byte, n)

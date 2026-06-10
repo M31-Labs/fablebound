@@ -92,15 +92,7 @@ Exit codes: 0 ok; 2 internal error; 3 policy denial
 `)
 }
 
-// Stub handlers — return "not implemented" (exit 2) until the real implementation lands.
-
-func runRun(_ []string) error {
-	return fmt.Errorf("not implemented")
-}
-
-func runRuns(_ []string) error {
-	return fmt.Errorf("not implemented")
-}
+// Stub handler — returns "not implemented" until the real implementation lands.
 
 func runPromote(_ []string) error {
 	return fmt.Errorf("not implemented")

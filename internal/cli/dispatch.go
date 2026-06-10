@@ -164,12 +164,12 @@ func runDispatch(args []string) error {
 		return fmt.Errorf("dispatch: policy returned empty model for role %q (Reject route)", *role)
 	}
 
-	// Allocate dispatch id.
+	// Allocate dispatch id (skip non-numeric ids like "root").
 	metas, err := run.ScanMetas(runDir)
 	if err != nil {
 		return fmt.Errorf("dispatch: scan metas: %w", err)
 	}
-	dispatchID := run.NewDispatchID(len(metas))
+	dispatchID := run.NextDispatchID(metas)
 
 	// Create dispatch directory.
 	// runDir = <workspace>/.fablebound/runs/<run-id>; store base = parent of runDir.

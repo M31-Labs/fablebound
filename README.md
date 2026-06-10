@@ -27,6 +27,8 @@ tiller install --project
 tiller uninstall
 ```
 
+**Trialing is safe.** `tiller uninstall` reverts everything tiller installed — hooks and tiller-* personas — in one shot. It works even from inside a gated fable session (the hook explicitly allows it). Your run history (`.tiller/` dirs in your projects) is never touched. Use `tiller uninstall --print` to preview exactly what would be removed before committing.
+
 `tiller install` does two things:
 1. Merges `PreToolUse` and `PostToolUse` hook entries into `~/.claude/settings.json`
 2. Writes the six tiller-* subagent persona files into `~/.claude/agents/`

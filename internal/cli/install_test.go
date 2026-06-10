@@ -437,3 +437,316 @@ func TestFullInstallUninstall_WithAgents(t *testing.T) {
 		t.Errorf("tiller-* files remain after uninstall: %v", remaining)
 	}
 }
+
+// ── New uninstall hardening tests ─────────────────────────────────────────────
+
+// TestPruneEmptyHookContainers_RemovesEmptyArrays verifies that after removing
+// all hook entries, pruneEmptyHookContainers clears the empty arrays and the
+// hooks map itself, leaving no husks in settings.json.
+func TestPruneEmptyHookContainers_RemovesEmptyArrays(t *testing.T) {
+	settings := map[string]interface{}{
+		"theme": "dark",
+		"hooks": map[string]interface{}{
+			"PreToolUse":  []interface{}{},
+			"PostToolUse": []interface{}{},
+		},
+	}
+	pruneEmptyHookContainers(settings)
+	if _, ok := settings["hooks"]; ok {
+		t.Error("hooks key must be removed when all arrays are empty")
+	}
+	if settings["theme"] != "dark" {
+		t.Error("theme key must be preserved")
+	}
+}
+
+// TestPruneEmptyHookContainers_KeepsNonEmpty verifies that non-empty arrays
+// survive pruning.
+func TestPruneEmptyHookContainers_KeepsNonEmpty(t *testing.T) {
+	settings := map[string]interface{}{
+		"hooks": map[string]interface{}{
+			"PreToolUse": []interface{}{
+				map[string]interface{}{"matcher": ".*"},
+			},
+			"PostToolUse": []interface{}{},
+		},
+	}
+	pruneEmptyHookContainers(settings)
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		t.Fatal("hooks map must survive when PreToolUse still has entries")
+	}
+	if _, postOk := hooks["PostToolUse"]; postOk {
+		t.Error("empty PostToolUse array must be pruned")
+	}
+	if _, preOk := hooks["PreToolUse"]; !preOk {
+		t.Error("non-empty PreToolUse must remain")
+	}
+}
+
+// TestOwnedTillerAgentFiles_OnlyOwned verifies that ownedTillerAgentFiles
+// returns only the embedded tiller-*.md files and NOT user-created agents
+// that happen to have a tiller- prefix but are not in the embedded set.
+func TestOwnedTillerAgentFiles_OnlyOwned(t *testing.T) {
+	agentsDir := filepath.Join(t.TempDir(), "agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Install the six embedded tiller-* files.
+	if _, err := installAgents(agentsDir, false); err != nil {
+		t.Fatalf("installAgents: %v", err)
+	}
+
+	// Place a user-created agent with tiller- prefix not in the embedded set.
+	userAgent := filepath.Join(agentsDir, "tiller-my-custom.md")
+	if err := os.WriteFile(userAgent, []byte("# custom"), 0o644); err != nil {
+		t.Fatalf("write user agent: %v", err)
+	}
+
+	// Place a completely unrelated agent.
+	otherAgent := filepath.Join(agentsDir, "my-agent.md")
+	if err := os.WriteFile(otherAgent, []byte("# other"), 0o644); err != nil {
+		t.Fatalf("write other agent: %v", err)
+	}
+
+	owned := ownedTillerAgentFiles(agentsDir)
+	// Should be exactly 6.
+	if len(owned) != 6 {
+		t.Fatalf("expected 6 owned files, got %d: %v", len(owned), owned)
+	}
+	// Must not include user-created tiller-my-custom.md or my-agent.md.
+	for _, name := range owned {
+		if name == "tiller-my-custom.md" {
+			t.Error("user-created tiller-my-custom.md must not be included in owned list")
+		}
+		if name == "my-agent.md" {
+			t.Error("my-agent.md must not be included in owned list")
+		}
+	}
+}
+
+// TestRunUninstall_Idempotent verifies that running uninstall twice prints
+// "nothing to uninstall" on the second call.
+func TestRunUninstall_Idempotent(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	settingsPath := filepath.Join(tmpHome, ".claude", "settings.json")
+	agentsDir := filepath.Join(tmpHome, ".claude", "agents")
+
+	// Set up settings.json with a proper "tiller hook" command (not the test binary).
+	tillerCmd := "/usr/local/bin/tiller hook"
+	entry := settingsHookEntry{
+		Matcher: ".*",
+		Hooks:   []settingsHookCommand{{Type: "command", Command: tillerCmd}},
+	}
+	settings := map[string]interface{}{}
+	mergeHookEntries(settings, entry)
+	if err := writeSettings(settingsPath, settings); err != nil {
+		t.Fatalf("writeSettings: %v", err)
+	}
+
+	// Install agents.
+	if _, err := installAgents(agentsDir, false); err != nil {
+		t.Fatalf("installAgents: %v", err)
+	}
+
+	// First uninstall — should remove hooks and agents.
+	if err := runUninstall([]string{}); err != nil {
+		t.Fatalf("first uninstall: %v", err)
+	}
+
+	// Second uninstall — nothing to uninstall.
+	if err := runUninstall([]string{}); err != nil {
+		t.Fatalf("second uninstall must not error (idempotent), got: %v", err)
+	}
+
+	// Settings.json must not have hooks or empty husks.
+	if _, err := os.Stat(settingsPath); err == nil {
+		data, _ := os.ReadFile(settingsPath)
+		var s map[string]interface{}
+		if jsonErr := json.Unmarshal(data, &s); jsonErr == nil {
+			if _, ok := s["hooks"]; ok {
+				t.Error("hooks key must not remain after uninstall")
+			}
+		}
+	}
+
+	// No tiller-* files in agents dir.
+	remaining := tillerAgentFilesIn(agentsDir)
+	if len(remaining) != 0 {
+		t.Errorf("tiller-* files remain after uninstall: %v", remaining)
+	}
+}
+
+// TestRunUninstall_PrintNoWrite verifies --print does not write any files.
+func TestRunUninstall_PrintNoWrite(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	settingsPath := filepath.Join(tmpHome, ".claude", "settings.json")
+	agentsDir := filepath.Join(tmpHome, ".claude", "agents")
+
+	// Set up settings with a proper "tiller hook" command.
+	tillerCmd := "/usr/local/bin/tiller hook"
+	entry := settingsHookEntry{
+		Matcher: ".*",
+		Hooks:   []settingsHookCommand{{Type: "command", Command: tillerCmd}},
+	}
+	settings := map[string]interface{}{}
+	mergeHookEntries(settings, entry)
+	if err := writeSettings(settingsPath, settings); err != nil {
+		t.Fatalf("writeSettings: %v", err)
+	}
+
+	// Install agents.
+	if _, err := installAgents(agentsDir, false); err != nil {
+		t.Fatalf("installAgents: %v", err)
+	}
+
+	// Capture settings before --print.
+	beforeData, _ := os.ReadFile(settingsPath)
+
+	// Run uninstall --print.
+	if err := runUninstall([]string{"--print"}); err != nil {
+		t.Fatalf("uninstall --print: %v", err)
+	}
+
+	// Settings.json must be unchanged.
+	afterData, _ := os.ReadFile(settingsPath)
+	if string(beforeData) != string(afterData) {
+		t.Error("--print must not modify settings.json")
+	}
+
+	// Agent files must still be present.
+	owned := ownedTillerAgentFiles(agentsDir)
+	if len(owned) != 6 {
+		t.Errorf("--print must not remove agents; expected 6, got %d", len(owned))
+	}
+}
+
+// TestRunUninstall_ForeignHookPreserved verifies that a foreign hook entry
+// (non-tiller command) survives uninstall and no empty husks remain.
+func TestRunUninstall_ForeignHookPreserved(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	settingsPath := filepath.Join(tmpHome, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Build settings with both a tiller hook and a foreign hook.
+	tillerCmd := "/usr/local/bin/tiller hook"
+	foreignCmd := "/usr/local/bin/block-hypha-serve.sh"
+	settings := map[string]interface{}{
+		"hooks": map[string]interface{}{
+			"PreToolUse": []interface{}{
+				map[string]interface{}{
+					"matcher": ".*",
+					"hooks": []interface{}{
+						map[string]interface{}{"type": "command", "command": tillerCmd},
+					},
+				},
+				map[string]interface{}{
+					"matcher": ".*",
+					"hooks": []interface{}{
+						map[string]interface{}{"type": "command", "command": foreignCmd},
+					},
+				},
+			},
+			"PostToolUse": []interface{}{
+				map[string]interface{}{
+					"matcher": ".*",
+					"hooks": []interface{}{
+						map[string]interface{}{"type": "command", "command": tillerCmd},
+					},
+				},
+			},
+		},
+	}
+	data, _ := json.MarshalIndent(settings, "", "  ")
+	if err := os.WriteFile(settingsPath, append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Uninstall.
+	if err := runUninstall([]string{}); err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+
+	// Read back settings.
+	after, _ := os.ReadFile(settingsPath)
+	var s map[string]interface{}
+	if err := json.Unmarshal(after, &s); err != nil {
+		t.Fatalf("parse settings: %v", err)
+	}
+
+	hooks, ok := s["hooks"].(map[string]interface{})
+	if !ok {
+		t.Fatal("hooks map must remain (foreign hook present)")
+	}
+
+	// PreToolUse must have exactly 1 entry (foreign), no tiller entry.
+	preList, _ := hooks["PreToolUse"].([]interface{})
+	if len(preList) != 1 {
+		t.Errorf("PreToolUse: expected 1 foreign entry, got %d", len(preList))
+	}
+
+	// PostToolUse must be absent (it was all-tiller → empty → pruned).
+	if _, postOk := hooks["PostToolUse"]; postOk {
+		t.Error("PostToolUse must be pruned (was all-tiller, now empty)")
+	}
+
+	// The foreign command must survive.
+	if len(preList) > 0 {
+		entry, _ := preList[0].(map[string]interface{})
+		hooksCmds, _ := entry["hooks"].([]interface{})
+		if len(hooksCmds) > 0 {
+			h, _ := hooksCmds[0].(map[string]interface{})
+			if h["command"] != foreignCmd {
+				t.Errorf("foreign command changed: got %v, want %s", h["command"], foreignCmd)
+			}
+		}
+	}
+}
+
+// TestRunUninstall_MissingSettings verifies that uninstall exits 0 gracefully
+// when settings.json does not exist.
+func TestRunUninstall_MissingSettings(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	// Do not create settings.json or agents dir — they don't exist.
+	if err := runUninstall([]string{}); err != nil {
+		t.Fatalf("uninstall with missing settings must exit 0, got: %v", err)
+	}
+}
+
+// TestRunUninstall_Project verifies --project flag uninstalls from ./.claude.
+func TestRunUninstall_Project(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Change CWD so claudePaths(project=true) resolves into tmpDir.
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origWd) })
+
+	// Install project-scope.
+	if err := runInstall([]string{"--project"}); err != nil {
+		t.Fatalf("install --project: %v", err)
+	}
+
+	// Uninstall project-scope.
+	if err := runUninstall([]string{"--project"}); err != nil {
+		t.Fatalf("uninstall --project: %v", err)
+	}
+
+	// No tiller agents remain.
+	agentsDir := filepath.Join(tmpDir, ".claude", "agents")
+	remaining := tillerAgentFilesIn(agentsDir)
+	if len(remaining) != 0 {
+		t.Errorf("tiller-* files remain after --project uninstall: %v", remaining)
+	}
+}

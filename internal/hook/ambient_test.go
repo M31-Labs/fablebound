@@ -870,3 +870,52 @@ func TestGap2_GeneralPurposeWithNonReasonModelAllowed(t *testing.T) {
 		t.Errorf("expected allow for general-purpose with non-reason model, got %q", decision)
 	}
 }
+
+// ─── AllowSelfUninstall escape hatch ────────────────────────────────────────
+
+// TestSelfUninstall_Allow: bare "tiller uninstall" is allowed from a fable
+// ambient session (escape hatch — user must be able to exit a gated session).
+func TestSelfUninstall_Allow(t *testing.T) {
+	p := fableTranscript(t)
+	decision := runAmbientHookFull(t, p, "Bash", map[string]any{"command": "tiller uninstall"})
+	if decision != "allow" {
+		t.Errorf("expected allow for 'tiller uninstall' escape hatch, got %q", decision)
+	}
+}
+
+// TestSelfUninstall_AllowPrint: "tiller uninstall --print" is allowed.
+func TestSelfUninstall_AllowPrint(t *testing.T) {
+	p := fableTranscript(t)
+	decision := runAmbientHookFull(t, p, "Bash", map[string]any{"command": "tiller uninstall --print"})
+	if decision != "allow" {
+		t.Errorf("expected allow for 'tiller uninstall --print', got %q", decision)
+	}
+}
+
+// TestSelfUninstall_AllowProject: "tiller uninstall --project" is allowed.
+func TestSelfUninstall_AllowProject(t *testing.T) {
+	p := fableTranscript(t)
+	decision := runAmbientHookFull(t, p, "Bash", map[string]any{"command": "tiller uninstall --project"})
+	if decision != "allow" {
+		t.Errorf("expected allow for 'tiller uninstall --project', got %q", decision)
+	}
+}
+
+// TestSelfUninstall_DenyChained: "tiller uninstall; rm -rf /" is denied.
+func TestSelfUninstall_DenyChained(t *testing.T) {
+	p := fableTranscript(t)
+	cmd := "tiller uninstall; rm -rf /"
+	decision := runAmbientHookFull(t, p, "Bash", map[string]any{"command": cmd})
+	if decision != "deny" {
+		t.Errorf("expected deny for chained uninstall command, got %q", decision)
+	}
+}
+
+// TestSelfUninstall_DenyInstall: "tiller install" remains denied (only uninstall is the escape hatch).
+func TestSelfUninstall_DenyInstall(t *testing.T) {
+	p := fableTranscript(t)
+	decision := runAmbientHookFull(t, p, "Bash", map[string]any{"command": "tiller install"})
+	if decision != "deny" {
+		t.Errorf("expected deny for 'tiller install' (not the escape hatch), got %q", decision)
+	}
+}

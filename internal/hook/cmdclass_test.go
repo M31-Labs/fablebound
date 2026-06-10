@@ -168,3 +168,58 @@ func TestClassifyCommand(t *testing.T) {
 		})
 	}
 }
+
+// TestIsSelfUninstall exercises the IsSelfUninstall escape-hatch predicate.
+func TestIsSelfUninstall(t *testing.T) {
+	cases := []struct {
+		cmd  string
+		want bool
+	}{
+		// ── Allowed forms ────────────────────────────────────────────────────
+		{"tiller uninstall", true},
+		{"tiller uninstall --print", true},
+		{"tiller uninstall --project", true},
+		{"tiller uninstall --print --project", true},
+		{"tiller uninstall --project --print", true},
+		// Full path binary — base must be "tiller".
+		{"/usr/local/bin/tiller uninstall", true},
+		{"/home/user/go/bin/tiller uninstall --print", true},
+
+		// ── Denied: chaining ─────────────────────────────────────────────────
+		{"tiller uninstall; rm -rf /", false},
+		{"tiller uninstall && echo done", false},
+		{"tiller uninstall || true", false},
+
+		// ── Denied: wrong subcommand ─────────────────────────────────────────
+		{"tiller install", false},
+		{"tiller run foo", false},
+		{"tiller version", false},
+		{"tiller uninstall extra-arg", false},
+
+		// ── Denied: duplicate flags ───────────────────────────────────────────
+		{"tiller uninstall --print --print", false},
+		{"tiller uninstall --project --project", false},
+
+		// ── Denied: unknown flags ─────────────────────────────────────────────
+		{"tiller uninstall --force", false},
+		{"tiller uninstall --dry-run", false},
+
+		// ── Denied: dangerous patterns ────────────────────────────────────────
+		{"tiller uninstall > /dev/null", false},
+		{"tiller uninstall `rm x`", false},
+
+		// ── Denied: wrong binary ──────────────────────────────────────────────
+		{"notiller uninstall", false},
+		{"", false},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.cmd, func(t *testing.T) {
+			got := IsSelfUninstall(tc.cmd)
+			if got != tc.want {
+				t.Errorf("IsSelfUninstall(%q) = %v, want %v", tc.cmd, got, tc.want)
+			}
+		})
+	}
+}

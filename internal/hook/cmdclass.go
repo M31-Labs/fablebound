@@ -374,6 +374,71 @@ func classifyGit(sub string, argv []string) string {
 	return "other"
 }
 
+// IsSelfUninstall returns true if cmd is exactly "tiller uninstall" with only
+// the optional --print and/or --project flags and no other arguments, no
+// chaining, no redirects, and no command substitution.
+//
+// Allowed forms (any order of flags):
+//
+//	tiller uninstall
+//	tiller uninstall --print
+//	tiller uninstall --project
+//	tiller uninstall --print --project
+//	tiller uninstall --project --print
+//
+// Any chaining operator (;, &&, ||, |, &), redirect (>, <), or substitution
+// causes the function to return false immediately.
+func IsSelfUninstall(cmd string) bool {
+	segments, ok := splitSegmentsQuoteAware(cmd)
+	if !ok {
+		// Dangerous metacharacter or unterminated quote — not safe.
+		return false
+	}
+	// Must be exactly one segment.
+	if len(segments) != 1 {
+		return false
+	}
+	fields := strings.Fields(segments[0])
+	if len(fields) == 0 {
+		return false
+	}
+	// Strip leading env assignments.
+	start := 0
+	for start < len(fields) && isVarAssignment(fields[start]) {
+		start++
+	}
+	argv := fields[start:]
+	// Must start with "tiller" or a path whose base is "tiller".
+	if len(argv) < 2 {
+		return false
+	}
+	if filepath.Base(argv[0]) != "tiller" {
+		return false
+	}
+	if argv[1] != "uninstall" {
+		return false
+	}
+	// All remaining args must be --print or --project, each at most once.
+	seenPrint, seenProject := false, false
+	for _, arg := range argv[2:] {
+		switch arg {
+		case "--print":
+			if seenPrint {
+				return false // duplicate
+			}
+			seenPrint = true
+		case "--project":
+			if seenProject {
+				return false // duplicate
+			}
+			seenProject = true
+		default:
+			return false // unknown arg
+		}
+	}
+	return true
+}
+
 // classifyHypha classifies a hypha invocation.
 // All subcommands allowed EXCEPT "mcp serve" and "hub serve".
 func classifyHypha(sub string, argv []string) string {

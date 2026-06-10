@@ -125,7 +125,14 @@ func printInstallPlan(settingsPath, agentsDir string, entry settingsHookEntry, c
 }
 
 // runUninstall implements `tiller uninstall [--print] [--project]`.
-// Removes only tiller's hook entries and tiller-*.md agent files.
+//
+// Removes only tiller's hook entries and owned tiller-*.md agent files.
+// Foreign hooks and user-created agent files are never touched.
+// After removal, prints a trial-exit report showing what was removed,
+// what is intentionally left, and how to finish cleanup.
+//
+// --print: show the plan without writing (idempotent dry-run).
+// --project: uninstall from ./.claude/ instead of ~/.claude/.
 func runUninstall(args []string) error {
 	fset := flag.NewFlagSet("uninstall", flag.ContinueOnError)
 	printOnly := fset.Bool("print", false, "print what would be removed without writing")
@@ -139,13 +146,19 @@ func runUninstall(args []string) error {
 		return err
 	}
 
-	settings, err := loadOrInitSettings(settingsPath)
+	// Load settings — missing file is not an error (nothing to uninstall).
+	settings, settingsMissing, err := loadSettingsForUninstall(settingsPath)
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
 	}
 
-	removedHooks := removeHookEntries(settings)
-	agentFiles := tillerAgentFilesIn(agentsDir)
+	// Determine what would be removed (mutates settings in-place for hooks).
+	var removedHooks []string
+	if !settingsMissing {
+		removedHooks = removeHookEntries(settings)
+		pruneEmptyHookContainers(settings)
+	}
+	agentFiles := ownedTillerAgentFiles(agentsDir)
 
 	if len(removedHooks) == 0 && len(agentFiles) == 0 {
 		fmt.Println("tiller: nothing to uninstall")
@@ -153,16 +166,25 @@ func runUninstall(args []string) error {
 	}
 
 	if *printOnly {
-		for _, ev := range removedHooks {
-			fmt.Printf("would remove: %s hook entry from %s\n", ev, settingsPath)
+		fmt.Println("# tiller uninstall --print (no files written)")
+		fmt.Println()
+		if len(removedHooks) > 0 {
+			fmt.Printf("## hooks to remove from %s\n", settingsPath)
+			for _, ev := range removedHooks {
+				fmt.Printf("  %s hook entry (command ending with 'tiller hook')\n", ev)
+			}
+			fmt.Println()
 		}
-		for _, name := range agentFiles {
-			fmt.Printf("would remove: %s\n", filepath.Join(agentsDir, name))
+		if len(agentFiles) > 0 {
+			fmt.Printf("## agent files to remove from %s\n", agentsDir)
+			for _, name := range agentFiles {
+				fmt.Printf("  %s\n", filepath.Join(agentsDir, name))
+			}
 		}
 		return nil
 	}
 
-	// Remove hooks.
+	// ── Remove hooks ──────────────────────────────────────────────────────────
 	if len(removedHooks) > 0 {
 		if err := writeSettings(settingsPath, settings); err != nil {
 			return fmt.Errorf("write settings: %w", err)
@@ -172,17 +194,101 @@ func runUninstall(args []string) error {
 		}
 	}
 
-	// Remove agent files.
+	// ── Remove owned agent files ──────────────────────────────────────────────
+	var removedAgents []string
 	for _, name := range agentFiles {
 		p := filepath.Join(agentsDir, name)
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove agent %s: %w", p, err)
 		}
 		fmt.Printf("tiller: removed agent %s\n", p)
+		removedAgents = append(removedAgents, p)
 	}
 
-	fmt.Println("tiller: uninstalled")
+	// ── Trial-exit report ─────────────────────────────────────────────────────
+	printTrialExitReport(removedHooks, removedAgents, settingsPath)
 	return nil
+}
+
+// loadSettingsForUninstall reads settings.json for uninstall.
+// Returns (settings, missing=true, nil) when the file does not exist.
+// Returns (nil, false, err) on parse errors (malformed JSON).
+func loadSettingsForUninstall(path string) (settings map[string]interface{}, missing bool, err error) {
+	data, readErr := os.ReadFile(path)
+	if os.IsNotExist(readErr) {
+		return nil, true, nil
+	}
+	if readErr != nil {
+		return nil, false, fmt.Errorf("read %s: %w", path, readErr)
+	}
+	var s map[string]interface{}
+	if jsonErr := json.Unmarshal(data, &s); jsonErr != nil {
+		return nil, false, fmt.Errorf("parse %s: %w", path, jsonErr)
+	}
+	return s, false, nil
+}
+
+// pruneEmptyHookContainers removes empty arrays and the hooks map itself from
+// settings when they become empty after tiller hook entries are removed.
+// This prevents accumulation of empty "hooks": {} husks in settings.json.
+func pruneEmptyHookContainers(settings map[string]interface{}) {
+	hooksRaw, ok := settings["hooks"]
+	if !ok {
+		return
+	}
+	hooks, ok := hooksRaw.(map[string]interface{})
+	if !ok {
+		return
+	}
+	// Remove keys whose arrays are now empty.
+	for k, v := range hooks {
+		list, ok := v.([]interface{})
+		if ok && len(list) == 0 {
+			delete(hooks, k)
+		}
+	}
+	// If the hooks map itself is now empty, remove it from settings.
+	if len(hooks) == 0 {
+		delete(settings, "hooks")
+	}
+}
+
+// ownedTillerAgentFiles returns the list of agent filenames in agentsDir that
+// tiller owns — i.e. filenames that exactly match an embedded tiller-*.md file.
+// User-created files named tiller-*.md that are NOT in the embedded set are
+// intentionally left alone.
+func ownedTillerAgentFiles(agentsDir string) []string {
+	// Build the set of names tiller owns from the embedded FS.
+	ownedSet := make(map[string]bool)
+	for _, name := range agents.AgentFileNames() {
+		ownedSet[name] = true
+	}
+
+	entries, err := os.ReadDir(agentsDir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() && ownedSet[e.Name()] {
+			out = append(out, e.Name())
+		}
+	}
+	return out
+}
+
+// printTrialExitReport prints the short post-uninstall summary.
+func printTrialExitReport(removedHooks []string, removedAgentPaths []string, settingsPath string) {
+	fmt.Println()
+	fmt.Println("tiller uninstalled.")
+	fmt.Printf("  hooks removed:  %d (%s)\n", len(removedHooks), settingsPath)
+	fmt.Printf("  agents removed: %d\n", len(removedAgentPaths))
+	fmt.Println()
+	fmt.Println("What's still on disk (yours to keep or remove):")
+	fmt.Println("  binary:   rm $(which tiller)")
+	fmt.Println("  run data: .tiller/ dirs in your projects (run history, audit logs — untouched)")
+	fmt.Println()
+	fmt.Println("Active fable sessions disengage on their next tool call — no restart needed.")
 }
 
 // claudePaths returns the settings.json path and agents/ directory for the

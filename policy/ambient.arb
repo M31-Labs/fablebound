@@ -103,24 +103,32 @@ rule DenyHyphaDaemons priority 14 {
     then Deny { reason: "persistent hypha daemons are forbidden (22GB OOM incident)" }
 }
 
-# AllowReadOnlyBash — allows the ambient orchestrator to run read-only Bash
-# commands (git log, ls, cat, gts callgraph, hypha recall, …) without forcing
-# a round-trip investigator dispatch for trivial lookups.
+# AllowPermittedBash — allows the ambient orchestrator to run Bash commands
+# that carry an explicitly permitted command class:
 #
-# The Go-side ClassifyCommand classifier splits the command into segments,
-# strips env assignments, and checks every argv0+subcommand against the
-# read-only allowlist.  Only when every segment classifies as "readonly" does
-# the hook set tool.command_class = "readonly".
+#   "readonly"       — read-only commands (git log, ls, cat, gts, hypha recall,
+#                      …).  The Go-side ClassifyCommand classifier sets this class
+#                      only when every pipeline segment is in the read-only
+#                      allowlist and no dangerous redirects/substitutions appear.
+#                      "2>&1" is the one permitted redirect token.
 #
-# Redirect/substitution policy: "2>&1" (the exact token) is permitted so that
-# the standard pattern "hypha recall '...' 2>&1 | head -80" works correctly.
-# Any other >, >>, <, backtick, or $( anywhere → "other".
-rule AllowReadOnlyBash priority 15 {
+#   "self-uninstall" — escape hatch for "tiller uninstall [--print] [--project]".
+#                      The Go-side IsSelfUninstall predicate (quote-aware tokenizer,
+#                      single-segment check, argv validation) sets this class.  The
+#                      class is intentionally distinct from "readonly" because
+#                      uninstall mutates settings.json; the classifier must stay
+#                      honest.
+#
+# These two classes are combined in one rule to avoid an arbiter v1.8.0 VM
+# quirk: having two separate inline-condition rules before a segment-based rule
+# causes the segment rule to not evaluate.  A single OR condition is the
+# correct workaround.
+rule AllowPermittedBash priority 15 {
     when {
         (tool.name == "Bash") and
-        (tool.command_class == "readonly")
+        (tool.command_class == "readonly" or tool.command_class == "self-uninstall")
     }
-    then Allow { reason: "read-only Bash command permitted for the ambient orchestrator (ls, cat, git log, gts, hypha, …)" }
+    then Allow { reason: "Bash command permitted for the ambient orchestrator (class: {tool.command_class})" }
 }
 
 # AllowMarkdownAuthoring — allows the ambient orchestrator to Write or Edit

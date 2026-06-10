@@ -401,9 +401,20 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer) error {
 	req.Command = input.Command
 	req.FilePath = input.FilePath
 
-	// Populate CommandClass for Bash calls (used by AllowReadOnlyBash rule).
+	// Populate CommandClass for Bash calls (used by AllowPermittedBash rule,
+	// which covers both "readonly" and "self-uninstall" classes).
+	//
+	// IsSelfUninstall takes priority: if the command is exactly
+	// "tiller uninstall [--print] [--project]", classify it as "self-uninstall"
+	// so AllowPermittedBash can fire.  This class is NOT "readonly" (the command
+	// mutates settings.json) — it is a distinct escape-hatch class.
+	// For all other commands, ClassifyCommand determines "readonly" or "other".
 	if event.ToolName == "Bash" {
-		req.CommandClass = ClassifyCommand(input.Command)
+		if IsSelfUninstall(input.Command) {
+			req.CommandClass = "self-uninstall"
+		} else {
+			req.CommandClass = ClassifyCommand(input.Command)
+		}
 	}
 
 	// Populate AgentType and AgentModelTier for Task/Agent calls.

@@ -5,8 +5,9 @@
 # No match → deny (combinator default).
 #
 # Coverage targets: HaltAmbient (kill_switch), AllowRead, AllowAgent,
-# AllowTodoWrite, AllowWebFetch, DenyHyphaDaemons, AllowReadOnlyBash,
-# AllowMarkdownAuthoring, DenyExecution.
+# AllowTodoWrite, AllowWebFetch, DenyHyphaDaemons, AllowPermittedBash
+# (covers readonly + self-uninstall classes), AllowMarkdownAuthoring,
+# DenyExecution.
 
 # ── AllowRead ────────────────────────────────────────────────────────────────
 
@@ -193,7 +194,7 @@ test "Bash go build is denied (DenyExecution — not readonly)" {
         run.id: ""
     }
     expect rule DenyExecution matched
-    expect rule AllowReadOnlyBash not matched
+    expect rule AllowPermittedBash not matched
 }
 
 # ── DenyHyphaDaemons (defense-in-depth, priority 14) ─────────────────────────
@@ -213,7 +214,7 @@ test "hypha mcp serve is denied (daemon guard, priority 14)" {
         run.id: ""
     }
     expect rule DenyHyphaDaemons matched
-    expect rule AllowReadOnlyBash not matched
+    expect rule AllowPermittedBash not matched
 }
 
 test "hypha hub serve is denied (daemon guard, priority 14)" {
@@ -231,10 +232,10 @@ test "hypha hub serve is denied (daemon guard, priority 14)" {
         run.id: ""
     }
     expect rule DenyHyphaDaemons matched
-    expect rule AllowReadOnlyBash not matched
+    expect rule AllowPermittedBash not matched
 }
 
-# ── AllowReadOnlyBash (priority 15) ─────────────────────────────────────────
+# ── AllowPermittedBash (priority 15) ─────────────────────────────────────────
 
 test "hypha recall is allowed (readonly bash)" {
     given {
@@ -250,7 +251,7 @@ test "hypha recall is allowed (readonly bash)" {
         tool.write_class: ""
         run.id: ""
     }
-    expect rule AllowReadOnlyBash matched
+    expect rule AllowPermittedBash matched
 }
 
 test "hypha recall with 2>&1 pipe is allowed (readonly bash)" {
@@ -267,7 +268,7 @@ test "hypha recall with 2>&1 pipe is allowed (readonly bash)" {
         tool.write_class: ""
         run.id: ""
     }
-    expect rule AllowReadOnlyBash matched
+    expect rule AllowPermittedBash matched
 }
 
 test "hypha pulse piped to head is allowed (readonly bash)" {
@@ -284,7 +285,7 @@ test "hypha pulse piped to head is allowed (readonly bash)" {
         tool.write_class: ""
         run.id: ""
     }
-    expect rule AllowReadOnlyBash matched
+    expect rule AllowPermittedBash matched
 }
 
 test "git log is allowed (readonly bash)" {
@@ -301,7 +302,7 @@ test "git log is allowed (readonly bash)" {
         tool.write_class: ""
         run.id: ""
     }
-    expect rule AllowReadOnlyBash matched
+    expect rule AllowPermittedBash matched
 }
 
 test "gts callgraph piped to wc is allowed (readonly bash)" {
@@ -318,7 +319,7 @@ test "gts callgraph piped to wc is allowed (readonly bash)" {
         tool.write_class: ""
         run.id: ""
     }
-    expect rule AllowReadOnlyBash matched
+    expect rule AllowPermittedBash matched
 }
 
 test "ls semicolon rm is denied (other bash)" {
@@ -335,7 +336,7 @@ test "ls semicolon rm is denied (other bash)" {
         tool.write_class: ""
         run.id: ""
     }
-    expect rule AllowReadOnlyBash not matched
+    expect rule AllowPermittedBash not matched
     expect rule DenyExecution matched
 }
 
@@ -353,7 +354,7 @@ test "cat with redirect is denied (other bash)" {
         tool.write_class: ""
         run.id: ""
     }
-    expect rule AllowReadOnlyBash not matched
+    expect rule AllowPermittedBash not matched
     expect rule DenyExecution matched
 }
 
@@ -371,7 +372,7 @@ test "git branch new-feature is denied (other bash)" {
         tool.write_class: ""
         run.id: ""
     }
-    expect rule AllowReadOnlyBash not matched
+    expect rule AllowPermittedBash not matched
     expect rule DenyExecution matched
 }
 
@@ -389,7 +390,7 @@ test "echo with command substitution is denied (other bash)" {
         tool.write_class: ""
         run.id: ""
     }
-    expect rule AllowReadOnlyBash not matched
+    expect rule AllowPermittedBash not matched
     expect rule DenyExecution matched
 }
 
@@ -734,4 +735,103 @@ test "Task tiller-worker with no model override is allowed (frontmatter governs)
     expect rule DenyImplicitReasonInheritance not matched
     expect rule DenyReasonModelSubagent not matched
     expect rule AllowAgent matched
+}
+
+# ── AllowPermittedBash: self-uninstall escape hatch ─────────────────────────
+
+test "tiller uninstall is allowed (escape hatch)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "tiller uninstall"
+        tool.command_class: "self-uninstall"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule AllowPermittedBash matched
+}
+
+test "tiller uninstall --print is allowed (escape hatch)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "tiller uninstall --print"
+        tool.command_class: "self-uninstall"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule AllowPermittedBash matched
+}
+
+test "tiller uninstall --project is allowed (escape hatch)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "tiller uninstall --project"
+        tool.command_class: "self-uninstall"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule AllowPermittedBash matched
+}
+
+test "tiller uninstall chained with rm is denied (command_class=other)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "tiller uninstall; rm -rf /"
+        tool.command_class: "other"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule AllowPermittedBash not matched
+    expect rule DenyExecution matched
+}
+
+test "tiller install is denied (not uninstall)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "tiller install"
+        tool.command_class: "other"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule AllowPermittedBash not matched
+    expect rule DenyExecution matched
 }

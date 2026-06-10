@@ -98,32 +98,11 @@ func runRun(_ []string) error {
 	return fmt.Errorf("not implemented")
 }
 
-func runDispatch(_ []string) error {
-	return fmt.Errorf("not implemented")
-}
-
-func runPoll(_ []string) error {
-	return fmt.Errorf("not implemented")
-}
-
-func runAwait(_ []string) error {
-	return fmt.Errorf("not implemented")
-}
-
-func runNote(_ []string) error {
-	return fmt.Errorf("not implemented")
-}
-
 func runRuns(_ []string) error {
 	return fmt.Errorf("not implemented")
 }
 
 func runPromote(_ []string) error {
-	return fmt.Errorf("not implemented")
-}
-
-
-func runSupervise(_ []string) error {
 	return fmt.Errorf("not implemented")
 }
 

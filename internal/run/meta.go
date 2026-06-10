@@ -9,19 +9,21 @@ import (
 
 // Meta is the per-dispatch record written to dispatches/<id>/meta.json.
 type Meta struct {
-	ID         string     `json:"id"`
-	Parent     string     `json:"parent,omitempty"` // parent dispatch id; "" for root
-	Role       string     `json:"role"`
-	Model      string     `json:"model"`
-	Profile    string     `json:"profile"`   // settings/toolgate class
-	Status     string     `json:"status"`    // running|completed|failed|halted
-	Depth      int        `json:"depth"`
-	StartedAt  time.Time  `json:"started_at"`
-	EndedAt    *time.Time `json:"ended_at,omitempty"`
-	Exit       int        `json:"exit,omitempty"`
-	CostUSD    float64    `json:"cost_usd,omitempty"`
-	NumTurns   int        `json:"num_turns,omitempty"`
-	SessionID  string     `json:"session_id,omitempty"`
+	ID             string     `json:"id"`
+	Parent         string     `json:"parent,omitempty"` // parent dispatch id; "" for root
+	Role           string     `json:"role"`
+	Model          string     `json:"model"`
+	Profile        string     `json:"profile"`          // settings/toolgate class
+	Status         string     `json:"status"`           // running|completed|failed|halted
+	Depth          int        `json:"depth"`
+	MaxTurns       int        `json:"max_turns,omitempty"`
+	TimeoutMinutes int        `json:"timeout_minutes,omitempty"`
+	StartedAt      time.Time  `json:"started_at"`
+	EndedAt        *time.Time `json:"ended_at,omitempty"`
+	Exit           int        `json:"exit,omitempty"`
+	CostUSD        float64    `json:"cost_usd,omitempty"`
+	NumTurns       int        `json:"num_turns,omitempty"`
+	SessionID      string     `json:"session_id,omitempty"`
 }
 
 // IsTerminal returns true if the meta status is a terminal state.

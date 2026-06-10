@@ -75,7 +75,7 @@ func HandlePostToolUse(id Identity, event HookEvent) error {
 		Status:       status,
 	}
 	toolTracePath := filepath.Join(dispatchDir, "tool_trace.jsonl")
-	if err := appendJSONL(toolTracePath, toolEvent); err != nil {
+	if err := AppendJSONL(toolTracePath, toolEvent); err != nil {
 		return fmt.Errorf("tool_trace.jsonl: %w", err)
 	}
 
@@ -92,7 +92,7 @@ func HandlePostToolUse(id Identity, event HookEvent) error {
 			InputSummary: summary,
 		}
 		ctxTracePath := filepath.Join(dispatchDir, "context_trace.jsonl")
-		if err := appendJSONL(ctxTracePath, readEvent); err != nil {
+		if err := AppendJSONL(ctxTracePath, readEvent); err != nil {
 			return fmt.Errorf("context_trace.jsonl: %w", err)
 		}
 	}
@@ -100,9 +100,10 @@ func HandlePostToolUse(id Identity, event HookEvent) error {
 	return nil
 }
 
-// appendJSONL opens path for appending with an exclusive flock, marshals v as
+// AppendJSONL opens path for appending with an exclusive flock, marshals v as
 // a single JSON line, and closes (releasing the lock).
-func appendJSONL(path string, v any) error {
+// Exported so that internal/spawn/supervise.go can append context_trace events.
+func AppendJSONL(path string, v any) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# claude-stub — fake claude binary for fablebound integration tests.
+# Emits canned --output-format json output on stdout.
+#
+# Environment variables (set by supervisor):
+#   FABLEBOUND_STUB_SLEEP  — seconds to sleep before output (default 0)
+#   FABLEBOUND_STUB_ROLE   — echoed in result; falls back to FABLEBOUND_ROLE
+#   FABLEBOUND_STUB_TEXT   — override result text (default: "stub report")
+#
+# The output matches claude's --output-format json schema:
+#   { "type": "result", "result": "...", "cost_usd": 0.001, "num_turns": 1,
+#     "session_id": "stub-session-<pid>", "is_error": false }
+
+sleep "${FABLEBOUND_STUB_SLEEP:-0}"
+
+role="${FABLEBOUND_STUB_ROLE:-${FABLEBOUND_ROLE:-unknown}}"
+text="${FABLEBOUND_STUB_TEXT:-stub report for role=${role}}"
+pid=$$
+
+printf '{"type":"result","result":"%s","cost_usd":0.001,"num_turns":1,"session_id":"stub-session-%s","is_error":false}\n' \
+    "$(printf '%s' "$text" | sed 's/"/\\"/g')" \
+    "$pid"

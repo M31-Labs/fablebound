@@ -12,25 +12,23 @@ import (
 //
 // Algorithm
 //
-//  1. Split the command into segments on shell sequencing operators
-//     (|, ;, &&, ||) and newlines. Each token on either side of these
-//     operators is treated independently.
+//  1. Walk the command with a quote-aware state machine to find real (unquoted)
+//     shell metacharacters.  States: unquoted, single-quoted, double-quoted,
+//     and backslash-escape (in unquoted and double-quoted contexts; inside
+//     single quotes everything is literal).
 //
-//  2. Strip leading VAR=val environment assignments from each segment
-//     (e.g. "FOO=1 BAR=2 gts callgraph X" → argv0 = "gts").
+//  2. Segment separators (|, ;, &, &&, ||, newline) and redirects (>, >>, <)
+//     are recognised only in the unquoted state.  The exact token "2>&1" is
+//     permitted (the only form needed for capturing stderr).
 //
-//  3. Redirect/substitution policy (conservative, documented):
-//     • "2>&1" (exact token) is permitted — it is the documented usage
-//       pattern for capturing stderr alongside stdout (e.g. hypha recall
-//       "..." 2>&1 | head -80).
-//     • Any other ">" or ">>" anywhere → other (output redirect).
-//     • Any "<" anywhere → other (input redirect — arguably safe but kept
-//       conservative per spec).
-//     • Any backtick or "$(" anywhere → other (command substitution).
+//  3. Command substitution ($( or backtick) is dangerous in unquoted AND
+//     double-quoted state; inside single quotes it is literal and safe.
+//     $VAR / ${VAR} expansion (without the opening paren) is allowed.
 //
-//  4. Classify the segment by argv0 basename + subcommand where relevant.
-//     Every segment must classify as "readonly"; the first "other" segment
-//     short-circuits the whole command to "other".
+//  4. An unterminated quote → "other" (conservative).
+//
+//  5. Classify each segment by argv0 basename + subcommand.  The first
+//     "other" segment short-circuits the whole command.
 //
 // Read-only allowlist:
 //
@@ -54,16 +52,13 @@ func ClassifyCommand(cmd string) string {
 		return "other"
 	}
 
-	// Check for unsafe redirect/substitution tokens in the raw command first,
-	// but allow "2>&1" as an explicit exception.
-	// We scan for the dangerous tokens after stripping "2>&1".
-	sanitised := strings.ReplaceAll(cmd, "2>&1", "")
-	if containsRedirectOrSubst(sanitised) {
+	segments, ok := splitSegmentsQuoteAware(cmd)
+	if !ok {
+		// Unterminated quote or dangerous unquoted metacharacter found during
+		// split — conservative denial.
 		return "other"
 	}
 
-	// Split into segments on |, ;, &&, ||, newlines.
-	segments := splitSegments(cmd)
 	for _, seg := range segments {
 		if classifySegment(seg) != "readonly" {
 			return "other"
@@ -72,46 +67,177 @@ func ClassifyCommand(cmd string) string {
 	return "readonly"
 }
 
-// containsRedirectOrSubst reports whether s contains any of the dangerous
-// characters/patterns that indicate output redirect, input redirect, or
-// command substitution: >, >>, <, `, $(.
-func containsRedirectOrSubst(s string) bool {
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '>', '<', '`':
-			return true
-		case '$':
-			if i+1 < len(s) && s[i+1] == '(' {
-				return true
-			}
-		}
-	}
-	return false
-}
+// splitSegmentsQuoteAware walks cmd with a shell quote-aware state machine.
+// It returns (segments, true) when the command is syntactically clean (no
+// dangerous unquoted metacharacters other than the permitted operators).
+// It returns (nil, false) if:
+//   - an unterminated quote is detected, OR
+//   - a dangerous unquoted pattern is found:
+//     output/append redirect (>), input redirect (<), backtick (`), or
+//     command substitution ($() — note: bare $VAR is allowed.
+//
+// Permitted separators that cause a new segment: |, ;, &&, ||, newline.
+// The literal token "2>&1" (unquoted) is allowed and consumed without
+// triggering a redirect error.
+func splitSegmentsQuoteAware(cmd string) ([]string, bool) {
+	const (
+		stateUnquoted = iota
+		stateSingle
+		stateDouble
+		stateEscapeUnquoted // backslash in unquoted
+		stateEscapeDouble   // backslash in double-quoted
+	)
 
-// splitSegments splits a shell command string into segments on the sequencing
-// operators |, ;, &&, ||, and newlines.  The split is textual (no quoting
-// awareness needed for our classifier — misclassifying a quoted "|" is
-// acceptable since the conservative fallback is "other").
-func splitSegments(cmd string) []string {
-	// Replace multi-char operators first, then split on single chars.
-	// We normalise &&, || to ; for simplicity, then split on | and ;.
+	state := stateUnquoted
+	var current strings.Builder
+	var segments []string
+
+	flush := func() {
+		s := strings.TrimSpace(current.String())
+		if s != "" {
+			segments = append(segments, s)
+		}
+		current.Reset()
+	}
+
 	s := cmd
-	s = strings.ReplaceAll(s, "&&", ";")
-	s = strings.ReplaceAll(s, "||", ";")
-	s = strings.ReplaceAll(s, "\n", ";")
-	// Now split on | and ;.
-	// We split on | separately first, then on ;.
-	var segs []string
-	for _, part := range strings.Split(s, "|") {
-		for _, sub := range strings.Split(part, ";") {
-			t := strings.TrimSpace(sub)
-			if t != "" {
-				segs = append(segs, t)
+	for i := 0; i < len(s); {
+		c := s[i]
+
+		switch state {
+		case stateEscapeUnquoted:
+			// The character after an unquoted backslash is literal; write it
+			// and return to unquoted state.
+			current.WriteByte(c)
+			state = stateUnquoted
+			i++
+
+		case stateEscapeDouble:
+			current.WriteByte(c)
+			state = stateDouble
+			i++
+
+		case stateSingle:
+			// Inside single quotes everything is literal — no escapes at all.
+			if c == '\'' {
+				state = stateUnquoted
+			} else {
+				current.WriteByte(c)
+			}
+			i++
+
+		case stateDouble:
+			switch c {
+			case '"':
+				state = stateUnquoted
+				i++
+			case '\\':
+				state = stateEscapeDouble
+				i++
+			case '`':
+				// Command substitution inside double quotes — dangerous.
+				return nil, false
+			case '$':
+				// Check for $( — command substitution even inside double quotes.
+				if i+1 < len(s) && s[i+1] == '(' {
+					return nil, false
+				}
+				// $VAR / ${VAR} are harmless variable expansions.
+				current.WriteByte(c)
+				i++
+			default:
+				current.WriteByte(c)
+				i++
+			}
+
+		case stateUnquoted:
+			switch c {
+			case '\'':
+				state = stateSingle
+				i++
+
+			case '"':
+				state = stateDouble
+				i++
+
+			case '\\':
+				state = stateEscapeUnquoted
+				i++
+
+			case '`':
+				return nil, false
+
+			case '$':
+				if i+1 < len(s) && s[i+1] == '(' {
+					return nil, false
+				}
+				current.WriteByte(c)
+				i++
+
+			case '>':
+				// Allow the exact "2>&1" token — check if the current buffer
+				// ends with "2" and what follows is ">&1" (optionally followed
+				// by space/end).
+				if i+2 < len(s) && s[i+1] == '&' && s[i+2] == '1' {
+					// Verify the preceding char was '2'.
+					buf := current.String()
+					if len(buf) > 0 && buf[len(buf)-1] == '2' {
+						// Consume >&1; strip trailing '2' from current.
+						current.Reset()
+						current.WriteString(buf[:len(buf)-1])
+						i += 3 // skip >&1
+						continue
+					}
+				}
+				// Any other > is an output redirect — dangerous.
+				return nil, false
+
+			case '<':
+				return nil, false
+
+			case '|':
+				// Check for ||
+				if i+1 < len(s) && s[i+1] == '|' {
+					flush()
+					i += 2
+				} else {
+					// Pipeline segment separator.
+					flush()
+					i++
+				}
+
+			case '&':
+				// Check for &&
+				if i+1 < len(s) && s[i+1] == '&' {
+					flush()
+					i += 2
+				} else {
+					// Bare & (background job) — dangerous.
+					return nil, false
+				}
+
+			case ';':
+				flush()
+				i++
+
+			case '\n':
+				flush()
+				i++
+
+			default:
+				current.WriteByte(c)
+				i++
 			}
 		}
 	}
-	return segs
+
+	// After walking the whole string, check for unterminated quotes.
+	if state == stateSingle || state == stateDouble {
+		return nil, false
+	}
+
+	flush()
+	return segments, true
 }
 
 // isVarAssignment reports whether tok looks like a shell variable assignment

@@ -135,6 +135,27 @@ func TestClassifyCommand(t *testing.T) {
 
 		// ── Empty/degenerate ─────────────────────────────────────────────────
 		{"", "other"},
+
+		// ── Quote-aware cases (TDD: these fail before the fix) ───────────────
+		// Real denied commands from the bug report.
+		{`grep -n "ambient\|Ambient" internal/hook/hook.go | head -30`, "readonly"},
+		{`grep -n "func DetectTier\|func lastFable\|Scan\|ReadFile\|Open\|bufio" internal/adapter/claudecode/detect.go | head -15`, "readonly"},
+		// Alternation in rg quoted arg.
+		{`rg "foo|bar" src/ | wc -l`, "readonly"},
+		// hypha with quoted arg containing & and |.
+		{`hypha recall "graphs & pipes | tricky" --format text`, "readonly"},
+		// Single-quoted arg with shell metacharacters — all literal.
+		{`echo 'safe $(not run) literal'`, "readonly"},
+		// $() inside double quotes — still command substitution.
+		{`echo "danger $(whoami)"`, "other"},
+		// Quoted semicolon in grep arg but real separator outside.
+		{`grep "a;b" f.txt; rm x`, "other"},
+		// > inside quoted filename arg — should be safe.
+		{`cat "file with > angle.txt"`, "readonly"},
+		// Unquoted redirect after a quoted arg.
+		{`cat f > "out.txt"`, "other"},
+		// Unterminated single quote — conservative → other.
+		{`grep 'unterminated f.txt`, "other"},
 	}
 
 	for _, tc := range cases {

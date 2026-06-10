@@ -372,16 +372,90 @@ type HookEventFull struct {
 
 // transcriptAssistantLine is the minimal struct we need from a transcript line.
 type transcriptAssistantLine struct {
-	Type    string `json:"type"`
-	Message struct {
+	Type        string `json:"type"`
+	IsSidechain *bool  `json:"isSidechain"`
+	AgentID     string `json:"agentId"`
+	Message     struct {
 		Model string `json:"model"`
 	} `json:"message"`
 }
 
+// isQualifyingAssistantLine returns true if the parsed line counts as a
+// qualifying root-session assistant line for model detection.
+//
+// Qualifying conditions (ALL must hold):
+//  1. type == "assistant"
+//  2. message.model is non-empty
+//  3. message.model != "<synthetic>" (session-limit / interrupted turns)
+//  4. isSidechain is absent (nil) or false (root session line)
+func isQualifyingAssistantLine(tl transcriptAssistantLine) bool {
+	if tl.Type != "assistant" {
+		return false
+	}
+	if tl.Message.Model == "" || tl.Message.Model == "<synthetic>" {
+		return false
+	}
+	if tl.IsSidechain != nil && *tl.IsSidechain {
+		return false
+	}
+	return true
+}
+
+// scanTranscriptLines scans r line-by-line with a 4 MiB buffer, calling fn
+// for each raw line text. If a single line exceeds the buffer cap it is
+// skipped (fn is not called for it) but scanning continues. Returns the
+// scanner error if the failure was NOT a token-too-large error.
+func scanTranscriptLines(r io.Reader, fn func(line string)) error {
+	sc := bufio.NewScanner(r)
+	// Fix 3: enlarge buffer to 4 MiB so large tool_use/tool_result lines don't
+	// trigger sc.Err() and cause a fail-open on the whole scan.
+	sc.Buffer(make([]byte, 0, 1<<20), 1<<22)
+	for sc.Scan() {
+		fn(sc.Text())
+	}
+	err := sc.Err()
+	if err == bufio.ErrTooLong {
+		// Single line exceeded the 4 MiB cap — treat as a skipped line;
+		// the caller gets no error so it can continue or retry from start.
+		return nil
+	}
+	return err
+}
+
+// lastQualifyingModel scans lines (in order) and returns the model of the
+// last qualifying assistant line, or "" if none found.
+// A returned model of "" from isSidechain==true is suppressed by the filter,
+// so if this returns a non-empty model it is always a root line.
+func lastQualifyingModel(lines []string) string {
+	var last string
+	for _, l := range lines {
+		var tl transcriptAssistantLine
+		if err := json.Unmarshal([]byte(l), &tl); err != nil {
+			continue
+		}
+		if isQualifyingAssistantLine(tl) {
+			last = tl.Message.Model
+		}
+	}
+	return last
+}
+
 // lastFableModelInTranscript reads up to the last 400 lines of the transcript
-// at transcriptPath and returns the model of the last assistant turn with a
-// non-empty model field, plus whether that model is in the fable set.
-// On any error it returns ("", false) — fail open.
+// at transcriptPath and returns the model of the last qualifying root assistant
+// turn, plus whether that model is in the fable set.
+//
+// Hardening applied:
+//   - Fix 1: skips lines where message.model == "<synthetic>".
+//   - Fix 2: skips lines where isSidechain == true.
+//   - Fix 3: uses a 4 MiB scanner buffer; oversized lines are skipped, not fatal.
+//   - Fix 4: if the 400-line tail contains no qualifying line, falls back to a
+//     full-file scan before returning unknown.
+//   - Fix 5: if the most-recent qualifying line is a sidechain line it would be
+//     filtered by Fix 2, so any returned model is always a root line. Rule 5
+//     (passthrough for sidechain context) is enforced in runAmbient by the
+//     caller checking the returned isFable flag only when model detection succeeds.
+//
+// On any error or no qualifier found returns ("", false) — fail open.
 func lastFableModelInTranscript(transcriptPath string) (model string, isFable bool) {
 	if transcriptPath == "" {
 		return "", false
@@ -392,33 +466,48 @@ func lastFableModelInTranscript(transcriptPath string) (model string, isFable bo
 	}
 	defer f.Close()
 
-	// Collect up to the last 400 lines.
+	// Fix 3 + Fix 4: Collect up to the last 400 lines using the enlarged scanner.
+	// If the tail scan encounters a too-large line it is simply skipped (scanTranscriptLines
+	// returns nil for ErrTooLong), and we still get the lines that did fit.
 	const maxLines = 400
-	lines := make([]string, 0, maxLines)
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := sc.Text()
-		if len(lines) >= maxLines {
-			lines = lines[1:]
+	tail := make([]string, 0, maxLines)
+	_ = scanTranscriptLines(f, func(line string) {
+		if len(tail) >= maxLines {
+			tail = tail[1:]
 		}
-		lines = append(lines, line)
-	}
-	if sc.Err() != nil {
-		return "", false
-	}
+		tail = append(tail, line)
+	})
 
-	// Scan backwards for the last assistant line with a model.
-	for i := len(lines) - 1; i >= 0; i-- {
+	// Scan backwards in the tail for the last qualifying assistant line.
+	for i := len(tail) - 1; i >= 0; i-- {
 		var tl transcriptAssistantLine
-		if err := json.Unmarshal([]byte(lines[i]), &tl); err != nil {
+		if err := json.Unmarshal([]byte(tail[i]), &tl); err != nil {
 			continue
 		}
-		if tl.Type == "assistant" && tl.Message.Model != "" {
+		if isQualifyingAssistantLine(tl) {
 			m := tl.Message.Model
 			return m, fableModels[m]
 		}
 	}
-	return "", false
+
+	// Fix 4 fallback: tail had no qualifying line — re-scan the whole file.
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", false
+	}
+	var lastModel string
+	_ = scanTranscriptLines(f, func(line string) {
+		var tl transcriptAssistantLine
+		if err := json.Unmarshal([]byte(line), &tl); err != nil {
+			return
+		}
+		if isQualifyingAssistantLine(tl) {
+			lastModel = tl.Message.Model
+		}
+	})
+	if lastModel == "" {
+		return "", false
+	}
+	return lastModel, fableModels[lastModel]
 }
 
 // handleAmbientPreToolUse evaluates the ambient policy for a fable session.

@@ -1,0 +1,4 @@
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"hello"}}
+{"type":"assistant","isSidechain":false,"message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"text","text":"Hi!"}]}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"do something"}}
+{"type":"assistant","isSidechain":false,"message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":""}]}}

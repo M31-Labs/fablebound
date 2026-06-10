@@ -1,0 +1,2 @@
+{"type":"system","leafUuid":"abc","sessionId":"session1"}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"hello"}}

@@ -1,0 +1,2 @@
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"hello"}}
+{"type":"assistant","isSidechain":true,"agentId":"agent-abc","message":{"model":"claude-sonnet-4-8","role":"assistant","content":[{"type":"text","text":"I am a subagent only."}]}}

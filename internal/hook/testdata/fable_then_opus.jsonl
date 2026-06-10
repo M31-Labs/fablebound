@@ -1,0 +1,4 @@
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"hello"}}
+{"type":"assistant","isSidechain":false,"message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"text","text":"Hi! I am fable."}]}}
+{"type":"user","isSidechain":false,"message":{"role":"user","content":"/model claude-opus-4-8"}}
+{"type":"assistant","isSidechain":false,"message":{"model":"claude-opus-4-8","role":"assistant","content":[{"type":"text","text":"Switched to opus."}]}}

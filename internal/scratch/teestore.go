@@ -4,6 +4,7 @@ import (
 	"io"
 	"log"
 	"sync"
+	"time"
 
 	"m31labs.dev/tiller/internal/auditlog"
 )
@@ -277,6 +278,58 @@ func (t *TeeStore) BuildRunSummaryJSON(runID string) ([]byte, error) {
 
 func (t *TeeStore) BuildDispatchTree(runID string) (*DispatchNode, error) {
 	return t.fs.BuildDispatchTree(runID)
+}
+
+// ── Claim / lease semantics (P4.1) ────────────────────────────────────────────
+
+// ClaimDispatch performs the CAS on fs (authoritative). A win on fs is then
+// mirrored to pg asynchronously. The caller receives the fs result immediately.
+// Claim decisions are always fs-authoritative: a pg mirror lag cannot cause a
+// double-claim because ClaimDispatch is called exactly once per claimant and
+// the fs O_CREAT|O_EXCL sentinel provides the serialisation.
+func (t *TeeStore) ClaimDispatch(runID, dispatchID, executor string, lease time.Duration) (bool, error) {
+	won, err := t.fs.ClaimDispatch(runID, dispatchID, executor, lease)
+	if err != nil || !won {
+		return won, err
+	}
+	t.enqueue(func() {
+		if _, err := t.pg.ClaimDispatch(runID, dispatchID, executor, lease); err != nil {
+			log.Printf("teestore: mirror ClaimDispatch %s/%s: %v", runID, dispatchID, err)
+		}
+	})
+	return true, nil
+}
+
+func (t *TeeStore) RenewLease(runID, dispatchID, executor string, lease time.Duration) error {
+	if err := t.fs.RenewLease(runID, dispatchID, executor, lease); err != nil {
+		return err
+	}
+	t.enqueue(func() {
+		if err := t.pg.RenewLease(runID, dispatchID, executor, lease); err != nil {
+			log.Printf("teestore: mirror RenewLease %s/%s: %v", runID, dispatchID, err)
+		}
+	})
+	return nil
+}
+
+func (t *TeeStore) ReleaseDispatch(runID, dispatchID, executor, terminalStatus string) error {
+	if err := t.fs.ReleaseDispatch(runID, dispatchID, executor, terminalStatus); err != nil {
+		return err
+	}
+	t.enqueue(func() {
+		if err := t.pg.ReleaseDispatch(runID, dispatchID, executor, terminalStatus); err != nil {
+			log.Printf("teestore: mirror ReleaseDispatch %s/%s: %v", runID, dispatchID, err)
+		}
+	})
+	return nil
+}
+
+func (t *TeeStore) ExpireLeases(runID string) ([]string, error) {
+	return t.fs.ExpireLeases(runID)
+}
+
+func (t *TeeStore) ListPendingDispatches(runID string) ([]*Dispatch, error) {
+	return t.fs.ListPendingDispatches(runID)
 }
 
 // ── interface compliance ──────────────────────────────────────────────────────

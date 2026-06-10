@@ -2,6 +2,7 @@ package scratch
 
 import (
 	"io"
+	"time"
 
 	"m31labs.dev/tiller/internal/auditlog"
 )
@@ -127,4 +128,32 @@ type Store interface {
 	// *DispatchNode tree. Added for P1.4: internal/hyphae/promote.go uses the
 	// tree to compose spore.md without importing internal/run.
 	BuildDispatchTree(runID string) (*DispatchNode, error)
+
+	// ── Claim / lease semantics (P4.1) ────────────────────────────────────────
+
+	// ClaimDispatch is a compare-and-swap that attempts to claim dispatchID for
+	// executor. It succeeds only if the dispatch is currently in status "pending".
+	// On success it sets status="claimed", claimed_by=executor, and
+	// lease_until=now+lease. Returns (true, nil) on success, (false, nil) if
+	// another claimant won, or (false, err) on I/O failure.
+	ClaimDispatch(runID, dispatchID, executor string, lease time.Duration) (bool, error)
+
+	// RenewLease extends the lease on a claimed dispatch by the caller (executor).
+	// Only the current holder may renew; if the claimed_by field does not match
+	// executor the call returns an error. The new lease deadline is now+lease.
+	RenewLease(runID, dispatchID, executor string, lease time.Duration) error
+
+	// ReleaseDispatch moves a claimed dispatch to terminalStatus (completed |
+	// failed | halted | stale) and clears the claim fields. terminalStatus must
+	// be a terminal state; the method returns an error if it is not.
+	ReleaseDispatch(runID, dispatchID, executor, terminalStatus string) error
+
+	// ExpireLeases scans all claimed dispatches under runID whose lease_until is
+	// in the past and re-queues them (status → "pending", claim cleared).
+	// Returns the IDs of the re-queued dispatches.
+	ExpireLeases(runID string) ([]string, error)
+
+	// ListPendingDispatches returns all dispatches with status "pending" for
+	// runID, in ascending dispatch-ID order (alloc order).
+	ListPendingDispatches(runID string) ([]*Dispatch, error)
 }

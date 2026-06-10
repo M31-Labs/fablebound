@@ -30,6 +30,7 @@ func TestDispatch_ReasonWorker_Deny(t *testing.T) {
 		CallerDepth:  0,
 		RunID:        "20260609-000000-aa01",
 		ReasonBudget: 2,
+		MaxDepth:     4,
 	}
 	res, err := EvalDispatch(dispatchLoaded, req)
 	if err != nil {
@@ -52,6 +53,7 @@ func TestDispatch_ReasonChiefArchitect_Allow(t *testing.T) {
 		RunID:        "20260609-000000-aa02",
 		ReasonBudget: 2,
 		ReasonCount:  0,
+		MaxDepth:     4,
 	}
 	res, err := EvalDispatch(dispatchLoaded, req)
 	if err != nil {
@@ -73,6 +75,7 @@ func TestDispatch_Depth1_Allow_Depth2_Deny(t *testing.T) {
 		CallerDepth:  1,
 		RunID:        "20260609-000000-aa03",
 		ReasonBudget: 2,
+		MaxDepth:     4,
 	}
 	res1, err := EvalDispatch(dispatchLoaded, req1)
 	if err != nil {
@@ -82,13 +85,15 @@ func TestDispatch_Depth1_Allow_Depth2_Deny(t *testing.T) {
 		t.Errorf("depth1: verdict = %s, want Allow (rule=%s)", res1.Verdict, res1.Rule)
 	}
 
-	// depth 2 → Deny DenyTerminalDepth
+	// depth 2 direct → Deny DenyDirectSpawnAtDepth
 	req2 := DispatchRequest{
 		Role:         "worker",
 		CallerRole:   "worker",
 		CallerDepth:  2,
+		Queued:       false,
 		RunID:        "20260609-000000-aa04",
 		ReasonBudget: 2,
+		MaxDepth:     4,
 	}
 	res2, err := EvalDispatch(dispatchLoaded, req2)
 	if err != nil {
@@ -97,8 +102,74 @@ func TestDispatch_Depth1_Allow_Depth2_Deny(t *testing.T) {
 	if res2.Verdict != VerdictDeny {
 		t.Errorf("depth2: verdict = %s, want Deny", res2.Verdict)
 	}
-	if res2.Rule != "DenyTerminalDepth" {
-		t.Errorf("depth2: rule = %q, want DenyTerminalDepth", res2.Rule)
+	if res2.Rule != "DenyDirectSpawnAtDepth" {
+		t.Errorf("depth2: rule = %q, want DenyDirectSpawnAtDepth", res2.Rule)
+	}
+}
+
+func TestDispatch_Depth3Queued_Allow(t *testing.T) {
+	// depth 3 + queued + max_depth 4 → Allow (worker dispatching investigator)
+	req := DispatchRequest{
+		Role:         "investigator",
+		CallerRole:   "worker",
+		CallerDepth:  3,
+		Queued:       true,
+		RunID:        "20260609-000000-ab01",
+		ReasonBudget: 2,
+		MaxDepth:     4,
+	}
+	res, err := EvalDispatch(dispatchLoaded, req)
+	if err != nil {
+		t.Fatalf("EvalDispatch depth3 queued: %v", err)
+	}
+	if res.Verdict != VerdictAllow {
+		t.Errorf("depth3 queued: verdict = %s, want Allow (rule=%s reason=%s)", res.Verdict, res.Rule, res.Reason)
+	}
+}
+
+func TestDispatch_Depth4MaxDepth4_Deny(t *testing.T) {
+	// depth 4 + queued + max_depth 4 → Deny DenyDepthBeyondPolicy
+	req := DispatchRequest{
+		Role:         "worker",
+		CallerRole:   "worker",
+		CallerDepth:  4,
+		Queued:       true,
+		RunID:        "20260609-000000-ab02",
+		ReasonBudget: 2,
+		MaxDepth:     4,
+	}
+	res, err := EvalDispatch(dispatchLoaded, req)
+	if err != nil {
+		t.Fatalf("EvalDispatch depth4 max4: %v", err)
+	}
+	if res.Verdict != VerdictDeny {
+		t.Errorf("depth4 max4: verdict = %s, want Deny", res.Verdict)
+	}
+	if res.Rule != "DenyDepthBeyondPolicy" {
+		t.Errorf("depth4 max4: rule = %q, want DenyDepthBeyondPolicy", res.Rule)
+	}
+}
+
+func TestDispatch_Depth2Direct_DenyDirectSpawnAtDepth(t *testing.T) {
+	// depth 2 direct (not queued) → Deny DenyDirectSpawnAtDepth
+	req := DispatchRequest{
+		Role:         "worker",
+		CallerRole:   "worker",
+		CallerDepth:  2,
+		Queued:       false,
+		RunID:        "20260609-000000-ab03",
+		ReasonBudget: 2,
+		MaxDepth:     4,
+	}
+	res, err := EvalDispatch(dispatchLoaded, req)
+	if err != nil {
+		t.Fatalf("EvalDispatch depth2 direct: %v", err)
+	}
+	if res.Verdict != VerdictDeny {
+		t.Errorf("depth2 direct: verdict = %s, want Deny", res.Verdict)
+	}
+	if res.Rule != "DenyDirectSpawnAtDepth" {
+		t.Errorf("depth2 direct: rule = %q, want DenyDirectSpawnAtDepth", res.Rule)
 	}
 }
 
@@ -109,6 +180,7 @@ func TestDispatch_ReviewerCaller_Deny(t *testing.T) {
 		CallerDepth:  1,
 		RunID:        "20260609-000000-aa05",
 		ReasonBudget: 2,
+		MaxDepth:     4,
 	}
 	res, err := EvalDispatch(dispatchLoaded, req)
 	if err != nil {
@@ -129,6 +201,7 @@ func TestDispatch_InvestigatorScope_Deny(t *testing.T) {
 		CallerDepth:  1,
 		RunID:        "20260609-000000-aa06",
 		ReasonBudget: 2,
+		MaxDepth:     4,
 	}
 	res, err := EvalDispatch(dispatchLoaded, req)
 	if err != nil {
@@ -151,6 +224,7 @@ func TestDispatch_InvestigatorRoute_Scrutiny(t *testing.T) {
 		CallerDepth:  0,
 		RunID:        "20260609-000000-aa07",
 		ReasonBudget: 2,
+		MaxDepth:     4,
 	}
 	res, err := EvalDispatch(dispatchLoaded, req)
 	if err != nil {
@@ -172,6 +246,7 @@ func TestDispatch_ReviewerRoute_Scrutiny(t *testing.T) {
 		CallerDepth:  0,
 		RunID:        "20260609-000000-aa08",
 		ReasonBudget: 2,
+		MaxDepth:     4,
 	}
 	res, err := EvalDispatch(dispatchLoaded, req)
 	if err != nil {
@@ -192,6 +267,7 @@ func TestDispatch_UnknownRole_Deny(t *testing.T) {
 		CallerDepth:  0,
 		RunID:        "20260609-000000-aa99",
 		ReasonBudget: 2,
+		MaxDepth:     4,
 	}
 	res, err := EvalDispatch(dispatchLoaded, req)
 	if err != nil {

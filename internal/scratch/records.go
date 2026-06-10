@@ -20,6 +20,7 @@ type Run struct {
 	Workspace     string // absolute path to workspace root
 	Status        string // created|running|completed|failed|halted
 	FableBudget   int    // max fable/reason dispatches; default 2 (v1 field, kept for compat)
+	MaxDepth      int    // max dispatch depth; 0 means use default (4). spec §4.3
 	CreatedAt     time.Time
 	EndedAt       *time.Time        `json:"ended_at,omitempty"`
 	RootSessionID string            `json:"root_session_id,omitempty"`

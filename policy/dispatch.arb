@@ -1,6 +1,6 @@
 # tiller dispatch policy. Input schema: DispatchRequest (arbiter check'd).
-# Depth semantics: spawn capability exists at exactly two levels — depth 0
-# (root orchestrator) and depth 1. Depth >= 2 is terminal (fail-closed).
+# Depth semantics: direct process-spawn is terminal at depth >= 2 (physics).
+# Queued dispatches (--queue flag) are allowed up to run.max_depth (spec §4.3).
 #
 # Canonical tier assignments (flat defaults, no canary):
 #   orchestrator → reason   chief-architect → reason   deep-report → reason
@@ -35,9 +35,14 @@ rule DenyReasonFromNonRoot priority 1 {
     then Deny { reason: "only the root orchestrator may summon the reason tier" }
 }
 
-rule DenyTerminalDepth priority 1 {
-    when { caller.depth >= 2 }
-    then Deny { reason: "depth-2 agents are terminal; spawn capability exists only at depths 0 and 1" }
+rule DenyDirectSpawnAtDepth priority 1 {
+    when { caller.depth >= 2 and not dispatch.queued }
+    then Deny { reason: "direct spawn at depth >= 2 is not allowed; use --queue to request a queued dispatch" }
+}
+
+rule DenyDepthBeyondPolicy priority 1 {
+    when { caller.depth >= run.max_depth }
+    then Deny { reason: "caller depth has reached or exceeded run.max_depth; dispatch not allowed" }
 }
 
 rule DenyReasonBudget priority 2 {

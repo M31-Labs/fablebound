@@ -132,6 +132,7 @@ func TestFactsourceGovernsDispatch(t *testing.T) {
 		ActiveCount:  activeDispatches,
 		ReasonCount:  reasonDispatches,
 		ReasonBudget: reasonBudget,
+		MaxDepth:     4, // keep DenyDepthBeyondPolicy quiet; this test targets the budget rule
 	}
 
 	// 5. Evaluate the embedded dispatch.arb policy.

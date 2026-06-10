@@ -28,6 +28,7 @@
       "Read",
       "Glob",
       "Grep",
+      "Bash(tiller dispatch --queue *)",
       "Bash(tiller note *)",
       "Bash(hypha *)",
       "Bash(rg *)",

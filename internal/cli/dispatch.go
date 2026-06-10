@@ -47,6 +47,7 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 		background = fs.Bool("background", false, "return immediately after spawn")
 		timeout    = fs.String("timeout", "8m", "wait timeout (e.g. 8m, 30s)")
 		wait       = fs.Bool("wait", true, "wait for completion (default true; use --background to disable)")
+		queue      = fs.Bool("queue", false, "write dispatch record as status:pending and exit 0 (no spawn)")
 	)
 
 	if err := fs.Parse(args); err != nil {
@@ -117,6 +118,10 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 	if reasonBudget == 0 {
 		reasonBudget = 2
 	}
+	maxDepth := runRec.MaxDepth // MaxDepth is policy data per spec §4.3
+	if maxDepth == 0 {
+		maxDepth = 4 // default when absent
+	}
 
 	// Get active + reason counts via DispatchFacts (subsumes ActiveCount + ReasonCount).
 	facts, err := st.DispatchFacts(runID)
@@ -130,6 +135,7 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 		Tier:         *tierFlag,
 		Background:   *background,
 		BriefBytes:   len(briefContent),
+		Queued:       *queue,
 		CallerRole:   callerRole,
 		CallerDepth:  callerDepth,
 		CallerID:     callerID,
@@ -137,6 +143,7 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 		ActiveCount:  facts.Active,
 		ReasonCount:  facts.ReasonCount,
 		ReasonBudget: reasonBudget,
+		MaxDepth:     maxDepth,
 	}
 
 	// Load and evaluate dispatch policy.
@@ -240,6 +247,38 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 		Depth:      childDepth,
 		MaxTurns:   result.Route.MaxTurns,
 		Timeout:    time.Duration(result.Route.TimeoutMinutes) * time.Minute,
+	}
+
+	// --queue: write dispatch record as status:pending, skip adapter Prepare/Run.
+	// Brief and route are fully persisted so an executor can claim and spawn later.
+	// --queue --wait polls ReadDispatch until terminal without spawning.
+	if *queue {
+		now := time.Now()
+		d := &scratch.Dispatch{
+			ID:             dispatchID,
+			Parent:         callerID,
+			Role:           *role,
+			Model:          candidate.Model,
+			Profile:        result.Route.Profile,
+			Status:         "pending",
+			Depth:          childDepth,
+			MaxTurns:       result.Route.MaxTurns,
+			TimeoutMinutes: result.Route.TimeoutMinutes,
+			StartedAt:      now,
+			Tier:           result.Route.Tier,
+			Provider:       candidate.Provider,
+			Adapter:        candidate.Adapter,
+		}
+		if err := st.WriteDispatch(runID, d); err != nil {
+			return fmt.Errorf("dispatch: write dispatch record: %w", err)
+		}
+
+		fmt.Fprintf(os.Stderr, "queued %s as %s (role=%s, tier=%s, status=pending)\n",
+			dispatchID, *role, *role, result.Route.Tier)
+		// --queue exits 0 immediately: print the dispatch id and return.
+		// Polling a queued dispatch is done via `tiller await <id>` (P4.3+).
+		fmt.Printf("%s\n", dispatchID)
+		return nil
 	}
 
 	// Prepare: writes settings.json via the Store (present-brief verb is already

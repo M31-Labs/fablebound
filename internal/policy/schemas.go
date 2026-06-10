@@ -8,6 +8,7 @@ type DispatchRequest struct {
 	Tier         string `arb:"dispatch.tier"`       // requested tier: reason|scrutiny|execute; "" = policy default
 	Background   bool   `arb:"dispatch.background"`
 	BriefBytes   int    `arb:"dispatch.brief_bytes"`
+	Queued       bool   `arb:"dispatch.queued"`     // true when --queue flag is set (write pending, no spawn)
 	CallerRole   string `arb:"caller.role"`        // "user" when invoked outside a run
 	CallerDepth  int    `arb:"caller.depth"`       // TILLER_DEPTH of requester
 	CallerID     string `arb:"caller.dispatch_id"` // TILLER_DISPATCH_ID (lineage)
@@ -15,6 +16,7 @@ type DispatchRequest struct {
 	ActiveCount  int    `arb:"run.active_dispatches"`  // scan of meta.json status==running
 	ReasonCount  int    `arb:"run.reason_dispatches"`  // dispatches where tier == "reason"
 	ReasonBudget int    `arb:"run.reason_budget"`      // from manifest (default 2)
+	MaxDepth     int    `arb:"run.max_depth"`          // max dispatch depth; manifest default 4
 }
 
 // ToolCallRequest is the input schema for toolgate.arb.

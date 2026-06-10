@@ -72,6 +72,7 @@ func runToManifest(r *scratch.Run) *run.Manifest {
 		Workspace:     r.Workspace,
 		Status:        r.Status,
 		FableBudget:   r.FableBudget,
+		MaxDepth:      r.MaxDepth,
 		CreatedAt:     r.CreatedAt,
 		EndedAt:       r.EndedAt,
 		RootSessionID: r.RootSessionID,
@@ -89,6 +90,7 @@ func manifestToRun(m *run.Manifest) *scratch.Run {
 		Workspace:     m.Workspace,
 		Status:        m.Status,
 		FableBudget:   m.FableBudget,
+		MaxDepth:      m.MaxDepth,
 		CreatedAt:     m.CreatedAt,
 		EndedAt:       m.EndedAt,
 		RootSessionID: m.RootSessionID,
@@ -254,6 +256,7 @@ func (fs *FS) ListDispatches(runID string) ([]*scratch.Dispatch, error) {
 }
 
 // DispatchFacts returns active/reason counters for dispatch.arb.
+// active = status IN ("running","pending","claimed") — mirrors pgstore semantics.
 func (fs *FS) DispatchFacts(runID string) (scratch.Facts, error) {
 	metas, err := run.ScanMetas(fs.runDir(runID))
 	if err != nil {
@@ -261,7 +264,8 @@ func (fs *FS) DispatchFacts(runID string) (scratch.Facts, error) {
 	}
 	var f scratch.Facts
 	for _, m := range metas {
-		if m.Status == "running" {
+		switch m.Status {
+		case "running", "pending", "claimed":
 			f.Active++
 		}
 		if m.IsFableModel() {

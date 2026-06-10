@@ -80,11 +80,15 @@ func (s *Store) CreateRun(r *scratch.Run) (string, error) {
 		return "", fmt.Errorf("pgstore.CreateRun: marshal policy_shas: %w", err)
 	}
 
+	maxDepth := r.MaxDepth
+	if maxDepth == 0 {
+		maxDepth = 4 // spec §4.3 default
+	}
 	_, err = s.db.db.ExecContext(context.Background(), `
-		INSERT INTO run (id, task, workspace, status, reason_budget, created_at, ended_at,
+		INSERT INTO run (id, task, workspace, status, reason_budget, max_depth, created_at, ended_at,
 		                 root_session_id, policy_shas, hypha_trace_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-		r.ID, r.Task, r.Workspace, r.Status, r.FableBudget,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		r.ID, r.Task, r.Workspace, r.Status, r.FableBudget, maxDepth,
 		r.CreatedAt, r.EndedAt,
 		r.RootSessionID, policySHAs, r.HyphaTraceID,
 	)
@@ -97,14 +101,14 @@ func (s *Store) CreateRun(r *scratch.Run) (string, error) {
 // ReadRun fetches the run record for runID.
 func (s *Store) ReadRun(runID string) (*scratch.Run, error) {
 	row := s.db.db.QueryRowContext(context.Background(), `
-		SELECT id, task, workspace, status, reason_budget, created_at, ended_at,
+		SELECT id, task, workspace, status, reason_budget, max_depth, created_at, ended_at,
 		       root_session_id, policy_shas, hypha_trace_id
 		FROM run WHERE id = $1`, runID)
 
 	r := &scratch.Run{}
 	var policySHAsRaw []byte
 	if err := row.Scan(
-		&r.ID, &r.Task, &r.Workspace, &r.Status, &r.FableBudget,
+		&r.ID, &r.Task, &r.Workspace, &r.Status, &r.FableBudget, &r.MaxDepth,
 		&r.CreatedAt, &r.EndedAt,
 		&r.RootSessionID, &policySHAsRaw, &r.HyphaTraceID,
 	); err == sql.ErrNoRows {
@@ -115,6 +119,10 @@ func (s *Store) ReadRun(runID string) (*scratch.Run, error) {
 	if err := json.Unmarshal(policySHAsRaw, &r.PolicySHAs); err != nil {
 		r.PolicySHAs = nil
 	}
+	// Apply default when column is zero (pre-migration rows).
+	if r.MaxDepth == 0 {
+		r.MaxDepth = 4
+	}
 	return r, nil
 }
 
@@ -124,12 +132,16 @@ func (s *Store) WriteRun(r *scratch.Run) error {
 	if err != nil {
 		return fmt.Errorf("pgstore.WriteRun: marshal policy_shas: %w", err)
 	}
+	maxDepth := r.MaxDepth
+	if maxDepth == 0 {
+		maxDepth = 4 // spec §4.3 default
+	}
 	_, err = s.db.db.ExecContext(context.Background(), `
-		UPDATE run SET task=$2, workspace=$3, status=$4, reason_budget=$5,
-		               created_at=$6, ended_at=$7, root_session_id=$8,
-		               policy_shas=$9, hypha_trace_id=$10
+		UPDATE run SET task=$2, workspace=$3, status=$4, reason_budget=$5, max_depth=$6,
+		               created_at=$7, ended_at=$8, root_session_id=$9,
+		               policy_shas=$10, hypha_trace_id=$11
 		WHERE id=$1`,
-		r.ID, r.Task, r.Workspace, r.Status, r.FableBudget,
+		r.ID, r.Task, r.Workspace, r.Status, r.FableBudget, maxDepth,
 		r.CreatedAt, r.EndedAt,
 		r.RootSessionID, policySHAs, r.HyphaTraceID,
 	)

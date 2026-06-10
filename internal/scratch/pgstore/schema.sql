@@ -24,12 +24,18 @@ CREATE TABLE IF NOT EXISTS run (
     workspace        TEXT        NOT NULL DEFAULT '',
     status           TEXT        NOT NULL DEFAULT 'created',  -- created|running|completed|failed|halted
     reason_budget    INTEGER     NOT NULL DEFAULT 2,
+    max_depth        INTEGER     NOT NULL DEFAULT 4,           -- max dispatch depth; spec §4.3
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     ended_at         TIMESTAMPTZ,
     root_session_id  TEXT        NOT NULL DEFAULT '',
     policy_shas      JSONB       NOT NULL DEFAULT '{}',       -- kind→sha256 map
     hypha_trace_id   TEXT        NOT NULL DEFAULT ''
 );
+
+-- Idempotent migration: add max_depth to run if it does not exist (schema version 4).
+-- ADD COLUMN IF NOT EXISTS resolves via search_path, so per-test schemas and the
+-- production schema are handled identically.
+ALTER TABLE run ADD COLUMN IF NOT EXISTS max_depth INTEGER NOT NULL DEFAULT 4;
 
 -- dispatch corresponds to spec §3.1 "dispatch" record.
 -- State machine: pending → claimed → running → completed | failed | expired
@@ -173,4 +179,8 @@ ON CONFLICT (version) DO NOTHING;
 
 INSERT INTO schema_version (version, description)
 VALUES (3, 'add dispatch_facts view for arbiter factsource governance')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO schema_version (version, description)
+VALUES (4, 'add max_depth column to run table (spec §4.3)')
 ON CONFLICT (version) DO NOTHING;

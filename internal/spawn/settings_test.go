@@ -166,12 +166,15 @@ func TestSettings_Depth2NoDispatch(t *testing.T) {
 			}
 
 			// The allow list must not contain the unrestricted tiller allow.
+			// It may contain the queue-only "Bash(tiller dispatch --queue *)" per spec §4.3.
 			for _, a := range allowStrings {
 				if a == "Bash(tiller *)" {
 					t.Errorf("depth-2 allow list for %q contains Bash(tiller *)", tc.profile)
 				}
-				if strings.HasPrefix(a, "Bash(tiller dispatch") {
-					t.Errorf("depth-2 allow list for %q contains %q", tc.profile, a)
+				// Broad tiller dispatch without --queue must not appear in the allow list.
+				// "Bash(tiller dispatch --queue *)" is the queue-only form and IS allowed.
+				if a == "Bash(tiller dispatch *)" || a == "Bash(tiller dispatch*)" {
+					t.Errorf("depth-2 allow list for %q contains unrestricted dispatch %q", tc.profile, a)
 				}
 			}
 		})
@@ -256,8 +259,8 @@ func TestSettings_Depth2HasNoteForm(t *testing.T) {
 }
 
 // TestSettings_Depth2ExecutionDenyDispatch verifies that the execution profile at
-// depth >= 2 contains "Bash(tiller dispatch*)" in the deny list, providing a
-// settings-layer guardrail against terminal workers spawning dispatches.
+// depth >= 2 contains "Bash(tiller dispatch *)" in the deny list (broad dispatch
+// without --queue is denied), providing a settings-layer guardrail per spec §4.3.
 func TestSettings_Depth2ExecutionDenyDispatch(t *testing.T) {
 	got, err := spawn.Settings("execution", 2)
 	if err != nil {
@@ -280,27 +283,27 @@ func TestSettings_Depth2ExecutionDenyDispatch(t *testing.T) {
 
 	found := false
 	for _, d := range denyRaw {
-		if d == "Bash(tiller dispatch*)" {
+		if d == "Bash(tiller dispatch *)" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("execution depth-2 deny list missing \"Bash(tiller dispatch*)\"; got: %v", denyRaw)
+		t.Errorf("execution depth-2 deny list missing \"Bash(tiller dispatch *)\"; got: %v", denyRaw)
 	}
 }
 
 // TestSettings_Depth1ExecutionNoDenyDispatch verifies that execution at depth 1
-// does NOT have "Bash(tiller dispatch*)" in the deny list (depth-1 workers
-// may dispatch).
+// does NOT have "Bash(tiller dispatch *)" in the deny list (depth-1 workers
+// may dispatch without restriction).
 func TestSettings_Depth1ExecutionNoDenyDispatch(t *testing.T) {
 	got, err := spawn.Settings("execution", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if strings.Contains(string(got), `"Bash(tiller dispatch*)"`) {
-		t.Error("execution depth-1 deny list unexpectedly contains Bash(tiller dispatch*)")
+	if strings.Contains(string(got), `"Bash(tiller dispatch *)"`) {
+		t.Error("execution depth-1 deny list unexpectedly contains Bash(tiller dispatch *)")
 	}
 }
 

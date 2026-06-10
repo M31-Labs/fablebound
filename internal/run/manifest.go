@@ -14,6 +14,7 @@ type Manifest struct {
 	Workspace     string            `json:"workspace"`     // absolute path to workspace root
 	Status        string            `json:"status"`        // created|running|completed|failed|halted
 	FableBudget   int               `json:"reason_budget"` // max reason-tier dispatches; default 2 (was fable_budget in v1)
+	MaxDepth      int               `json:"max_depth,omitempty"` // max dispatch depth; 0 means absent → default 4
 	CreatedAt     time.Time         `json:"created_at"`
 	EndedAt       *time.Time        `json:"ended_at,omitempty"`
 	RootSessionID string            `json:"root_session_id,omitempty"`
@@ -24,6 +25,9 @@ type Manifest struct {
 	// NEVER store the DSN here — DSN flows via TILLER_STORE_DSN env only.
 	Store string `json:"store,omitempty"`
 }
+
+// DefaultMaxDepth is the default maximum dispatch depth when max_depth is absent.
+const DefaultMaxDepth = 4
 
 // manifestPath returns the path to manifest.json inside a run directory.
 func manifestPath(runDir string) string {
@@ -43,6 +47,7 @@ func WriteManifest(runDir string, m *Manifest) error {
 // ReadManifest reads and parses manifest.json from runDir.
 // It handles both the v2 "reason_budget" key and the legacy v1 "fable_budget" key
 // (the latter is read from a raw map and promoted when reason_budget is absent/zero).
+// When max_depth is absent or zero the DefaultMaxDepth (4) is applied.
 func ReadManifest(runDir string) (*Manifest, error) {
 	data, err := os.ReadFile(manifestPath(runDir))
 	if err != nil {
@@ -64,6 +69,10 @@ func ReadManifest(runDir string) (*Manifest, error) {
 				}
 			}
 		}
+	}
+	// Default max_depth to 4 when absent (zero) — spec §4.3.
+	if m.MaxDepth == 0 {
+		m.MaxDepth = DefaultMaxDepth
 	}
 	return &m, nil
 }

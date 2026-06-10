@@ -6,9 +6,10 @@
 #   worker       → execute   debugger        → execute
 #
 # Coverage targets: every rule (HaltAll, DenyReasonTierForExecution,
-# DenyReasonFromNonRoot, DenyTerminalDepth, DenyReasonBudget,
-# DenyConcurrencyCap, DenyExecutionSpawnsInsight, DenyReviewerDispatch,
-# DenyInvestigatorScope, DenyInsightScope, DenyWorkerScope, AllowDispatch)
+# DenyReasonFromNonRoot, DenyDirectSpawnAtDepth, DenyDepthBeyondPolicy,
+# DenyReasonBudget, DenyConcurrencyCap, DenyExecutionSpawnsInsight,
+# DenyReviewerDispatch, DenyInvestigatorScope, DenyInsightScope,
+# DenyWorkerScope, AllowDispatch)
 # and every DispatchRoute strategy arm (Architect, DeepReport,
 # Investigator, Worker, Debugger, Reviewer).
 
@@ -20,6 +21,7 @@ test "worker dispatch by orchestrator at depth 0 is allowed" {
         dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 512
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -27,10 +29,12 @@ test "worker dispatch by orchestrator at depth 0 is allowed" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule AllowDispatch matched
     expect rule DenyReasonTierForExecution not matched
-    expect rule DenyTerminalDepth not matched
+    expect rule DenyDirectSpawnAtDepth not matched
+    expect rule DenyDepthBeyondPolicy not matched
 }
 
 test "debugger dispatch by orchestrator at depth 0 is allowed" {
@@ -39,6 +43,7 @@ test "debugger dispatch by orchestrator at depth 0 is allowed" {
         dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 256
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -46,6 +51,7 @@ test "debugger dispatch by orchestrator at depth 0 is allowed" {
         run.active_dispatches: 1
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule AllowDispatch matched
 }
@@ -56,6 +62,7 @@ test "reviewer dispatch by orchestrator at depth 0 is allowed" {
         dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -63,6 +70,7 @@ test "reviewer dispatch by orchestrator at depth 0 is allowed" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule AllowDispatch matched
 }
@@ -73,6 +81,7 @@ test "investigator dispatch by orchestrator at depth 0 is allowed" {
         dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 400
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -80,6 +89,7 @@ test "investigator dispatch by orchestrator at depth 0 is allowed" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule AllowDispatch matched
 }
@@ -90,6 +100,7 @@ test "chief-architect dispatch by orchestrator at depth 0 is allowed" {
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 1024
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -97,6 +108,7 @@ test "chief-architect dispatch by orchestrator at depth 0 is allowed" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule AllowDispatch matched
     expect rule DenyReasonTierForExecution not matched
@@ -109,6 +121,7 @@ test "worker dispatch by depth-1 agent is allowed" {
         dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 300
+        dispatch.queued: false
         caller.role: "worker"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -116,9 +129,11 @@ test "worker dispatch by depth-1 agent is allowed" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule AllowDispatch matched
-    expect rule DenyTerminalDepth not matched
+    expect rule DenyDirectSpawnAtDepth not matched
+    expect rule DenyDepthBeyondPolicy not matched
 }
 
 # ── HaltAll (kill_switch) ────────────────────────────────────────────────────
@@ -129,6 +144,7 @@ test "HaltAll kill switch is off by default — normal dispatch proceeds" {
         dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -136,6 +152,7 @@ test "HaltAll kill switch is off by default — normal dispatch proceeds" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule HaltAll not matched
 }
@@ -148,6 +165,7 @@ test "reason tier requested for worker is denied (DenyReasonTierForExecution)" {
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -155,6 +173,7 @@ test "reason tier requested for worker is denied (DenyReasonTierForExecution)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyReasonTierForExecution matched
 }
@@ -165,6 +184,7 @@ test "reason tier requested for debugger is denied (DenyReasonTierForExecution)"
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -172,6 +192,7 @@ test "reason tier requested for debugger is denied (DenyReasonTierForExecution)"
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyReasonTierForExecution matched
 }
@@ -182,6 +203,7 @@ test "reason tier requested for investigator is denied (DenyReasonTierForExecuti
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -189,6 +211,7 @@ test "reason tier requested for investigator is denied (DenyReasonTierForExecuti
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyReasonTierForExecution matched
 }
@@ -199,6 +222,7 @@ test "reason tier requested for reviewer is denied (DenyReasonTierForExecution)"
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -206,6 +230,7 @@ test "reason tier requested for reviewer is denied (DenyReasonTierForExecution)"
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyReasonTierForExecution matched
 }
@@ -216,6 +241,7 @@ test "reason tier for chief-architect does NOT fire DenyReasonTierForExecution" 
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -223,6 +249,7 @@ test "reason tier for chief-architect does NOT fire DenyReasonTierForExecution" 
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyReasonTierForExecution not matched
 }
@@ -233,6 +260,7 @@ test "reason tier for deep-report does NOT fire DenyReasonTierForExecution" {
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -240,6 +268,7 @@ test "reason tier for deep-report does NOT fire DenyReasonTierForExecution" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyReasonTierForExecution not matched
 }
@@ -252,6 +281,7 @@ test "reason tier from worker caller is denied (DenyReasonFromNonRoot)" {
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "worker"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -259,6 +289,7 @@ test "reason tier from worker caller is denied (DenyReasonFromNonRoot)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyReasonFromNonRoot matched
 }
@@ -269,6 +300,7 @@ test "reason tier from investigator caller is denied (DenyReasonFromNonRoot)" {
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "investigator"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -276,6 +308,7 @@ test "reason tier from investigator caller is denied (DenyReasonFromNonRoot)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyReasonFromNonRoot matched
 }
@@ -286,6 +319,7 @@ test "reason tier from orchestrator does NOT fire DenyReasonFromNonRoot" {
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -293,18 +327,20 @@ test "reason tier from orchestrator does NOT fire DenyReasonFromNonRoot" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyReasonFromNonRoot not matched
 }
 
-# ── DenyTerminalDepth ─────────────────────────────────────────────────────────
+# ── DenyDirectSpawnAtDepth + DenyDepthBeyondPolicy ───────────────────────────
 
-test "depth-2 caller is denied (DenyTerminalDepth)" {
+test "depth-2 direct caller is denied (DenyDirectSpawnAtDepth)" {
     given {
         dispatch.role: "investigator"
         dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "worker"
         caller.depth: 2
         caller.dispatch_id: "d02"
@@ -312,16 +348,18 @@ test "depth-2 caller is denied (DenyTerminalDepth)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
-    expect rule DenyTerminalDepth matched
+    expect rule DenyDirectSpawnAtDepth matched
 }
 
-test "depth-3 caller is also denied (DenyTerminalDepth)" {
+test "depth-3 direct caller is also denied (DenyDirectSpawnAtDepth)" {
     given {
         dispatch.role: "investigator"
         dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "investigator"
         caller.depth: 3
         caller.dispatch_id: "d03"
@@ -329,16 +367,18 @@ test "depth-3 caller is also denied (DenyTerminalDepth)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
-    expect rule DenyTerminalDepth matched
+    expect rule DenyDirectSpawnAtDepth matched
 }
 
-test "depth-1 caller does NOT fire DenyTerminalDepth" {
+test "depth-1 caller does NOT fire DenyDirectSpawnAtDepth" {
     given {
         dispatch.role: "investigator"
         dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "worker"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -346,8 +386,49 @@ test "depth-1 caller does NOT fire DenyTerminalDepth" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
-    expect rule DenyTerminalDepth not matched
+    expect rule DenyDirectSpawnAtDepth not matched
+}
+
+test "depth-3 queued dispatch with max_depth 4 is allowed (DenyDirectSpawnAtDepth not fired)" {
+    given {
+        dispatch.role: "worker"
+        dispatch.tier: "execute"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        dispatch.queued: true
+        caller.role: "worker"
+        caller.depth: 3
+        caller.dispatch_id: "d03"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.reason_dispatches: 0
+        run.reason_budget: 2
+        run.max_depth: 4
+    }
+    expect rule DenyDirectSpawnAtDepth not matched
+    expect rule DenyDepthBeyondPolicy not matched
+    expect rule AllowDispatch matched
+}
+
+test "depth-4 queued dispatch with max_depth 4 is denied (DenyDepthBeyondPolicy)" {
+    given {
+        dispatch.role: "worker"
+        dispatch.tier: "execute"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        dispatch.queued: true
+        caller.role: "worker"
+        caller.depth: 4
+        caller.dispatch_id: "d04"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.reason_dispatches: 0
+        run.reason_budget: 2
+        run.max_depth: 4
+    }
+    expect rule DenyDepthBeyondPolicy matched
 }
 
 # ── DenyReasonBudget ───────────────────────────────────────────────────────────
@@ -358,6 +439,7 @@ test "reason budget exhausted denies reason dispatch (DenyReasonBudget)" {
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -365,6 +447,7 @@ test "reason budget exhausted denies reason dispatch (DenyReasonBudget)" {
         run.active_dispatches: 0
         run.reason_dispatches: 2
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyReasonBudget matched
 }
@@ -375,6 +458,7 @@ test "reason dispatches exceed budget is denied (DenyReasonBudget)" {
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -382,6 +466,7 @@ test "reason dispatches exceed budget is denied (DenyReasonBudget)" {
         run.active_dispatches: 0
         run.reason_dispatches: 3
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyReasonBudget matched
 }
@@ -392,6 +477,7 @@ test "reason budget not yet exhausted does NOT fire DenyReasonBudget" {
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -399,6 +485,7 @@ test "reason budget not yet exhausted does NOT fire DenyReasonBudget" {
         run.active_dispatches: 0
         run.reason_dispatches: 1
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyReasonBudget not matched
 }
@@ -411,6 +498,7 @@ test "active dispatch cap of 4 reached is denied (DenyConcurrencyCap)" {
         dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -418,6 +506,7 @@ test "active dispatch cap of 4 reached is denied (DenyConcurrencyCap)" {
         run.active_dispatches: 4
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyConcurrencyCap matched
 }
@@ -428,6 +517,7 @@ test "active dispatches exceed cap is denied (DenyConcurrencyCap)" {
         dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -435,6 +525,7 @@ test "active dispatches exceed cap is denied (DenyConcurrencyCap)" {
         run.active_dispatches: 5
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyConcurrencyCap matched
 }
@@ -445,6 +536,7 @@ test "active dispatches below cap does NOT fire DenyConcurrencyCap" {
         dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -452,6 +544,7 @@ test "active dispatches below cap does NOT fire DenyConcurrencyCap" {
         run.active_dispatches: 3
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyConcurrencyCap not matched
 }
@@ -464,6 +557,7 @@ test "worker cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "worker"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -471,6 +565,7 @@ test "worker cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyExecutionSpawnsInsight matched
 }
@@ -481,6 +576,7 @@ test "debugger cannot spawn deep-report (DenyExecutionSpawnsInsight)" {
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "debugger"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -488,6 +584,7 @@ test "debugger cannot spawn deep-report (DenyExecutionSpawnsInsight)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyExecutionSpawnsInsight matched
 }
@@ -498,6 +595,7 @@ test "investigator cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "investigator"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -505,6 +603,7 @@ test "investigator cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyExecutionSpawnsInsight matched
 }
@@ -515,6 +614,7 @@ test "reviewer cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "reviewer"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -522,6 +622,7 @@ test "reviewer cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyExecutionSpawnsInsight matched
 }
@@ -532,6 +633,7 @@ test "orchestrator spawning chief-architect does NOT fire DenyExecutionSpawnsIns
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -539,6 +641,7 @@ test "orchestrator spawning chief-architect does NOT fire DenyExecutionSpawnsIns
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyExecutionSpawnsInsight not matched
 }
@@ -551,6 +654,7 @@ test "reviewer caller is denied all dispatches (DenyReviewerDispatch)" {
         dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "reviewer"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -558,6 +662,7 @@ test "reviewer caller is denied all dispatches (DenyReviewerDispatch)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyReviewerDispatch matched
 }
@@ -568,6 +673,7 @@ test "reviewer cannot dispatch an investigator (DenyReviewerDispatch)" {
         dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "reviewer"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -575,6 +681,7 @@ test "reviewer cannot dispatch an investigator (DenyReviewerDispatch)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyReviewerDispatch matched
 }
@@ -585,6 +692,7 @@ test "non-reviewer caller does NOT fire DenyReviewerDispatch" {
         dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "worker"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -592,6 +700,7 @@ test "non-reviewer caller does NOT fire DenyReviewerDispatch" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyReviewerDispatch not matched
 }
@@ -604,6 +713,7 @@ test "investigator dispatching worker is denied (DenyInvestigatorScope)" {
         dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "investigator"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -611,6 +721,7 @@ test "investigator dispatching worker is denied (DenyInvestigatorScope)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyInvestigatorScope matched
 }
@@ -621,6 +732,7 @@ test "investigator dispatching debugger is denied (DenyInvestigatorScope)" {
         dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "investigator"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -628,6 +740,7 @@ test "investigator dispatching debugger is denied (DenyInvestigatorScope)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyInvestigatorScope matched
 }
@@ -638,6 +751,7 @@ test "investigator dispatching another investigator is allowed" {
         dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "investigator"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -645,6 +759,7 @@ test "investigator dispatching another investigator is allowed" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyInvestigatorScope not matched
     expect rule AllowDispatch matched
@@ -658,6 +773,7 @@ test "chief-architect cannot dispatch a worker (DenyInsightScope)" {
         dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "chief-architect"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -665,6 +781,7 @@ test "chief-architect cannot dispatch a worker (DenyInsightScope)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyInsightScope matched
 }
@@ -675,6 +792,7 @@ test "deep-report cannot dispatch a debugger (DenyInsightScope)" {
         dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "deep-report"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -682,6 +800,7 @@ test "deep-report cannot dispatch a debugger (DenyInsightScope)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyInsightScope matched
 }
@@ -692,6 +811,7 @@ test "chief-architect dispatching investigator is NOT denied by insight scope" {
         dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "chief-architect"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -699,6 +819,7 @@ test "chief-architect dispatching investigator is NOT denied by insight scope" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyInsightScope not matched
     expect rule AllowDispatch matched
@@ -712,6 +833,7 @@ test "worker cannot dispatch a reviewer (DenyWorkerScope)" {
         dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "worker"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -719,6 +841,7 @@ test "worker cannot dispatch a reviewer (DenyWorkerScope)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyWorkerScope matched
 }
@@ -729,6 +852,7 @@ test "debugger cannot dispatch a reviewer (DenyWorkerScope)" {
         dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "debugger"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -736,6 +860,7 @@ test "debugger cannot dispatch a reviewer (DenyWorkerScope)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyWorkerScope matched
 }
@@ -746,6 +871,7 @@ test "worker dispatching investigator does NOT fire DenyWorkerScope" {
         dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "worker"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -753,6 +879,7 @@ test "worker dispatching investigator does NOT fire DenyWorkerScope" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyWorkerScope not matched
 }
@@ -763,6 +890,7 @@ test "worker dispatching debugger does NOT fire DenyWorkerScope" {
         dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "worker"
         caller.depth: 1
         caller.dispatch_id: "d01"
@@ -770,6 +898,7 @@ test "worker dispatching debugger does NOT fire DenyWorkerScope" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyWorkerScope not matched
 }
@@ -782,6 +911,7 @@ test "unknown role dispatched by orchestrator matches nothing (combinator denies
         dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -789,6 +919,7 @@ test "unknown role dispatched by orchestrator matches nothing (combinator denies
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule AllowDispatch not matched
 }
@@ -801,6 +932,7 @@ test "chief-architect routes to Architect arm (reason tier)" {
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 512
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -808,6 +940,7 @@ test "chief-architect routes to Architect arm (reason tier)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect strategy DispatchRoute selected Architect { tier: "reason", profile: "insight" }
 }
@@ -818,6 +951,7 @@ test "deep-report routes to DeepReport arm (reason tier)" {
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 512
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -825,6 +959,7 @@ test "deep-report routes to DeepReport arm (reason tier)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect strategy DispatchRoute selected DeepReport { tier: "reason", profile: "insight" }
 }
@@ -835,6 +970,7 @@ test "investigator routes to Investigator arm (scrutiny tier)" {
         dispatch.tier: ""
         dispatch.background: false
         dispatch.brief_bytes: 200
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -842,6 +978,7 @@ test "investigator routes to Investigator arm (scrutiny tier)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule AllowDispatch matched
     expect strategy DispatchRoute selected Investigator { tier: "scrutiny", profile: "readonly" }
@@ -853,6 +990,7 @@ test "reviewer routes to Reviewer arm (scrutiny tier)" {
         dispatch.tier: ""
         dispatch.background: false
         dispatch.brief_bytes: 200
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -860,6 +998,7 @@ test "reviewer routes to Reviewer arm (scrutiny tier)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect strategy DispatchRoute selected Reviewer { tier: "scrutiny", profile: "readonly" }
 }
@@ -870,6 +1009,7 @@ test "worker routes to Worker arm (execute tier + execution profile)" {
         dispatch.tier: ""
         dispatch.background: false
         dispatch.brief_bytes: 300
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -877,6 +1017,7 @@ test "worker routes to Worker arm (execute tier + execution profile)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect strategy DispatchRoute selected Worker { tier: "execute", profile: "execution" }
 }
@@ -887,6 +1028,7 @@ test "debugger routes to Debugger arm (execute tier + execution profile)" {
         dispatch.tier: ""
         dispatch.background: false
         dispatch.brief_bytes: 300
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -894,6 +1036,7 @@ test "debugger routes to Debugger arm (execute tier + execution profile)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect strategy DispatchRoute selected Debugger { tier: "execute", profile: "execution" }
 }
@@ -906,6 +1049,7 @@ test "reason+worker triggers DenyReasonTierForExecution (combined)" {
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -913,6 +1057,7 @@ test "reason+worker triggers DenyReasonTierForExecution (combined)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     # DenyReasonTierForExecution (priority 1) wins over AllowDispatch (priority 99)
     expect rule DenyReasonTierForExecution matched
@@ -924,6 +1069,7 @@ test "orchestrator dispatching chief-architect with budget remaining is fully al
         dispatch.tier: "reason"
         dispatch.background: false
         dispatch.brief_bytes: 2048
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -931,21 +1077,24 @@ test "orchestrator dispatching chief-architect with budget remaining is fully al
         run.active_dispatches: 1
         run.reason_dispatches: 1
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule AllowDispatch matched
     expect rule DenyReasonTierForExecution not matched
     expect rule DenyReasonFromNonRoot not matched
     expect rule DenyReasonBudget not matched
-    expect rule DenyTerminalDepth not matched
+    expect rule DenyDirectSpawnAtDepth not matched
+    expect rule DenyDepthBeyondPolicy not matched
     expect strategy DispatchRoute selected Architect
 }
 
-test "depth-2 worker attempting dispatch is denied by DenyTerminalDepth" {
+test "depth-2 worker direct dispatch is denied by DenyDirectSpawnAtDepth" {
     given {
         dispatch.role: "investigator"
         dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 100
+        dispatch.queued: false
         caller.role: "worker"
         caller.depth: 2
         caller.dispatch_id: "d02"
@@ -953,9 +1102,10 @@ test "depth-2 worker attempting dispatch is denied by DenyTerminalDepth" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
-    # DenyTerminalDepth (priority 1) wins; combinator denies even though AllowDispatch also matches
-    expect rule DenyTerminalDepth matched
+    # DenyDirectSpawnAtDepth (priority 1) wins; combinator denies even though AllowDispatch also matches
+    expect rule DenyDirectSpawnAtDepth matched
 }
 
 # ── DenyBriefTooLarge ─────────────────────────────────────────────────────────
@@ -966,6 +1116,7 @@ test "brief exceeding 256KB is denied (DenyBriefTooLarge)" {
         dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 262145
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -973,6 +1124,7 @@ test "brief exceeding 256KB is denied (DenyBriefTooLarge)" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyBriefTooLarge matched
 }
@@ -983,6 +1135,7 @@ test "brief at exactly 256KB (262144 bytes) is NOT denied by DenyBriefTooLarge" 
         dispatch.tier: "execute"
         dispatch.background: false
         dispatch.brief_bytes: 262144
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -990,6 +1143,7 @@ test "brief at exactly 256KB (262144 bytes) is NOT denied by DenyBriefTooLarge" 
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyBriefTooLarge not matched
 }
@@ -1000,6 +1154,7 @@ test "normal brief does NOT fire DenyBriefTooLarge" {
         dispatch.tier: "scrutiny"
         dispatch.background: false
         dispatch.brief_bytes: 1024
+        dispatch.queued: false
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
@@ -1007,6 +1162,7 @@ test "normal brief does NOT fire DenyBriefTooLarge" {
         run.active_dispatches: 0
         run.reason_dispatches: 0
         run.reason_budget: 2
+        run.max_depth: 4
     }
     expect rule DenyBriefTooLarge not matched
 }

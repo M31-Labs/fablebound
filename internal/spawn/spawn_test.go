@@ -312,8 +312,8 @@ func TestDispatchDenyWorkerReason(t *testing.T) {
 	}
 }
 
-// TestDispatchDenyTerminalDepth verifies that TILLER_DEPTH=2 results in
-// exit 3 with DenyTerminalDepth.
+// TestDispatchDenyTerminalDepth verifies that TILLER_DEPTH=2 without --queue
+// results in exit 3 with DenyDirectSpawnAtDepth.
 func TestDispatchDenyTerminalDepth(t *testing.T) {
 	runDir, binary, stub := setupFixtureRun(t)
 
@@ -343,8 +343,8 @@ func TestDispatchDenyTerminalDepth(t *testing.T) {
 	}
 
 	stderr := stderrBuf.String()
-	if !strings.Contains(stderr, "DenyTerminalDepth") {
-		t.Errorf("stderr missing DenyTerminalDepth, got: %s", stderr)
+	if !strings.Contains(stderr, "DenyDirectSpawnAtDepth") {
+		t.Errorf("stderr missing DenyDirectSpawnAtDepth, got: %s", stderr)
 	}
 }
 

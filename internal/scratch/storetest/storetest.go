@@ -44,6 +44,12 @@ func Run(t *testing.T, open func(t *testing.T) scratch.Store) {
 	t.Run("RenderTree", func(t *testing.T) { testRenderTree(t, open(t)) })
 	t.Run("BuildRunSummaryJSON", func(t *testing.T) { testBuildRunSummaryJSON(t, open(t)) })
 	t.Run("BuildDispatchTree", func(t *testing.T) { testBuildDispatchTree(t, open(t)) })
+	// P4.1 claim semantics.
+	t.Run("ClaimConcurrent", func(t *testing.T) { testClaimConcurrent(t, open(t)) })
+	t.Run("ClaimExpireRequeue", func(t *testing.T) { testClaimExpireRequeue(t, open(t)) })
+	t.Run("ClaimRenewPreventsExpiry", func(t *testing.T) { testClaimRenewPreventsExpiry(t, open(t)) })
+	t.Run("ClaimReleaseTerminal", func(t *testing.T) { testClaimReleaseTerminal(t, open(t)) })
+	t.Run("ListPendingDispatches", func(t *testing.T) { testListPendingDispatches(t, open(t)) })
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -637,4 +643,257 @@ func findDispatchNode(n *scratch.DispatchNode, id string) bool {
 		}
 	}
 	return false
+}
+
+// ── P4.1 Claim conformance tests ──────────────────────────────────────────────
+
+// mustSeedPending writes a minimal pending dispatch. AllocDispatch inserts a
+// placeholder; WriteDispatch sets the full shape with status=pending.
+func mustSeedPending(t *testing.T, s scratch.Store, runID string) string {
+	t.Helper()
+	did := mustAllocDispatch(t, s, runID)
+	d := &scratch.Dispatch{
+		ID:        did,
+		Role:      "worker",
+		Model:     "sonnet",
+		Status:    "pending",
+		StartedAt: time.Now().UTC(),
+	}
+	if err := s.WriteDispatch(runID, d); err != nil {
+		t.Fatalf("WriteDispatch (seed pending) %s: %v", did, err)
+	}
+	return did
+}
+
+// testClaimConcurrent: 8 concurrent ClaimDispatch calls → exactly 1 true.
+func testClaimConcurrent(t *testing.T, s scratch.Store) {
+	t.Helper()
+	runID := mustCreateRun(t, s)
+	did := mustSeedPending(t, s, runID)
+
+	const goroutines = 8
+	results := make([]bool, goroutines)
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			executor := fmt.Sprintf("exec-%d", i)
+			won, err := s.ClaimDispatch(runID, did, executor, 10*time.Second)
+			if err != nil {
+				t.Errorf("goroutine %d ClaimDispatch: %v", i, err)
+				return
+			}
+			results[i] = won
+		}()
+	}
+	wg.Wait()
+
+	wins := 0
+	for _, w := range results {
+		if w {
+			wins++
+		}
+	}
+	if wins != 1 {
+		t.Errorf("ClaimDispatch concurrent: %d winners (want exactly 1)", wins)
+	}
+
+	// Dispatch status must be "claimed".
+	d, err := s.ReadDispatch(runID, did)
+	if err != nil {
+		t.Fatalf("ReadDispatch after claim: %v", err)
+	}
+	if d.Status != "claimed" {
+		t.Errorf("status after claim=%q want claimed", d.Status)
+	}
+	if d.ClaimedBy == "" {
+		t.Error("claimed_by is empty after claim")
+	}
+	if d.LeaseUntil == nil {
+		t.Error("lease_until is nil after claim")
+	}
+}
+
+// testClaimExpireRequeue: claim with 50ms lease, wait, ExpireLeases re-queues,
+// then a second claim on the same dispatch succeeds.
+func testClaimExpireRequeue(t *testing.T, s scratch.Store) {
+	t.Helper()
+	runID := mustCreateRun(t, s)
+	did := mustSeedPending(t, s, runID)
+
+	won, err := s.ClaimDispatch(runID, did, "exec-a", 50*time.Millisecond)
+	if err != nil || !won {
+		t.Fatalf("first ClaimDispatch: won=%v err=%v", won, err)
+	}
+
+	// Wait for lease to expire.
+	time.Sleep(120 * time.Millisecond)
+
+	requeued, err := s.ExpireLeases(runID)
+	if err != nil {
+		t.Fatalf("ExpireLeases: %v", err)
+	}
+	found := false
+	for _, id := range requeued {
+		if id == did {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("ExpireLeases: %q not in requeued list %v", did, requeued)
+	}
+
+	// Status must be pending again.
+	d, err := s.ReadDispatch(runID, did)
+	if err != nil {
+		t.Fatalf("ReadDispatch after expire: %v", err)
+	}
+	if d.Status != "pending" {
+		t.Errorf("status after expire=%q want pending", d.Status)
+	}
+	if d.ClaimedBy != "" {
+		t.Errorf("claimed_by not cleared after expire: %q", d.ClaimedBy)
+	}
+
+	// Second claim must succeed.
+	won2, err := s.ClaimDispatch(runID, did, "exec-b", 5*time.Second)
+	if err != nil {
+		t.Fatalf("second ClaimDispatch: %v", err)
+	}
+	if !won2 {
+		t.Error("second ClaimDispatch after expiry should succeed")
+	}
+}
+
+// testClaimRenewPreventsExpiry: renewing extends so ExpireLeases does NOT requeue.
+func testClaimRenewPreventsExpiry(t *testing.T, s scratch.Store) {
+	t.Helper()
+	runID := mustCreateRun(t, s)
+	did := mustSeedPending(t, s, runID)
+
+	won, err := s.ClaimDispatch(runID, did, "exec-renew", 50*time.Millisecond)
+	if err != nil || !won {
+		t.Fatalf("ClaimDispatch: won=%v err=%v", won, err)
+	}
+
+	// Renew before expiry to a long lease.
+	if err := s.RenewLease(runID, did, "exec-renew", 10*time.Second); err != nil {
+		t.Fatalf("RenewLease: %v", err)
+	}
+
+	// Wait past original 50ms window.
+	time.Sleep(120 * time.Millisecond)
+
+	requeued, err := s.ExpireLeases(runID)
+	if err != nil {
+		t.Fatalf("ExpireLeases after renew: %v", err)
+	}
+	for _, id := range requeued {
+		if id == did {
+			t.Errorf("ExpireLeases requeued %q but lease was renewed", did)
+		}
+	}
+
+	// Status must still be "claimed".
+	d, err := s.ReadDispatch(runID, did)
+	if err != nil {
+		t.Fatalf("ReadDispatch after renew+expire: %v", err)
+	}
+	if d.Status != "claimed" {
+		t.Errorf("status after renew=%q want claimed", d.Status)
+	}
+}
+
+// testClaimReleaseTerminal: ReleaseDispatch(completed) is terminal —
+// ExpireLeases never touches it and ListPendingDispatches excludes it.
+func testClaimReleaseTerminal(t *testing.T, s scratch.Store) {
+	t.Helper()
+	runID := mustCreateRun(t, s)
+	did := mustSeedPending(t, s, runID)
+
+	won, err := s.ClaimDispatch(runID, did, "exec-rel", 10*time.Second)
+	if err != nil || !won {
+		t.Fatalf("ClaimDispatch: won=%v err=%v", won, err)
+	}
+
+	if err := s.ReleaseDispatch(runID, did, "exec-rel", "completed"); err != nil {
+		t.Fatalf("ReleaseDispatch: %v", err)
+	}
+
+	d, err := s.ReadDispatch(runID, did)
+	if err != nil {
+		t.Fatalf("ReadDispatch: %v", err)
+	}
+	if d.Status != "completed" {
+		t.Errorf("status after release=%q want completed", d.Status)
+	}
+	if d.ClaimedBy != "" {
+		t.Errorf("claimed_by not cleared: %q", d.ClaimedBy)
+	}
+
+	// ExpireLeases must not touch it.
+	requeued, err := s.ExpireLeases(runID)
+	if err != nil {
+		t.Fatalf("ExpireLeases: %v", err)
+	}
+	for _, id := range requeued {
+		if id == did {
+			t.Errorf("ExpireLeases touched terminal dispatch %q", did)
+		}
+	}
+
+	// ListPendingDispatches must not include it.
+	pending, err := s.ListPendingDispatches(runID)
+	if err != nil {
+		t.Fatalf("ListPendingDispatches: %v", err)
+	}
+	for _, p := range pending {
+		if p.ID == did {
+			t.Errorf("ListPendingDispatches includes terminal dispatch %q", did)
+		}
+	}
+}
+
+// testListPendingDispatches: only pending dispatches in alloc order.
+func testListPendingDispatches(t *testing.T, s scratch.Store) {
+	t.Helper()
+	runID := mustCreateRun(t, s)
+
+	// Seed 3 pending dispatches.
+	ids := make([]string, 3)
+	for i := range ids {
+		ids[i] = mustSeedPending(t, s, runID)
+	}
+
+	// Claim the middle one.
+	won, err := s.ClaimDispatch(runID, ids[1], "exec-x", 10*time.Second)
+	if err != nil || !won {
+		t.Fatalf("ClaimDispatch ids[1]: won=%v err=%v", won, err)
+	}
+
+	pending, err := s.ListPendingDispatches(runID)
+	if err != nil {
+		t.Fatalf("ListPendingDispatches: %v", err)
+	}
+	if len(pending) != 2 {
+		t.Fatalf("ListPendingDispatches count=%d want 2", len(pending))
+	}
+	// Must be in ascending alloc order: ids[0] then ids[2].
+	if pending[0].ID != ids[0] {
+		t.Errorf("pending[0]=%q want %q", pending[0].ID, ids[0])
+	}
+	if pending[1].ID != ids[2] {
+		t.Errorf("pending[1]=%q want %q", pending[1].ID, ids[2])
+	}
+	// None should be the claimed one.
+	for _, p := range pending {
+		if p.ID == ids[1] {
+			t.Errorf("ListPendingDispatches includes claimed dispatch %q", ids[1])
+		}
+		if p.Status != "pending" {
+			t.Errorf("ListPendingDispatches entry %q has status=%q want pending", p.ID, p.Status)
+		}
+	}
 }

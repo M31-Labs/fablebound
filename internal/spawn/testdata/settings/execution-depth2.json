@@ -30,13 +30,15 @@
       "Grep",
       "Edit",
       "Write",
-      "Bash"
+      "Bash",
+      "Bash(tiller dispatch --queue *)",
+      "Bash(tiller note *)"
     ],
     "ask": [],
     "deny": [
       "Agent",
       "NotebookEdit",
-      "Bash(tiller dispatch*)"
+      "Bash(tiller dispatch *)"
     ]
   }
 }

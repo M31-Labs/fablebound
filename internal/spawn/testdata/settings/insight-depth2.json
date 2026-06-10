@@ -30,6 +30,7 @@
       "Grep",
       "Edit",
       "Write",
+      "Bash(tiller dispatch --queue *)",
       "Bash(tiller note *)",
       "Bash(hypha *)"
     ],

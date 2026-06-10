@@ -84,6 +84,11 @@ CREATE INDEX IF NOT EXISTS dispatch_lease_idx     ON dispatch (lease_until) WHER
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS adapter_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT '';
 
+-- Idempotent migration: add deny_reason to dispatch (schema version 6).
+-- Populated when a pool-time gate denies a dispatch (status='denied').
+-- Empty string for all other statuses; NOT NULL DEFAULT '' so v1 rows are unaffected.
+ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS deny_reason TEXT NOT NULL DEFAULT '';
+
 -- dispatch_seq is an atomic per-run dispatch counter for AllocDispatch.
 -- One row per run; next_n is incremented atomically via INSERT ... ON CONFLICT.
 CREATE TABLE IF NOT EXISTS dispatch_seq (
@@ -196,4 +201,8 @@ ON CONFLICT (version) DO NOTHING;
 
 INSERT INTO schema_version (version, description)
 VALUES (5, 'add adapter_name and provider columns to dispatch table')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO schema_version (version, description)
+VALUES (6, 'add deny_reason column to dispatch table for pool-time gate denials')
 ON CONFLICT (version) DO NOTHING;

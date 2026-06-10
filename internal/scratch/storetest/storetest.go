@@ -50,6 +50,9 @@ func Run(t *testing.T, open func(t *testing.T) scratch.Store) {
 	t.Run("ClaimRenewPreventsExpiry", func(t *testing.T) { testClaimRenewPreventsExpiry(t, open(t)) })
 	t.Run("ClaimReleaseTerminal", func(t *testing.T) { testClaimReleaseTerminal(t, open(t)) })
 	t.Run("ListPendingDispatches", func(t *testing.T) { testListPendingDispatches(t, open(t)) })
+	// F1 running-state expiry (pool crash recovery).
+	t.Run("RunningStateExpireWithLease", func(t *testing.T) { testRunningStateExpireWithLease(t, open(t)) })
+	t.Run("RunningStateNoLeaseUntouched", func(t *testing.T) { testRunningStateNoLeaseUntouched(t, open(t)) })
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -895,5 +898,125 @@ func testListPendingDispatches(t *testing.T, s scratch.Store) {
 		if p.Status != "pending" {
 			t.Errorf("ListPendingDispatches entry %q has status=%q want pending", p.ID, p.Status)
 		}
+	}
+}
+
+// testRunningStateExpireWithLease verifies that a "running" dispatch whose
+// lease_until is set and expired is reclaimed to "pending" by ExpireLeases
+// (F1 pool-crash-recovery fix). Steps:
+//
+//  1. Claim the dispatch (status → claimed, lease set).
+//  2. Manually write status = "running" while keeping the lease intact.
+//  3. Wait for the lease to expire.
+//  4. ExpireLeases must re-queue it (status → pending, claim cleared).
+//  5. Dispatch must be re-claimable by a second executor.
+func testRunningStateExpireWithLease(t *testing.T, s scratch.Store) {
+	t.Helper()
+	runID := mustCreateRun(t, s)
+	did := mustSeedPending(t, s, runID)
+
+	const shortLease = 50 * time.Millisecond
+	won, err := s.ClaimDispatch(runID, did, "exec-crash", shortLease)
+	if err != nil || !won {
+		t.Fatalf("ClaimDispatch: won=%v err=%v", won, err)
+	}
+
+	// Advance status to "running" while preserving the lease (simulates pool crash
+	// after claimed→running write but before the dispatch completes).
+	d, err := s.ReadDispatch(runID, did)
+	if err != nil {
+		t.Fatalf("ReadDispatch before running write: %v", err)
+	}
+	if d.LeaseUntil == nil {
+		t.Fatal("lease_until should be set after ClaimDispatch")
+	}
+	d.Status = "running"
+	// LeaseUntil stays as-is (short, about to expire).
+	if err := s.WriteDispatch(runID, d); err != nil {
+		t.Fatalf("WriteDispatch (running): %v", err)
+	}
+
+	// Wait for lease to expire.
+	time.Sleep(shortLease + 30*time.Millisecond)
+
+	// ExpireLeases must re-queue the running+expired dispatch.
+	requeued, err := s.ExpireLeases(runID)
+	if err != nil {
+		t.Fatalf("ExpireLeases: %v", err)
+	}
+	found := false
+	for _, id := range requeued {
+		if id == did {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("ExpireLeases: running dispatch %q not in requeued list %v", did, requeued)
+	}
+
+	// Status must be pending, claim cleared.
+	d2, err := s.ReadDispatch(runID, did)
+	if err != nil {
+		t.Fatalf("ReadDispatch after expire: %v", err)
+	}
+	if d2.Status != "pending" {
+		t.Errorf("status after expire=%q want pending", d2.Status)
+	}
+	if d2.ClaimedBy != "" {
+		t.Errorf("claimed_by not cleared after expire: %q", d2.ClaimedBy)
+	}
+	if d2.LeaseUntil != nil {
+		t.Error("lease_until not cleared after expire")
+	}
+
+	// Must be re-claimable.
+	won2, err := s.ClaimDispatch(runID, did, "exec-recovery", 5*time.Second)
+	if err != nil {
+		t.Fatalf("second ClaimDispatch: %v", err)
+	}
+	if !won2 {
+		t.Error("second ClaimDispatch after running-expiry should succeed")
+	}
+}
+
+// testRunningStateNoLeaseUntouched verifies that a "running" dispatch with NO
+// lease_until (v1-style direct dispatch) is never reclaimed by ExpireLeases.
+func testRunningStateNoLeaseUntouched(t *testing.T, s scratch.Store) {
+	t.Helper()
+	runID := mustCreateRun(t, s)
+	did := mustAllocDispatch(t, s, runID)
+
+	// Write a running dispatch with no lease (v1 style: tiller run directly).
+	now := time.Now().UTC()
+	d := &scratch.Dispatch{
+		ID:        did,
+		Role:      "orchestrator",
+		Model:     "fable",
+		Status:    "running",
+		StartedAt: now,
+		// LeaseUntil intentionally nil — v1 dispatch, never pool-managed.
+	}
+	if err := s.WriteDispatch(runID, d); err != nil {
+		t.Fatalf("WriteDispatch (v1 running, no lease): %v", err)
+	}
+
+	// ExpireLeases must NOT touch this dispatch.
+	requeued, err := s.ExpireLeases(runID)
+	if err != nil {
+		t.Fatalf("ExpireLeases: %v", err)
+	}
+	for _, id := range requeued {
+		if id == did {
+			t.Errorf("ExpireLeases touched running dispatch with no lease: %q", did)
+		}
+	}
+
+	// Status must still be running.
+	d2, err := s.ReadDispatch(runID, did)
+	if err != nil {
+		t.Fatalf("ReadDispatch after ExpireLeases: %v", err)
+	}
+	if d2.Status != "running" {
+		t.Errorf("v1 running dispatch status changed to %q, want running", d2.Status)
 	}
 }

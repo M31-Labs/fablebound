@@ -53,13 +53,13 @@ import (
 	"m31labs.dev/arbiter/expert"
 	"m31labs.dev/arbiter/workflow"
 	"m31labs.dev/tiller/internal/adapter"
+	"m31labs.dev/tiller/internal/auditlog"
 	"m31labs.dev/tiller/internal/policy"
 	"m31labs.dev/tiller/internal/scratch"
 )
 
 const (
 	defaultLeaseDuration = 2 * time.Minute
-	defaultRenewInterval = 1 * time.Minute // renew at half-life (2m / 2)
 	defaultPollInterval  = 5 * time.Second
 	defaultMaxConcurrent = 4
 
@@ -99,6 +99,11 @@ type Options struct {
 	// LeaseDuration is the initial claim lease duration (default 2m).
 	LeaseDuration time.Duration
 
+	// RenewInterval is how often the lease is renewed while a dispatch is running
+	// (default: LeaseDuration/2). Must be less than LeaseDuration.
+	// Zero means use the default (half of LeaseDuration).
+	RenewInterval time.Duration
+
 	// ExecutorID overrides the executor identifier used in claim records.
 	// Defaults to poolExecutorID() (host+PID). Used in tests to distinguish
 	// multiple in-process Pool instances sharing the same PID.
@@ -115,7 +120,8 @@ type Pool struct {
 	maxConcurrent   int
 	journalPath     string
 	leaseDuration   time.Duration
-	executorID      string // "" → poolExecutorID() at claim time
+	renewInterval   time.Duration // resolved to LeaseDuration/2 when zero
+	executorID      string        // "" → poolExecutorID() at claim time
 
 	// runIDs tracks the run IDs seen by the source loader (for sweeper).
 	runsMu sync.RWMutex
@@ -138,6 +144,9 @@ func New(opts Options) (*Pool, error) {
 	}
 	if opts.LeaseDuration <= 0 {
 		opts.LeaseDuration = defaultLeaseDuration
+	}
+	if opts.RenewInterval <= 0 {
+		opts.RenewInterval = opts.LeaseDuration / 2
 	}
 
 	pol := opts.DispatchPolicy
@@ -162,6 +171,7 @@ func New(opts Options) (*Pool, error) {
 		maxConcurrent:   opts.MaxConcurrent,
 		journalPath:     opts.JournalPath,
 		leaseDuration:   opts.LeaseDuration,
+		renewInterval:   opts.RenewInterval,
 		executorID:      opts.ExecutorID,
 		runIDs:          make(map[string]struct{}),
 	}, nil
@@ -320,16 +330,23 @@ func (p *Pool) executeDispatch(ctx context.Context, inv workflow.WorkerInvocatio
 	log.Printf("pool: claim %s/%s", runID, dispatchID)
 
 	// ── Gate evaluation (Queued=true) ──────────────────────────────────────────
-	allowed, denyReason, gateErr := p.evalGate(ctx, runID, dispatchID)
+	allowed, gateResult, gateErr := p.evalGate(ctx, runID, dispatchID)
 	if gateErr != nil {
 		p.releaseDispatch(runID, dispatchID, executor, "failed")
 		return workflow.WorkerExecution{}, fmt.Errorf("pool: gate %s/%s: %w", runID, dispatchID, gateErr)
 	}
 	if !allowed {
-		log.Printf("pool: gate denied %s/%s: %s", runID, dispatchID, denyReason)
-		p.releaseDispatch(runID, dispatchID, executor, "failed")
+		log.Printf("pool: gate denied %s/%s: %s", runID, dispatchID, gateResult.reason)
+		// Write the deny reason to the dispatch record before releasing.
+		if deniedDispatch, readErr := p.store.ReadDispatch(runID, dispatchID); readErr == nil {
+			deniedDispatch.DenyReason = gateResult.reason
+			_ = p.store.WriteDispatch(runID, deniedDispatch)
+		}
+		// Write audit line mirroring queue-time deny in cli/dispatch.go.
+		p.writeGateDenyAudit(runID, dispatchID, gateResult)
+		p.releaseDispatch(runID, dispatchID, executor, "denied")
 		return workflow.WorkerExecution{
-			Outcomes: []expert.Outcome{resultOutcome(runID, dispatchID, "failed", 0)},
+			Outcomes: []expert.Outcome{resultOutcome(runID, dispatchID, "denied", 0)},
 		}, nil
 	}
 
@@ -372,7 +389,7 @@ func (p *Pool) executeDispatch(ctx context.Context, inv workflow.WorkerInvocatio
 	renewWg.Add(1)
 	go func() {
 		defer renewWg.Done()
-		t := time.NewTicker(defaultRenewInterval)
+		t := time.NewTicker(p.renewInterval)
 		defer t.Stop()
 		for {
 			select {
@@ -432,6 +449,14 @@ func (p *Pool) releaseDispatch(runID, dispatchID, executor, status string) {
 	}
 }
 
+// gateResult holds the outcome of evalGate for use in audit + deny recording.
+type gateResult struct {
+	reason    string        // deny reason (empty on allow)
+	rule      string        // rule name that fired
+	req       policy.DispatchRequest
+	matchedRes policy.DispatchResult
+}
+
 // evalGate evaluates the dispatch policy with Queued=true semantics.
 //
 // ActiveCount is computed from ListDispatches filtered to "running" only —
@@ -440,18 +465,18 @@ func (p *Pool) releaseDispatch(runID, dispatchID, executor, status string) {
 // DispatchFacts.Active includes pending+claimed+running (correct for the
 // queue-time gate where the caller is about to spawn), but the pool-time gate
 // must not count pending dispatches it is about to execute.
-func (p *Pool) evalGate(_ context.Context, runID, dispatchID string) (bool, string, error) {
+func (p *Pool) evalGate(_ context.Context, runID, dispatchID string) (bool, gateResult, error) {
 	d, err := p.store.ReadDispatch(runID, dispatchID)
 	if err != nil {
-		return false, "", fmt.Errorf("read dispatch: %w", err)
+		return false, gateResult{}, fmt.Errorf("read dispatch: %w", err)
 	}
 	runRec, err := p.store.ReadRun(runID)
 	if err != nil {
-		return false, "", fmt.Errorf("read run: %w", err)
+		return false, gateResult{}, fmt.Errorf("read run: %w", err)
 	}
 	facts, err := p.store.DispatchFacts(runID)
 	if err != nil {
-		return false, "", fmt.Errorf("dispatch facts: %w", err)
+		return false, gateResult{}, fmt.Errorf("dispatch facts: %w", err)
 	}
 
 	reasonBudget := runRec.FableBudget
@@ -472,7 +497,7 @@ func (p *Pool) evalGate(_ context.Context, runID, dispatchID string) (bool, stri
 	// we use only running dispatches (actual concurrent agent executions).
 	activeRunning, err := p.countRunningDispatches(runID)
 	if err != nil {
-		return false, "", fmt.Errorf("count running dispatches: %w", err)
+		return false, gateResult{}, fmt.Errorf("count running dispatches: %w", err)
 	}
 
 	req := policy.DispatchRequest{
@@ -493,12 +518,40 @@ func (p *Pool) evalGate(_ context.Context, runID, dispatchID string) (bool, stri
 
 	res, err := policy.EvalDispatch(p.dispatchPolicy, req)
 	if err != nil {
-		return false, "", err
+		return false, gateResult{}, err
 	}
+	gr := gateResult{req: req, matchedRes: res}
 	if res.Verdict != policy.VerdictAllow {
-		return false, res.Reason, nil
+		gr.reason = res.Reason
+		gr.rule = res.Rule
+		return false, gr, nil
 	}
-	return true, "", nil
+	return true, gr, nil
+}
+
+// writeGateDenyAudit writes a DecisionEvent to the run's dispatch audit sink,
+// mirroring the queue-time deny path in cli/dispatch.go.
+func (p *Pool) writeGateDenyAudit(runID, dispatchID string, gr gateResult) {
+	sink, closer, err := p.store.AuditSink(runID, "dispatch")
+	if err != nil {
+		log.Printf("pool: gate deny audit open %s/%s: %v", runID, dispatchID, err)
+		return
+	}
+	if closer != nil {
+		defer closer.Close()
+	}
+	auditErr := auditlog.DispatchEvent(
+		sink,
+		runID+"/"+dispatchID,
+		p.dispatchPolicy.SHA256,
+		gr.req,
+		gr.matchedRes.Matched,
+		nil, // no strategy decision on deny
+		gr.matchedRes.Arbitrace,
+	)
+	if auditErr != nil {
+		log.Printf("pool: gate deny audit write %s/%s: %v", runID, dispatchID, auditErr)
+	}
 }
 
 // countRunningDispatches returns the number of dispatches with status "running" for runID.

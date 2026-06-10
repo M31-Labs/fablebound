@@ -243,15 +243,31 @@ func (fs *FS) WriteDispatch(runID string, d *scratch.Dispatch) error {
 }
 
 // ListDispatches returns all dispatch records for a run.
+// Reads raw meta.json (via readDispatchRaw) to preserve all v2 fields
+// (DenyReason, Tier, Enforcement, ClaimedBy, LeaseUntil) which run.ScanMetas
+// would drop through the run.Meta → metaToDispatch mapping.
 func (fs *FS) ListDispatches(runID string) ([]*scratch.Dispatch, error) {
-	metas, err := run.ScanMetas(fs.runDir(runID))
+	dispatchesDir := filepath.Join(fs.runDir(runID), "dispatches")
+	entries, err := os.ReadDir(dispatchesDir)
 	if err != nil {
-		return nil, fmt.Errorf("fsstore.ListDispatches %s: %w", runID, err)
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("fsstore.ListDispatches %s: readdir: %w", runID, err)
 	}
-	out := make([]*scratch.Dispatch, len(metas))
-	for i, m := range metas {
-		out[i] = metaToDispatch(m)
+
+	var out []*scratch.Dispatch
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		d, err := readDispatchRaw(fs.runDir(runID), e.Name())
+		if err != nil {
+			continue // skip corrupt / partial writes
+		}
+		out = append(out, d)
 	}
+	// entries from os.ReadDir are already in lexicographic order (d01, d02, …).
 	return out, nil
 }
 

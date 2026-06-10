@@ -176,7 +176,10 @@ func (fs *FS) ExpireLeases(runID string) ([]string, error) {
 		if err != nil {
 			continue // skip corrupt / partial writes
 		}
-		if d.Status != "claimed" {
+		// Reclaim dispatches with status "claimed" OR "running" whose lease has
+		// expired. A running dispatch with no lease (LeaseUntil == nil) is a
+		// v1-style direct dispatch (tiller run) — NEVER touch those.
+		if d.Status != "claimed" && d.Status != "running" {
 			continue
 		}
 		if d.LeaseUntil == nil || !d.LeaseUntil.Before(now) {
@@ -186,7 +189,8 @@ func (fs *FS) ExpireLeases(runID string) ([]string, error) {
 		// Re-queue under flock; re-check under lock to avoid races.
 		var requeued1 bool
 		if err := fs.flockUpdateMeta(runID, dispatchID, func(cur *scratch.Dispatch) error {
-			if cur.Status != "claimed" || cur.LeaseUntil == nil || !cur.LeaseUntil.Before(now) {
+			if (cur.Status != "claimed" && cur.Status != "running") ||
+				cur.LeaseUntil == nil || !cur.LeaseUntil.Before(now) {
 				return nil // raced with a renewal or release; skip
 			}
 			cur.Status = "pending"
@@ -290,7 +294,7 @@ func (fs *FS) flockUpdateMeta(runID, dispatchID string, fn func(*scratch.Dispatc
 // isTerminalStatus returns true for terminal dispatch status values.
 func isTerminalStatus(s string) bool {
 	switch s {
-	case "completed", "failed", "halted", "stale":
+	case "completed", "failed", "halted", "stale", "denied":
 		return true
 	}
 	return false

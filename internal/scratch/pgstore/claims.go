@@ -88,7 +88,9 @@ func (s *Store) ReleaseDispatch(runID, dispatchID, executor, terminalStatus stri
 	return nil
 }
 
-// ExpireLeases re-queues all claimed dispatches for runID whose lease has expired.
+// ExpireLeases re-queues all claimed or running dispatches for runID whose
+// lease has expired. A running dispatch with lease_until IS NULL is a v1-style
+// direct dispatch (tiller run) — the NULL guard ensures it is never touched.
 // Returns the IDs of re-queued dispatches.
 func (s *Store) ExpireLeases(runID string) ([]string, error) {
 	rows, err := s.db.db.QueryContext(context.Background(), `
@@ -97,7 +99,8 @@ func (s *Store) ExpireLeases(runID string) ([]string, error) {
 		       claimed_by  = '',
 		       lease_until = NULL
 		 WHERE run_id = $1
-		   AND status = 'claimed'
+		   AND status IN ('claimed', 'running')
+		   AND lease_until IS NOT NULL
 		   AND lease_until < now()
 		 RETURNING id`,
 		runID,
@@ -128,7 +131,7 @@ func (s *Store) ListPendingDispatches(runID string) ([]*scratch.Dispatch, error)
 		SELECT id, parent_id, role, model, profile, status, depth,
 		       supervisor_pid, max_turns, timeout_minutes, started_at, ended_at,
 		       exit_code, cost_usd, num_turns, session_id, tier, enforcement,
-		       claimed_by, lease_until, adapter_name, provider
+		       claimed_by, lease_until, adapter_name, provider, deny_reason
 		  FROM dispatch
 		 WHERE run_id = $1 AND status = 'pending'
 		 ORDER BY id`,
@@ -153,7 +156,7 @@ func (s *Store) ListPendingDispatches(runID string) ([]*scratch.Dispatch, error)
 // pgIsTerminalStatus mirrors the fsstore helper.
 func pgIsTerminalStatus(s string) bool {
 	switch s {
-	case "completed", "failed", "halted", "stale":
+	case "completed", "failed", "halted", "stale", "denied":
 		return true
 	}
 	return false

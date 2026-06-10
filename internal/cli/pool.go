@@ -21,12 +21,14 @@ func runPool(args []string) error {
 	fs.SetOutput(os.Stderr)
 
 	var (
-		pollFlag       = fs.String("poll", "5s", "polling interval between dispatch sweeps (e.g. 5s, 10s)")
-		maxConcurrent  = fs.Int("max-concurrent", 4, "maximum dispatches running simultaneously")
-		journalFlag    = fs.String("journal", "", "path to delivery-log JSONL file (default: .tiller/pool-journal.jsonl)")
-		storeFlag      = fs.String("store", "", "storage backend: fs|pg|tee (default: TILLER_STORE env or fs)")
-		dsnFlag        = fs.String("store-dsn", "", "PostgreSQL DSN for pg/tee backends (default: TILLER_STORE_DSN env)")
-		policyDir      = fs.String("policy-dir", "", "project directory for policy loading (default: cwd)")
+		pollFlag      = fs.String("poll", "5s", "polling interval between dispatch sweeps (e.g. 5s, 10s)")
+		maxConcurrent = fs.Int("max-concurrent", 4, "maximum dispatches running simultaneously")
+		journalFlag   = fs.String("journal", "", "path to delivery-log JSONL file (default: .tiller/pool-journal.jsonl)")
+		storeFlag     = fs.String("store", "", "storage backend: fs|pg|tee (default: TILLER_STORE env or fs)")
+		dsnFlag       = fs.String("store-dsn", "", "PostgreSQL DSN for pg/tee backends (default: TILLER_STORE_DSN env)")
+		policyDir     = fs.String("policy-dir", "", "project directory for policy loading (default: cwd)")
+		leaseFlag     = fs.String("lease", "2m", "claim lease duration; pool must renew before this expires (e.g. 2m, 90s)")
+		renewFlag     = fs.String("renew", "", "lease renewal interval; must be less than --lease (default: lease/2)")
 	)
 
 	if err := fs.Parse(args); err != nil {
@@ -48,6 +50,29 @@ func runPool(args []string) error {
 	if *maxConcurrent <= 0 {
 		return fmt.Errorf("pool: --max-concurrent must be positive")
 	}
+
+	leaseDuration, err := time.ParseDuration(*leaseFlag)
+	if err != nil {
+		return fmt.Errorf("pool: --lease %q: %w", *leaseFlag, err)
+	}
+	if leaseDuration <= 0 {
+		return fmt.Errorf("pool: --lease must be positive")
+	}
+
+	var renewInterval time.Duration
+	if *renewFlag != "" {
+		renewInterval, err = time.ParseDuration(*renewFlag)
+		if err != nil {
+			return fmt.Errorf("pool: --renew %q: %w", *renewFlag, err)
+		}
+		if renewInterval <= 0 {
+			return fmt.Errorf("pool: --renew must be positive")
+		}
+		if renewInterval >= leaseDuration {
+			return fmt.Errorf("pool: --renew (%s) must be less than --lease (%s)", renewInterval, leaseDuration)
+		}
+	}
+	// Zero renewInterval means pool.New will default to leaseDuration/2.
 
 	// Resolve the scratch store.
 	st, _, storeCloser, err := storeutil.Resolve(&storeutil.Options{
@@ -95,13 +120,15 @@ func runPool(args []string) error {
 		MaxConcurrent:   *maxConcurrent,
 		JournalPath:     journalPath,
 		ProjectDir:      projectDir,
+		LeaseDuration:   leaseDuration,
+		RenewInterval:   renewInterval,
 	})
 	if err != nil {
 		return fmt.Errorf("pool: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "tiller pool: starting (poll=%s max-concurrent=%d journal=%s)\n",
-		pollInterval, *maxConcurrent, journalPath)
+	fmt.Fprintf(os.Stderr, "tiller pool: starting (poll=%s lease=%s max-concurrent=%d journal=%s)\n",
+		pollInterval, leaseDuration, *maxConcurrent, journalPath)
 
 	return p.RunWithSignals()
 }

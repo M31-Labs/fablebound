@@ -43,7 +43,7 @@ type Dispatch struct {
 	Role           string     `json:"role"`
 	Model          string     `json:"model"`
 	Profile        string     `json:"profile"`
-	Status         string     `json:"status"` // pending|claimed|running|completed|failed|halted|stale
+	Status         string     `json:"status"` // pending|claimed|running|completed|failed|halted|stale|denied
 	Depth          int        `json:"depth"`
 	SupervisorPID  int        `json:"supervisor_pid,omitempty"`
 	MaxTurns       int        `json:"max_turns,omitempty"`
@@ -62,12 +62,15 @@ type Dispatch struct {
 	// Dispatch pool fields (inert until P4) — omitempty for byte stability
 	ClaimedBy  string     `json:"claimed_by,omitempty"`
 	LeaseUntil *time.Time `json:"lease_until,omitempty"`
+	// DenyReason is set when Status=="denied" (pool-time gate denial) or
+	// when a non-gate failure occurs. omitempty so v1 metas stay byte-stable.
+	DenyReason string `json:"deny_reason,omitempty"`
 }
 
 // IsTerminal returns true if the dispatch status is a terminal state.
 func (d *Dispatch) IsTerminal() bool {
 	switch d.Status {
-	case "completed", "failed", "halted", "stale":
+	case "completed", "failed", "halted", "stale", "denied":
 		return true
 	}
 	return false

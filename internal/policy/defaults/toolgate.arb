@@ -1,0 +1,81 @@
+# fablebound tool gate. Input schema: ToolCallRequest. No match => deny.
+# Installed as the PreToolUse hook in EVERY spawned claude process (root and
+# all child levels); agent.role / agent.depth come from env fablebound set
+# at spawn. Per-role capability enforcement, not just root protection.
+
+segment orchestrator { agent.role == "orchestrator" }
+segment scratch_writers { agent.role in ["chief-architect", "deep-report", "reviewer"] }
+segment readonly_bash_roles {
+    agent.role in ["investigator", "reviewer", "chief-architect", "deep-report"]
+}
+segment execution { agent.role in ["worker", "debugger"] }
+
+rule HaltAllTools priority 0 {
+    kill_switch
+    when { true }
+    then Deny { reason: "fablebound tool halt" }
+}
+
+rule DenyHyphaDaemons priority 1 {
+    when { tool.name == "Bash" and tool.command matches "hypha +(mcp|hub) +serve" }
+    then Deny { reason: "persistent hypha daemons are forbidden (22GB OOM incident)" }
+}
+rule DenyDestructive priority 1 {
+    when { tool.name == "Bash" and
+           (tool.command matches "rm +-rf +[/~]" or
+            tool.command matches "git +push +.*--force") }
+    then Deny { reason: "destructive command" }
+}
+rule DenyTerminalDispatch priority 2 {
+    when { agent.depth >= 2 and tool.name == "Bash" and
+           tool.command starts_with "fablebound dispatch" }
+    then Deny { reason: "depth-2 agents are terminal; they cannot spawn" }
+}
+
+rule OrchestratorRead priority 10 {
+    when segment orchestrator { tool.name in ["Read", "Glob", "Grep"] }
+    then Allow { reason: "orchestrator reads" }
+}
+rule OrchestratorEffector priority 10 {
+    when segment orchestrator {
+        tool.name == "Bash" and
+        (tool.command starts_with "fablebound " or tool.command starts_with "hypha ")
+    }
+    then Allow { reason: "orchestrator effector" }
+}
+rule OrchestratorDenyRest priority 20 {
+    when segment orchestrator { true }
+    then Deny { reason: "the orchestrator dispatches; it does not execute" }
+}
+
+rule ScratchWrite priority 10 {
+    when segment scratch_writers {
+        tool.name in ["Write", "Edit"] and tool.path_in_scratch == true
+    }
+    then Allow { reason: "write confined to run scratch space" }
+}
+rule DenyWriteOutsideScratch priority 11 {
+    when segment scratch_writers { tool.name in ["Write", "Edit"] }
+    then Deny { reason: "this role writes only inside the run scratch space" }
+}
+
+rule ReadOnlyBash priority 12 {
+    when segment readonly_bash_roles {
+        tool.name == "Bash" and
+        (tool.command starts_with "fablebound " or tool.command starts_with "hypha "
+         or tool.command starts_with "rg " or tool.command starts_with "ls "
+         or tool.command starts_with "git log" or tool.command starts_with "git diff"
+         or tool.command starts_with "git show" or tool.command starts_with "go doc"
+         or tool.command starts_with "gts ")
+    }
+    then Allow { reason: "read-only command" }
+}
+rule ReadTools priority 12 {
+    when { tool.name in ["Read", "Glob", "Grep"] }
+    then Allow { reason: "reading is universal" }
+}
+
+rule ExecutionAllow priority 50 {
+    when segment execution { true }
+    then Allow { reason: "execution role; audited" }
+}

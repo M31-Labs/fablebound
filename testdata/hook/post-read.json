@@ -1,0 +1,11 @@
+{
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "/workspace/README.md"
+  },
+  "tool_response": {
+    "is_error": false,
+    "output": "# Project README"
+  }
+}

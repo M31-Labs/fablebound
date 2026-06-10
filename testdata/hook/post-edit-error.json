@@ -1,0 +1,11 @@
+{
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "/workspace/main.go"
+  },
+  "tool_response": {
+    "is_error": true,
+    "output": "file not found"
+  }
+}

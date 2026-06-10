@@ -1,0 +1,107 @@
+# fablebound dispatch policy. Input schema: DispatchRequest (arbiter check'd).
+# Depth semantics: spawn capability exists at exactly two levels — depth 0
+# (root orchestrator) and depth 1. Depth >= 2 is terminal (fail-closed).
+
+segment fable_request {
+    dispatch.model == "fable"
+}
+segment insight_role {
+    dispatch.role in ["chief-architect", "deep-report"]
+}
+segment execution_caller {
+    caller.role in ["worker", "debugger", "investigator", "reviewer"]
+}
+
+rule HaltAll priority 0 {
+    kill_switch
+    when { true }
+    then Deny { reason: "fablebound emergency halt" }
+}
+
+rule DenyFableForExecution priority 1 {
+    when segment fable_request {
+        not (dispatch.role in ["chief-architect", "deep-report"])
+    }
+    then Deny { reason: "fable is reserved for insight roles; execution goes to lesser models" }
+}
+
+rule DenyFableFromNonRoot priority 1 {
+    when segment fable_request { caller.role != "orchestrator" }
+    then Deny { reason: "only the root orchestrator may summon fable" }
+}
+
+rule DenyTerminalDepth priority 1 {
+    when { caller.depth >= 2 }
+    then Deny { reason: "depth-2 agents are terminal; spawn capability exists only at depths 0 and 1" }
+}
+
+rule DenyFableBudget priority 2 {
+    when segment fable_request { run.fable_dispatches >= run.fable_budget }
+    then Deny { reason: "fable budget exhausted for this run" }
+}
+
+rule DenyConcurrencyCap priority 2 {
+    when { run.active_dispatches >= 4 }
+    then Deny { reason: "active dispatch cap (4); poll or await running dispatches" }
+}
+
+rule DenyExecutionSpawnsInsight priority 3 {
+    when segment execution_caller {
+        dispatch.role in ["chief-architect", "deep-report"]
+    }
+    then Deny { reason: "execution roles cannot spawn insight roles" }
+}
+
+rule DenyReviewerDispatch priority 3 {
+    when { caller.role == "reviewer" }
+    then Deny { reason: "reviewers report; they do not dispatch" }
+}
+
+rule DenyInvestigatorScope priority 3 {
+    when { caller.role == "investigator" and dispatch.role != "investigator" }
+    then Deny { reason: "investigators may dispatch only investigators" }
+}
+
+rule DenyInsightScope priority 3 {
+    when { caller.role in ["chief-architect", "deep-report"]
+           and dispatch.role != "investigator" }
+    then Deny { reason: "insight roles may dispatch only investigators" }
+}
+
+rule DenyWorkerScope priority 3 {
+    when { caller.role in ["worker", "debugger"]
+           and not (dispatch.role in ["investigator", "debugger"]) }
+    then Deny { reason: "execution roles may dispatch only investigators and debuggers" }
+}
+
+rule AllowDispatch priority 99 {
+    when { dispatch.role in ["chief-architect", "deep-report", "investigator",
+                             "worker", "debugger", "reviewer"] }
+    then Allow { reason: "no guardrail matched" }
+}
+
+outcome Route {
+    model: string
+    profile: string
+    max_turns: number
+    timeout_minutes: number
+}
+
+strategy DispatchRoute returns Route {
+    when segment insight_role { dispatch.role == "chief-architect" }
+        then Architect { model: "fable", profile: "insight", max_turns: 80, timeout_minutes: 30 }
+    when { dispatch.role == "deep-report" }
+        then DeepReport { model: "fable", profile: "insight", max_turns: 60, timeout_minutes: 30 }
+    rollout percent 10 by run.id namespace "inv-haiku"
+    when { dispatch.role == "investigator" }
+        then InvestigatorCanary { model: "haiku", profile: "readonly", max_turns: 40, timeout_minutes: 15 }
+    when { dispatch.role == "investigator" }
+        then Investigator { model: "sonnet", profile: "readonly", max_turns: 40, timeout_minutes: 15 }
+    when { dispatch.role == "worker" }
+        then Worker { model: "sonnet", profile: "execution", max_turns: 60, timeout_minutes: 45 }
+    when { dispatch.role == "debugger" }
+        then Debugger { model: "sonnet", profile: "execution", max_turns: 60, timeout_minutes: 45 }
+    when { dispatch.role == "reviewer" }
+        then Reviewer { model: "sonnet", profile: "readonly", max_turns: 30, timeout_minutes: 15 }
+    else Reject { model: "", profile: "", max_turns: 0, timeout_minutes: 0 }
+}

@@ -1,0 +1,11 @@
+{
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "go build ./..."
+  },
+  "tool_response": {
+    "is_error": false,
+    "output": ""
+  }
+}

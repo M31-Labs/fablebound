@@ -56,9 +56,14 @@ func formatMetaWithReport(m *Meta, runDir string) string {
 		return "(unknown)"
 	}
 
-	model := m.Model
-	if model == "" {
-		model = "?"
+	// Prefer tier for the parenthetical label (v2 records); fall back to model
+	// for v1 records that lack a Tier field (e.g. "fable", "sonnet").
+	label := m.Tier
+	if label == "" {
+		label = m.Model
+	}
+	if label == "" {
+		label = "?"
 	}
 
 	var cost string
@@ -68,7 +73,7 @@ func formatMetaWithReport(m *Meta, runDir string) string {
 
 	// Use EffectiveStatus so orphan running dispatches show as "stale".
 	status := m.EffectiveStatus()
-	base := fmt.Sprintf("%s %s(%s) [%s%s]", m.ID, m.Role, model, status, cost)
+	base := fmt.Sprintf("%s %s(%s) [%s%s]", m.ID, m.Role, label, status, cost)
 
 	// Append → dispatches/<id>/report.md if the file exists.
 	if runDir != "" && status == "completed" {

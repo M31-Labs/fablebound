@@ -182,8 +182,9 @@ func TestPrepare_WritesSettingsJSON(t *testing.T) {
 	}
 }
 
-// TestPrepare_SetsTier verifies that Prepare derives TILLER_TIER from the model
-// when DispatchSpec.Tier is empty, and uses the provided Tier when set.
+// TestPrepare_SetsTier verifies that Prepare passes through the caller-supplied
+// Tier verbatim. Since P2.6, Tier is resolved by the caller (dispatch.go via
+// tier.Resolve) before Prepare is called; Prepare does not derive it from Model.
 func TestPrepare_SetsTier(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -191,11 +192,9 @@ func TestPrepare_SetsTier(t *testing.T) {
 		tierInput string
 		wantTier  string
 	}{
-		{"fable→reason", "fable", "", "reason"},
-		{"opus→scrutiny", "opus", "", "scrutiny"},
-		{"sonnet→execute", "sonnet", "", "execute"},
-		{"haiku→execute", "haiku", "", "execute"},
-		{"explicit reason", "fable", "reason", "reason"},
+		{"reason tier preserved", "fable", "reason", "reason"},
+		{"scrutiny tier preserved", "opus", "scrutiny", "scrutiny"},
+		{"execute tier preserved", "sonnet", "execute", "execute"},
 		{"explicit execute override", "fable", "execute", "execute"},
 	}
 

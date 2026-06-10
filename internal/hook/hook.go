@@ -412,10 +412,6 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer) error {
 	toolName := event.ToolName
 	reason := result.Reason
 	if decision == "deny" {
-		if reason == "" {
-			// Fallback if the policy emitted no reason: neutral message naming the personas.
-			reason = "tiller: ambient orchestrator runs in read/dispatch mode — dispatch a subagent (Task) to execute; delegate to tiller-worker, tiller-debugger, tiller-investigator, tiller-reviewer, tiller-architect, or tiller-deep-report."
-		}
 		// Substitute {tool.name} placeholder that the policy may embed.
 		if toolName != "" {
 			reason = strings.ReplaceAll(reason, "{tool.name}", toolName)

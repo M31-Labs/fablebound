@@ -105,6 +105,7 @@ func Supervise(a SuperviseArgs) error {
 		Role:           d.Role,
 		CallerDepth:    d.Depth - 1, // d.Depth is child depth; caller = child-1
 		Route:          metaRoute,
+		Model:          d.Model, // resolved by tier.Resolve at dispatch time (P2.6+)
 		BriefPath:      briefPath,
 		SettingsPath:   settingsPath,
 		RolePromptPath: rolePromptPath,

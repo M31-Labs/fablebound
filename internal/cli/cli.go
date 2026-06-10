@@ -34,7 +34,7 @@ type subcommand struct {
 }
 
 // buildRegistry constructs the adapter registry used by the dispatch handler.
-// P2.6 will add tier resolution here; for now only claude-headless is registered.
+// claude-headless is registered; additional adapters can be registered here as providers expand.
 // binary is the tiller executable path (empty = resolve at Run time via os.Executable).
 func buildRegistry(binary string) *adapter.Registry {
 	reg := adapter.NewRegistry()
@@ -54,8 +54,8 @@ func Main(args []string) {
 	reg := buildRegistry("")
 
 	// Subcommands that need the registry are wired here via closure; all others
-	// remain as plain function references. P2.6 will swap "claude-headless" for
-	// the tier-resolved adapter name inside makeDispatchHandler.
+	// remain as plain function references. Route resolution selects the adapter
+	// by name from the registry inside makeDispatchHandler.
 	subcommands := []subcommand{
 		{"init", runInit},
 		{"run", runRun},

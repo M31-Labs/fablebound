@@ -52,6 +52,8 @@ type Dispatch struct {
 	// v2 fields — omitempty so v1 meta.json stays byte-stable
 	Tier        string `json:"tier,omitempty"`        // reason|scrutiny|execute
 	Enforcement string `json:"enforcement,omitempty"` // full|degraded; default "full"
+	Provider    string `json:"provider,omitempty"`    // anthropic|openai|local|…
+	Adapter     string `json:"adapter,omitempty"`     // claude-headless|claude-code|…
 	// Dispatch pool fields (inert until P4) — omitempty for byte stability
 	ClaimedBy  string     `json:"claimed_by,omitempty"`
 	LeaseUntil *time.Time `json:"lease_until,omitempty"`

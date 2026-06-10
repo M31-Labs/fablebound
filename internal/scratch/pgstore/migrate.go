@@ -22,7 +22,7 @@ import (
 var schemaDDL string
 
 // SchemaVersion is the expected version number written by schema.sql.
-const SchemaVersion = 1
+const SchemaVersion = 3
 
 // DB wraps a *sql.DB opened against a PostgreSQL DSN.
 type DB struct {
@@ -117,7 +117,7 @@ func (d *DB) QueryStatus(ctx context.Context) (Status, error) {
 		return Status{}, fmt.Errorf("pgstore: version query: %w", err)
 	}
 
-	tables := []string{"run", "dispatch", "doc", "trace_event", "audit_event", "schema_version"}
+	tables := []string{"run", "dispatch", "dispatch_seq", "doc", "trace_event", "audit_event", "schema_version"}
 	counts := make(map[string]int64, len(tables))
 	for _, t := range tables {
 		var n int64

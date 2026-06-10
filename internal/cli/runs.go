@@ -10,12 +10,13 @@ import (
 
 	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/scratch/fsstore"
+	"m31labs.dev/tiller/internal/storeutil"
 )
 
-// runRuns is the handler for `tiller runs list|show|gc`.
+// runRuns is the handler for `tiller runs list|show|gc|export`.
 func runRuns(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("runs: subcommand required: list|show|gc")
+		return fmt.Errorf("runs: subcommand required: list|show|gc|export")
 	}
 
 	switch args[0] {
@@ -25,8 +26,10 @@ func runRuns(args []string) error {
 		return runRunsShow(args[1:])
 	case "gc":
 		return runRunsGC(args[1:])
+	case "export":
+		return runRunsExport(args[1:])
 	default:
-		return fmt.Errorf("runs: unknown subcommand %q (want list|show|gc)", args[0])
+		return fmt.Errorf("runs: unknown subcommand %q (want list|show|gc|export)", args[0])
 	}
 }
 
@@ -266,5 +269,64 @@ func runRunsGC(args []string) error {
 		}
 	}
 
+	return nil
+}
+
+// runRunsExport implements `tiller runs export <id> --dir <d> [--store pg] [--store-dsn DSN]`.
+//
+// Reads the run from the resolved store (typically pgstore) and materialises
+// the v1 file layout in --dir so that file-based tools (arbiter replay, etc.)
+// keep working verbatim.
+func runRunsExport(args []string) error {
+	fs := flag.NewFlagSet("runs export", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	var (
+		dir      = fs.String("dir", "", "destination directory (required)")
+		storeKnd = fs.String("store", "", "storage backend: fs|pg|tee (default: TILLER_STORE env or fs)")
+		dsnFlag  = fs.String("store-dsn", "", "PostgreSQL DSN (default: TILLER_STORE_DSN env)")
+	)
+
+	// Separate the run id positional arg from flag args.
+	var filteredArgs []string
+	var id string
+	for _, a := range args {
+		if len(a) > 0 && a[0] != '-' && id == "" {
+			id = a
+		} else {
+			filteredArgs = append(filteredArgs, a)
+		}
+	}
+	if err := fs.Parse(filteredArgs); err != nil {
+		return err
+	}
+
+	if id == "" {
+		return fmt.Errorf("runs export: run id required")
+	}
+	if *dir == "" {
+		return fmt.Errorf("runs export: --dir is required")
+	}
+
+	// Resolve the store.
+	// Export is a top-level CLI command; TILLER_RUN_DIR is not set, so the
+	// hot-path guard does not fire and TILLER_STORE / --store is honoured.
+	opts := &storeutil.Options{
+		StoreKind: *storeKnd,
+		DSN:       *dsnFlag,
+	}
+	st, _, closer, err := storeutil.Resolve(opts)
+	if err != nil {
+		return fmt.Errorf("runs export: open store: %w", err)
+	}
+	if closer != nil {
+		defer closer()
+	}
+
+	if err := scratch.ExportRun(st, id, *dir); err != nil {
+		return fmt.Errorf("runs export: %w", err)
+	}
+
+	fmt.Printf("exported %s → %s\n", id, *dir)
 	return nil
 }

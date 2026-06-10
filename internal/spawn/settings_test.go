@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"m31labs.dev/tiller/internal/policy"
 	"m31labs.dev/tiller/internal/spawn"
 )
 
@@ -300,5 +301,34 @@ func TestSettings_Depth1ExecutionNoDenyDispatch(t *testing.T) {
 
 	if strings.Contains(string(got), `"Bash(tiller dispatch*)"`) {
 		t.Error("execution depth-1 deny list unexpectedly contains Bash(tiller dispatch*)")
+	}
+}
+
+// TestBuildEnv_SetsTILLER_TIER verifies that BuildEnv exports TILLER_TIER
+// from the dispatch's tier (Route.Tier), matching the adapter.go docstring claim.
+func TestBuildEnv_SetsTILLER_TIER(t *testing.T) {
+	a := spawn.ClaudeArgs{
+		RunDir:      "/tmp/runs/r01",
+		DispatchID:  "d01",
+		Role:        "worker",
+		CallerDepth: 0,
+		Route:       policy.Route{Tier: "execute"},
+	}
+	env := spawn.BuildEnv(a)
+
+	envMap := make(map[string]string, len(env))
+	for _, kv := range env {
+		idx := strings.IndexByte(kv, '=')
+		if idx < 0 {
+			continue
+		}
+		envMap[kv[:idx]] = kv[idx+1:]
+	}
+
+	if envMap["TILLER_TIER"] != "execute" {
+		t.Errorf("TILLER_TIER = %q, want %q", envMap["TILLER_TIER"], "execute")
+	}
+	if envMap["TILLER_ROLE"] != "worker" {
+		t.Errorf("TILLER_ROLE = %q, want %q", envMap["TILLER_ROLE"], "worker")
 	}
 }

@@ -192,6 +192,55 @@ tiller runs show <run-id>
 tiller runs gc --keep 20 [--dry-run]
 ```
 
+## Storage Backends
+
+tiller writes run artifacts (manifest, dispatches, audit logs) to a configurable storage backend. Three backends are available:
+
+| Backend | Flag/Env | Description |
+|---------|----------|-------------|
+| `fs` (default) | `--store fs` | Writes to `.tiller/runs/<id>/` on disk. No DSN required. |
+| `pg` | `--store pg` | Writes to PostgreSQL. Requires `--store-dsn` / `TILLER_STORE_DSN`. |
+| `tee` | `--store tee` | Writes to both fs and pg. **Rollout mode.** |
+
+**Selecting a backend:**
+
+```sh
+# Explicit flag (highest priority)
+tiller run --store tee --store-dsn postgres://user:pass@host/db "my task"
+
+# Environment variables (inherited by all child dispatches)
+TILLER_STORE=tee TILLER_STORE_DSN=postgres://... tiller run "my task"
+```
+
+Resolution order: `--store` flag → `TILLER_STORE` env → default `fs`.
+
+**Tee rollout semantics.** In `tee` mode, fs is authoritative:
+- Every write goes to fs first, synchronously. Error semantics are identical to `fs` alone.
+- pg mirror writes are async (bounded queue, single goroutine). A mirror failure logs and drops; it never slows or fails the caller.
+- All reads come from fs. If fs and pg diverge, fs wins.
+- `Close` (called at end of `tiller run`) drains the mirror queue before returning.
+
+**Hot-path guard.** When `TILLER_RUN_DIR` is set (hook and child dispatch invocations), the store is always opened as `fs` regardless of `TILLER_STORE`/`TILLER_STORE_DSN`. The toolgate evaluates policy locally and must never touch the network.
+
+**DSN.** The DSN is a standard PostgreSQL connection string:
+
+```
+postgres://user:password@host:5432/dbname?sslmode=disable
+```
+
+**Exporting a pg-stored run.** After a run with `--store pg` or `--store tee`, materialise the v1 file layout so that `arbiter replay` and other file-based tools work verbatim:
+
+```sh
+tiller runs export <run-id> --dir /tmp/myrun \
+  --store pg --store-dsn postgres://...
+
+# Then replay the audit log
+arbiter replay .tiller/policy/toolgate.arb \
+  --audit /tmp/myrun/audit/toolgate.jsonl
+```
+
+`tiller runs export` is idempotent: re-running into the same `--dir` overwrites files in place.
+
 ## Configuration
 
 | Variable | Default | Description |
@@ -201,6 +250,8 @@ tiller runs gc --keep 20 [--dry-run]
 | `TILLER_DEPTH` | `0` | Spawn depth; set by tiller at spawn |
 | `TILLER_RUN_DIR` | — | Absolute path to the run scratch directory |
 | `TILLER_DISPATCH_ID` | — | Dispatch id of the current agent |
+| `TILLER_STORE` | `fs` | Storage backend: `fs`\|`pg`\|`tee` |
+| `TILLER_STORE_DSN` | — | PostgreSQL DSN (required for `pg` and `tee` backends) |
 
 ## Hyphae Integration
 

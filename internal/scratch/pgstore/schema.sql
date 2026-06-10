@@ -33,8 +33,11 @@ CREATE TABLE IF NOT EXISTS run (
 
 -- dispatch corresponds to spec §3.1 "dispatch" record.
 -- State machine: pending → claimed → running → completed | failed | expired
+--
+-- NOTE: dispatch IDs (d01, d02, …) are scoped to their run_id — they are NOT
+-- globally unique. The primary key is (run_id, id) to reflect this.
 CREATE TABLE IF NOT EXISTS dispatch (
-    id               TEXT        PRIMARY KEY,
+    id               TEXT        NOT NULL,
     run_id           TEXT        NOT NULL REFERENCES run(id),
     parent_id        TEXT        NOT NULL DEFAULT '',
     role             TEXT        NOT NULL DEFAULT '',
@@ -57,16 +60,26 @@ CREATE TABLE IF NOT EXISTS dispatch (
     -- dispatch pool / lease fields (active from P4)
     claimed_by       TEXT        NOT NULL DEFAULT '',
     lease_until      TIMESTAMPTZ,
-    -- adapter config (settings.json body)
-    adapter_config   JSONB
+    -- adapter config (settings.json body); stored as TEXT to preserve exact bytes
+    adapter_config   TEXT,
+    PRIMARY KEY (run_id, id)
 );
 
 CREATE INDEX IF NOT EXISTS dispatch_run_id_idx    ON dispatch (run_id);
 CREATE INDEX IF NOT EXISTS dispatch_status_idx    ON dispatch (status);
 CREATE INDEX IF NOT EXISTS dispatch_lease_idx     ON dispatch (lease_until) WHERE status = 'claimed';
 
+-- dispatch_seq is an atomic per-run dispatch counter for AllocDispatch.
+-- One row per run; next_n is incremented atomically via INSERT ... ON CONFLICT.
+CREATE TABLE IF NOT EXISTS dispatch_seq (
+    run_id  TEXT    PRIMARY KEY REFERENCES run(id),
+    next_n  INTEGER NOT NULL DEFAULT 1
+);
+
 -- doc stores brief, report, and note bodies.
--- unique constraint: one (kind, run_id, dispatch_id) tuple per record.
+-- Unique constraint: for brief/report (filename='') one row per (kind, run_id,
+-- dispatch_id). For notes (kind='note', filename≠'') the filename makes the row
+-- unique. The compound key (kind, run_id, dispatch_id, filename) covers both cases.
 CREATE TABLE IF NOT EXISTS doc (
     id           BIGSERIAL   PRIMARY KEY,
     kind         TEXT        NOT NULL,                        -- brief|report|note
@@ -80,7 +93,7 @@ CREATE TABLE IF NOT EXISTS doc (
     filename     TEXT        NOT NULL DEFAULT '',             -- for notes: relative filename
     -- body (inline for ≤64KB; future: ref to object store)
     body         TEXT        NOT NULL DEFAULT '',
-    UNIQUE (kind, run_id, dispatch_id)
+    UNIQUE (kind, run_id, dispatch_id, filename)
 );
 
 CREATE INDEX IF NOT EXISTS doc_run_id_idx ON doc (run_id);
@@ -123,7 +136,41 @@ CREATE INDEX IF NOT EXISTS audit_event_run_id_idx ON audit_event (run_id);
 CREATE INDEX IF NOT EXISTS audit_event_kind_idx   ON audit_event (kind);
 CREATE INDEX IF NOT EXISTS audit_event_ts_idx     ON audit_event (ts);
 
--- Seed the version row (idempotent via ON CONFLICT DO NOTHING).
+-- dispatch_facts is a SQL view exposing per-run active/reason dispatch aggregates.
+-- It is the factsource backing for arbiter governance: the postgres factsource
+-- loader queries it as a read-only "table" (type/key/fields/version columns).
+--
+-- active = status IN ('running','pending','claimed')  — mirrors fsstore semantics
+-- reason = tier='reason' OR (tier='' AND model='fable')  — v1 model fallback
+--
+-- The view is idempotent: CREATE OR REPLACE is safe to run multiple times.
+CREATE OR REPLACE VIEW dispatch_facts AS
+SELECT
+    'dispatch_facts'::TEXT                                            AS type,
+    d.run_id                                                          AS key,
+    jsonb_build_object(
+        'active_dispatches',
+        COUNT(*) FILTER (WHERE d.status IN ('running','pending','claimed')),
+        'reason_dispatches',
+        COUNT(*) FILTER (WHERE d.tier = 'reason'
+                           OR  (d.tier = '' AND d.model = 'fable')),
+        'reason_budget',
+        MAX(r.reason_budget)
+    )                                                                 AS fields,
+    1::BIGINT                                                         AS version
+FROM dispatch d
+JOIN run r ON r.id = d.run_id
+GROUP BY d.run_id;
+
+-- Seed the version rows (idempotent via ON CONFLICT DO NOTHING).
 INSERT INTO schema_version (version, description)
 VALUES (1, 'initial tiller scratch bus schema')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO schema_version (version, description)
+VALUES (2, 'add dispatch_seq; widen doc unique key to include filename')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO schema_version (version, description)
+VALUES (3, 'add dispatch_facts view for arbiter factsource governance')
 ON CONFLICT (version) DO NOTHING;

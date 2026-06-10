@@ -19,8 +19,11 @@ type ClaudeArgs struct {
 	Role string
 	// CallerDepth is the TILLER_DEPTH of the caller; child = caller+1.
 	CallerDepth int
-	// Route contains model, max_turns, timeout from the policy decision.
+	// Route contains tier, max_turns, timeout from the policy decision.
 	Route policy.Route
+	// Model is the resolved model identifier (e.g. "fable", "opus", "sonnet").
+	// Set by the caller from tier.Resolve; takes precedence over tier-derived model.
+	Model string
 	// BriefPath is the path to the brief file (passed as -p argument).
 	BriefPath string
 	// SettingsPath is the path to the generated settings.json for this dispatch.
@@ -56,8 +59,12 @@ func BuildArgs(a ClaudeArgs) ([]string, error) {
 		return nil, fmt.Errorf("spawn: Route.Tier is required")
 	}
 
-	// Derive model from tier until P2.6 wires tier.Resolve from models.toml.
-	model := tierToModel(a.Route.Tier)
+	// Model is resolved by the caller via tier.Resolve; fall back to a
+	// tier-derived default only when the dispatch record predates P2.6.
+	model := a.Model
+	if model == "" {
+		model = tierModelFallback(a.Route.Tier)
+	}
 
 	args := []string{
 		ClaudeBin(),
@@ -79,16 +86,15 @@ func BuildArgs(a ClaudeArgs) ([]string, error) {
 	return args, nil
 }
 
-// tierToModel maps a tier name to the canonical claude model identifier.
-// This is a temporary bridge until P2.6 wires tier.Resolve from models.toml.
-func tierToModel(tier string) string {
-	switch tier {
+// tierModelFallback maps a tier name to a model identifier.
+// Used only when reading a pre-P2.6 dispatch record that lacks a Model field;
+// new records always carry Model from tier.Resolve.
+func tierModelFallback(t string) string {
+	switch t {
 	case "reason":
 		return "fable"
 	case "scrutiny":
 		return "opus"
-	case "execute":
-		return "sonnet"
 	default:
 		return "sonnet"
 	}
@@ -104,6 +110,7 @@ func BuildEnv(a ClaudeArgs) []string {
 		"TILLER_RUN_DIR":     a.RunDir,
 		"TILLER_DISPATCH_ID": a.DispatchID,
 		"TILLER_ROLE":        a.Role,
+		"TILLER_TIER":        a.Route.Tier,
 	}
 
 	// Start with the current environment, filtering out keys we override.

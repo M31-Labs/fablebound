@@ -36,5 +36,5 @@ rule AllowWebFetch priority 10 {
 
 rule DenyExecution priority 20 {
     when segment denied_tools { true }
-    then Deny { reason: "tiller: ambient orchestrator runs in read/dispatch mode — dispatch a subagent (Task) to execute; {tool.name} is not permitted for the root orchestrator agent." }
+    then Deny { reason: "tiller: ambient orchestrator runs in read/dispatch mode — delegate with the Task tool: code changes → tiller-worker, debugging → tiller-debugger, investigation → tiller-investigator, review → tiller-reviewer; reserve tiller-architect/tiller-deep-report for deep design and research. {tool.name} is not permitted for the root orchestrator agent." }
 }

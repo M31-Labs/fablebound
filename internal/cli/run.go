@@ -12,9 +12,19 @@ import (
 	"m31labs.dev/tiller/internal/hyphae"
 	"m31labs.dev/tiller/internal/policy"
 	"m31labs.dev/tiller/internal/scratch"
-	"m31labs.dev/tiller/internal/scratch/fsstore"
 	"m31labs.dev/tiller/internal/spawn"
+	"m31labs.dev/tiller/internal/storeutil"
+	"m31labs.dev/tiller/internal/tier"
 )
+
+// storeKindValid reports whether k is a valid store kind name.
+func storeKindValid(k string) bool {
+	switch k {
+	case "", "fs", "pg", "tee":
+		return true
+	}
+	return false
+}
 
 // runRun is the handler for `tiller run "<task>"`.
 // It creates the run scratch space, generates orchestrator settings,
@@ -27,10 +37,16 @@ func runRun(args []string) error {
 	var (
 		fableBudget = fs.Int("reason-budget", 2, "max reason-tier dispatches per run (default 2)")
 		policyDir   = fs.String("policy-dir", "", "project directory override for policy loading")
+		storeFlag   = fs.String("store", "", "storage backend: fs|pg|tee (default: TILLER_STORE env or fs)")
+		dsnFlag     = fs.String("store-dsn", "", "PostgreSQL DSN for pg/tee backends (default: TILLER_STORE_DSN env)")
 	)
 
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	if !storeKindValid(*storeFlag) {
+		return fmt.Errorf("run: --store must be fs, pg, or tee (got %q)", *storeFlag)
 	}
 
 	taskArgs := fs.Args()
@@ -50,7 +66,8 @@ func runRun(args []string) error {
 		projectDir = workspace
 	}
 
-	// Resolve/ensure the runs directory.
+	// Resolve/ensure the runs directory (needed even for non-fs stores because
+	// the fs layer is always present as the authoritative copy).
 	runsBase := filepath.Join(workspace, ".tiller", "runs")
 	if err := os.MkdirAll(runsBase, 0o755); err != nil {
 		return fmt.Errorf("run: create runs dir: %w", err)
@@ -66,8 +83,40 @@ func runRun(args []string) error {
 		return fmt.Errorf("run: load toolgate policy: %w", err)
 	}
 
-	// Open the store.
-	st := fsstore.Open(runsBase)
+	// Open the store using the provider-agnostic resolver.
+	// --store flag → TILLER_STORE env → default fs.
+	// Note: TILLER_RUN_DIR is NOT set here (this is the top-level `tiller run`
+	// invocation, not a child dispatch), so the hot-path guard does not fire.
+	//
+	// Set TILLER_RUN_BASE so that fsstore.Resolve (called inside storeutil.Resolve)
+	// picks up the right runs directory when TILLER_RUN_DIR is not set.
+	if err := os.Setenv("TILLER_RUN_BASE", runsBase); err != nil {
+		return fmt.Errorf("run: setenv TILLER_RUN_BASE: %w", err)
+	}
+	// Propagate --store and --store-dsn to child processes via env so that
+	// dispatches (child invocations) inherit the same store selection.
+	if *storeFlag != "" {
+		if err := os.Setenv("TILLER_STORE", *storeFlag); err != nil {
+			return fmt.Errorf("run: setenv TILLER_STORE: %w", err)
+		}
+	}
+	if *dsnFlag != "" {
+		if err := os.Setenv("TILLER_STORE_DSN", *dsnFlag); err != nil {
+			return fmt.Errorf("run: setenv TILLER_STORE_DSN: %w", err)
+		}
+	}
+
+	storeOpts := &storeutil.Options{
+		StoreKind: *storeFlag,
+		DSN:       *dsnFlag,
+	}
+	st, _, storeCloser, err := storeutil.Resolve(storeOpts)
+	if err != nil {
+		return fmt.Errorf("run: open store: %w", err)
+	}
+	if storeCloser != nil {
+		defer storeCloser()
+	}
 
 	// Create the run record.
 	now := time.Now()
@@ -128,17 +177,30 @@ func runRun(args []string) error {
 	// Resolve role prompt path for orchestrator.
 	rolePromptPath := spawn.RolePromptPath(runDir, "orchestrator")
 
+	// Resolve orchestrator via tier.Resolve (orchestrator always uses reason tier).
+	tierCfg, err := tier.Load(projectDir)
+	if err != nil {
+		return fmt.Errorf("run: load tier config: %w", err)
+	}
+	rootCandidate, err := tierCfg.Resolve("reason", runIDBucket(runID))
+	if err != nil {
+		return fmt.Errorf("run: resolve reason tier: %w", err)
+	}
+
 	// Write root dispatch record (status: running, parent: "").
 	rootDispatch := &scratch.Dispatch{
 		ID:             "root",
 		Parent:         "",
 		Role:           "orchestrator",
-		Model:          "fable",
+		Model:          rootCandidate.Model,
 		Profile:        "orchestrator",
 		Status:         "running",
 		Depth:          0,
 		StartedAt:      now,
 		TimeoutMinutes: 0, // no timeout for run-initiated orchestrator
+		Tier:           "reason",
+		Provider:       rootCandidate.Provider,
+		Adapter:        rootCandidate.Adapter,
 	}
 	if err := st.WriteDispatch(runID, rootDispatch); err != nil {
 		return fmt.Errorf("run: write root dispatch: %w", err)

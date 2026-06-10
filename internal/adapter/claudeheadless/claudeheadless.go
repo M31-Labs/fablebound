@@ -16,23 +16,15 @@
 //	emit-traces     → out-of-process: PostToolUse hook block in settings.json
 //	request-dispatch→ tiller dispatch CLI; not an adapter method
 //
-// TILLER_TIER derivation (until P2.5/P2.6 firm up tier resolution):
-//
-//	DispatchSpec.Tier is used verbatim if non-empty.
-//	Otherwise derived from the model string:
-//	  fable → "reason"
-//	  opus  → "scrutiny"
-//	  sonnet, haiku, or any other model → "execute"
-//
-// This mapping is intentionally simple and documented here; P2.5 will replace
-// it with tier.Resolve once models.toml is in place.
+// TILLER_TIER, Provider, and Model are resolved by the caller (dispatch.go via
+// tier.Resolve from models.toml) before Prepare is called. The adapter treats
+// spec.Tier as authoritative and does not derive it from the model string.
 package claudeheadless
 
 import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"m31labs.dev/tiller/internal/adapter"
@@ -63,11 +55,12 @@ func (a *Adapter) Name() string { return "claude-headless" }
 // PreToolUse hook block installed by Prepare.
 func (a *Adapter) Enforcement() string { return "full" }
 
-// Prepare materialises the dispatch for execution. It:
-//  1. Derives TILLER_TIER from spec.Tier or spec.Model (see package doc).
-//  2. Writes settings.json via spec.Store.WriteAdapterConfig, with BOTH
-//     PreToolUse and PostToolUse tiller hook blocks, using the child depth
-//     (spec.Depth) for permission-profile selection.
+// Prepare materialises the dispatch for execution. It writes settings.json via
+// spec.Store.WriteAdapterConfig, with BOTH PreToolUse and PostToolUse tiller
+// hook blocks, using the child depth (spec.Depth) for permission-profile selection.
+//
+// spec.Tier, spec.Provider, and spec.Model are expected to be set by the caller
+// (dispatch.go via tier.Resolve) before Prepare is called.
 //
 // The brief.md is written by dispatch.go before Prepare is called; Prepare
 // does not re-write it.
@@ -75,13 +68,6 @@ func (a *Adapter) Enforcement() string { return "full" }
 // Prepare is idempotent: re-calling it on the same spec overwrites settings.json
 // with the same content and leaves the dispatch record unchanged.
 func (a *Adapter) Prepare(ctx context.Context, s *adapter.DispatchSpec) error {
-	// Derive tier if not already set.
-	tier := s.Tier
-	if tier == "" {
-		tier = deriveTier(s.Model)
-	}
-	s.Tier = tier
-
 	// Determine the profile for settings generation. Fall back to "orchestrator"
 	// if Profile is empty (should not happen in practice; dispatch.go always sets it).
 	profile := s.Profile
@@ -174,19 +160,4 @@ func pollToTerminal(ctx context.Context, s *adapter.DispatchSpec) (*adapter.Resu
 	}
 }
 
-// deriveTier maps a model string to a tier name.
-// fable → "reason", opus → "scrutiny", anything else → "execute".
-// This mapping is intentionally simple and stays confined here (spec §2.1
-// confinement); P2.5 will replace it with tier.Resolve from models.toml.
-func deriveTier(model string) string {
-	lower := strings.ToLower(model)
-	switch {
-	case strings.Contains(lower, "fable"):
-		return "reason"
-	case strings.Contains(lower, "opus"):
-		return "scrutiny"
-	default:
-		return "execute"
-	}
-}
 

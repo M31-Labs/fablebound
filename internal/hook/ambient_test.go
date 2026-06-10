@@ -409,8 +409,13 @@ func TestAmbientDenyReason_NoVendorTokens(t *testing.T) {
 	}
 
 	// The reason must mention subagent delegation (from the policy reason).
-	if !strings.Contains(reason, "dispatch") && !strings.Contains(reason, "Task") && !strings.Contains(reason, "tiller-worker") {
+	if !strings.Contains(reason, "dispatch") && !strings.Contains(reason, "Task") {
 		t.Errorf("deny reason must mention subagent delegation; got: %q", reason)
+	}
+
+	// The reason must name tiller-worker so the orchestrator knows where to delegate code changes.
+	if !strings.Contains(reason, "tiller-worker") {
+		t.Errorf("deny reason must contain 'tiller-worker'; got: %q", reason)
 	}
 
 	// No vendor-model tokens as bare words.

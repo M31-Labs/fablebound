@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"os"
 	"path/filepath"
@@ -19,12 +20,12 @@ import (
 	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/scratch/fsstore"
 	"m31labs.dev/tiller/internal/spawn"
+	"m31labs.dev/tiller/internal/tier"
 )
 
 // makeDispatchHandler returns a handler for `tiller dispatch` that uses the
-// provided adapter registry for spawn+poll. P2.6 will replace the hard-coded
-// "claude-headless" adapter name with tier-resolved routing; the registry
-// lookup point is already in place here so P2.6 only needs to change one line.
+// provided adapter registry for spawn+poll. Tier-resolved routing is wired:
+// the registry lookup selects the adapter based on tier from the policy decision.
 func makeDispatchHandler(reg *adapter.Registry) func([]string) error {
 	return func(args []string) error {
 		return runDispatchWithRegistry(args, reg)
@@ -40,7 +41,7 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 
 	var (
 		role       = fs.String("role", "", "agent role (required)")
-		tier       = fs.String("tier", "", "tier override: reason|scrutiny|execute (optional, downgrade only)")
+		tierFlag   = fs.String("tier", "", "tier override: reason|scrutiny|execute (optional, downgrade only)")
 		modelAlias = fs.String("model", "", "deprecated: use --tier; fable→reason, opus→scrutiny, sonnet/haiku→execute")
 		briefFlag  = fs.String("brief", "", "brief: '-' for stdin, a file path, or literal text")
 		background = fs.Bool("background", false, "return immediately after spawn")
@@ -57,18 +58,18 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 	}
 
 	// Handle deprecated --model alias: map vendor model names to tiers.
-	if *modelAlias != "" && *tier == "" {
+	if *modelAlias != "" && *tierFlag == "" {
 		fmt.Fprintf(os.Stderr, "tiller dispatch: --model is deprecated; use --tier instead\n")
 		switch *modelAlias {
 		case "fable":
-			*tier = "reason"
+			*tierFlag = "reason"
 		case "opus":
-			*tier = "scrutiny"
+			*tierFlag = "scrutiny"
 		case "sonnet", "haiku":
-			*tier = "execute"
+			*tierFlag = "execute"
 		default:
 			// Unknown model: pass through as tier string (best effort).
-			*tier = *modelAlias
+			*tierFlag = *modelAlias
 		}
 	}
 
@@ -120,7 +121,7 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 	// Build dispatch request.
 	req := policy.DispatchRequest{
 		Role:         *role,
-		Tier:         *tier,
+		Tier:         *tierFlag,
 		Background:   *background,
 		BriefBytes:   len(briefContent),
 		CallerRole:   callerRole,
@@ -201,18 +202,24 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 		return fmt.Errorf("dispatch: write brief.md: %w", err)
 	}
 
-	// Resolve adapter for this dispatch.
-	// P2.6 will replace the constant "claude-headless" with tier.Resolve output;
-	// the registry lookup is already here so P2.6 only changes the name string.
-	const adapterName = "claude-headless"
-	adp, err := reg.Get(adapterName)
+	// Resolve adapter, provider, and model via tier.Config.Resolve.
+	// bucket = stable FNV-32a hash of runID (preserves v1 §6.3 canary bucketing).
+	tierCfg, err := tier.Load(projectDir)
 	if err != nil {
-		return fmt.Errorf("dispatch: resolve adapter %q: %w", adapterName, err)
+		return fmt.Errorf("dispatch: load tier config: %w", err)
+	}
+	bucket := runIDBucket(runID)
+	candidate, err := tierCfg.Resolve(result.Route.Tier, bucket)
+	if err != nil {
+		return fmt.Errorf("dispatch: resolve tier %q: %w", result.Route.Tier, err)
+	}
+
+	adp, err := reg.Get(candidate.Adapter)
+	if err != nil {
+		return fmt.Errorf("dispatch: resolve adapter %q: %w", candidate.Adapter, err)
 	}
 
 	// Build the DispatchSpec for the adapter.
-	// Tier is set from policy route; Model is derived from Tier for the adapter
-	// until P2.6 wires full tier-to-model resolution via models.toml.
 	childDepth := callerDepth + 1
 	spec := &adapter.DispatchSpec{
 		Store:      st,
@@ -220,8 +227,8 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 		DispatchID: dispatchID,
 		Role:       *role,
 		Tier:       result.Route.Tier,
-		Provider:   "anthropic",
-		Model:      tierToDefaultModel(result.Route.Tier), // P2.6 replaces with tier.Resolve
+		Provider:   candidate.Provider,
+		Model:      candidate.Model,
 		Profile:    result.Route.Profile,
 		WorkDir:    runDir,
 		Depth:      childDepth,
@@ -236,21 +243,23 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 	}
 
 	// Write dispatch record (status: running).
-	// Tier and Enforcement are set from the adapter contract (spec §2.1).
+	// Tier/Provider/Model/Adapter are set from tier.Resolve; Enforcement from the adapter.
 	now := time.Now()
 	d := &scratch.Dispatch{
 		ID:             dispatchID,
 		Parent:         callerID,
 		Role:           *role,
-		Model:          spec.Model, // derived from tier until P2.6
+		Model:          spec.Model,
 		Profile:        result.Route.Profile,
 		Status:         "running",
 		Depth:          childDepth,
 		MaxTurns:       result.Route.MaxTurns,
 		TimeoutMinutes: result.Route.TimeoutMinutes,
 		StartedAt:      now,
-		Tier:           spec.Tier,        // set by Prepare (deriveTier)
-		Enforcement:    adp.Enforcement(), // "full" for claude-headless
+		Tier:           spec.Tier,
+		Enforcement:    adp.Enforcement(),
+		Provider:       spec.Provider,
+		Adapter:        candidate.Adapter,
 	}
 	if err := st.WriteDispatch(runID, d); err != nil {
 		return fmt.Errorf("dispatch: write dispatch record: %w", err)
@@ -380,18 +389,11 @@ func parseDuration(s string) (time.Duration, error) {
 	return 0, fmt.Errorf("invalid duration: %q", s)
 }
 
-// tierToDefaultModel maps a tier name to a default model identifier.
-// This is a temporary bridge until P2.6 wires tier.Resolve from models.toml.
-// The adapter (claudeheadless) also has deriveTier(model) which is the inverse.
-func tierToDefaultModel(tier string) string {
-	switch tier {
-	case "reason":
-		return "fable"
-	case "scrutiny":
-		return "opus"
-	case "execute":
-		return "sonnet"
-	default:
-		return "sonnet" // safe default
-	}
+// runIDBucket returns a stable non-negative bucket index for canary bucketing
+// (preserves v1 §6.3 stable-hash-of-run-id semantics).
+// Uses FNV-32a so the mapping is deterministic across processes and platforms.
+func runIDBucket(runID string) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(runID))
+	return int(h.Sum32())
 }

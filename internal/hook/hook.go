@@ -406,17 +406,6 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer) error {
 		req.CommandClass = ClassifyCommand(input.Command)
 	}
 
-	// Populate WriteClass for Write/Edit *.md calls (used by AllowMarkdownAuthoring
-	// and DenyCodeHeavyMarkdown rules).
-	if (event.ToolName == "Write" || event.ToolName == "Edit") &&
-		strings.HasSuffix(input.FilePath, ".md") {
-		content := input.Content
-		if event.ToolName == "Edit" {
-			content = input.NewString
-		}
-		req.WriteClass = ClassifyWrite(content)
-	}
-
 	// Populate AgentType and AgentModelTier for Task/Agent calls.
 	// Vendor model IDs are resolved via the claudecode package to keep them confined.
 	if event.ToolName == "Task" || event.ToolName == "Agent" {

@@ -31,7 +31,6 @@ type ToolCallRequest struct {
 	FilePath       string `arb:"tool.file_path"`         // Edit/Write/Read/NotebookEdit, else ""
 	InScratch      bool   `arb:"tool.path_in_scratch"`   // computed in Go (§6.5)
 	InWorkspace    bool   `arb:"tool.path_in_workspace"`
-	WriteClass     string `arb:"tool.write_class"`       // "doc"|"code-heavy"; computed in Go for Write/Edit *.md
 	AgentType      string `arb:"tool.agent_type"`        // Task/Agent: subagent_type field, "" if absent
 	AgentModelTier string `arb:"tool.agent_model_tier"`  // Task/Agent: "reason"|"other"|""; computed via claudecode.ModelTier
 	RunID          string `arb:"run.id"`

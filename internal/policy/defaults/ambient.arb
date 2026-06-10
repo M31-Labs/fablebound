@@ -124,34 +124,15 @@ rule AllowReadOnlyBash priority 15 {
 }
 
 # AllowMarkdownAuthoring — allows the ambient orchestrator to Write or Edit
-# markdown files (specs, plans, prompts, directives, briefs) whose content is
-# prose-first (not code-dominant).
+# markdown files (specs, plans, prompts, directives, briefs, code-in-specs).
 # Only .md paths are permitted; code files, notebooks, and no-extension paths
 # remain denied by DenyExecution below.
-# The tool.write_class guard prevents code-dump markdown from slipping through:
-# see DenyCodeHeavyMarkdown for the explicit deny.
 rule AllowMarkdownAuthoring priority 15 {
     when {
         tool.name in ["Write", "Edit"] and
-        tool.file_path ends_with ".md" and
-        tool.write_class != "code-heavy"
+        tool.file_path ends_with ".md"
     }
     then Allow { reason: "markdown authoring (specs, plans, prompts, directives) is permitted for the ambient orchestrator" }
-}
-
-# DenyCodeHeavyMarkdown — blocks markdown files whose content is dominated by
-# fenced code blocks (>50 fenced lines AND >50% of total lines are fenced).
-# The threshold is generous — real specs/plans legitimately embed code snippets.
-# Only code-DOMINANT documents are blocked.
-# Reason text steers the orchestrator toward the correct delegation pattern
-# without naming vendor model tokens.
-rule DenyCodeHeavyMarkdown priority 16 {
-    when {
-        tool.name in ["Write", "Edit"] and
-        tool.file_path ends_with ".md" and
-        tool.write_class == "code-heavy"
-    }
-    then Deny { reason: "tiller: code artifacts belong in tiller-worker dispatches — keep orchestrator-authored .md prose-first (specs/plans/prompts/directives). This document is code-dominant (>50 fenced lines, >50% of total). Delegate code generation to tiller-worker via the Task tool." }
 }
 
 rule DenyExecution priority 20 {

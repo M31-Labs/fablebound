@@ -6,7 +6,7 @@
 #
 # Coverage targets: HaltAmbient (kill_switch), AllowRead, AllowAgent,
 # AllowTodoWrite, AllowWebFetch, DenyHyphaDaemons, AllowReadOnlyBash,
-# AllowMarkdownAuthoring, DenyCodeHeavyMarkdown, DenyExecution.
+# AllowMarkdownAuthoring, DenyExecution.
 
 # ── AllowRead ────────────────────────────────────────────────────────────────
 
@@ -395,7 +395,7 @@ test "echo with command substitution is denied (other bash)" {
 
 # ── AllowMarkdownAuthoring ────────────────────────────────────────────────────
 
-test "Write to .md file with doc content is allowed (markdown authoring)" {
+test "Write to .md file is allowed (markdown authoring)" {
     given {
         agent.role: "ambient-orchestrator"
         agent.depth: 0
@@ -406,16 +406,15 @@ test "Write to .md file with doc content is allowed (markdown authoring)" {
         tool.file_path: "/home/user/project/spec.md"
         tool.path_in_scratch: false
         tool.path_in_workspace: true
-        tool.write_class: "doc"
+        tool.write_class: ""
         run.id: ""
     }
     # AllowMarkdownAuthoring (priority 15) wins over DenyExecution (priority 20).
     # Both rules match; the lower priority wins.
     expect rule AllowMarkdownAuthoring matched
-    expect rule DenyCodeHeavyMarkdown not matched
 }
 
-test "Edit of notes/plan.md with doc content is allowed (markdown authoring)" {
+test "Edit of notes/plan.md is allowed (markdown authoring)" {
     given {
         agent.role: "ambient-orchestrator"
         agent.depth: 0
@@ -426,11 +425,30 @@ test "Edit of notes/plan.md with doc content is allowed (markdown authoring)" {
         tool.file_path: "/home/user/project/notes/plan.md"
         tool.path_in_scratch: false
         tool.path_in_workspace: true
-        tool.write_class: "doc"
+        tool.write_class: ""
         run.id: ""
     }
     expect rule AllowMarkdownAuthoring matched
-    expect rule DenyCodeHeavyMarkdown not matched
+}
+
+# Regression: code-dominant .md write must be ALLOWED (the guard was removed).
+# A spec with 10 prose lines and 120 fenced code lines is still a valid
+# orchestrator-authored document (ambient orchestrator may embed code in specs).
+test "Write to .md file with code-dominant content is allowed (regression)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Write"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: "/tmp/spec.md"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: "code-heavy"
+        run.id: ""
+    }
+    expect rule AllowMarkdownAuthoring matched
 }
 
 test "Write to .go file is denied (code file, not markdown)" {
@@ -467,44 +485,6 @@ test "NotebookEdit is denied (not a markdown file tool)" {
     }
     expect rule AllowMarkdownAuthoring not matched
     expect rule DenyExecution matched
-}
-
-# ── DenyCodeHeavyMarkdown (priority 16) ──────────────────────────────────────
-
-test "Write to .md file with code-heavy content is denied" {
-    given {
-        agent.role: "ambient-orchestrator"
-        agent.depth: 0
-        agent.dispatch_id: ""
-        tool.name: "Write"
-        tool.command: ""
-        tool.command_class: ""
-        tool.file_path: "/home/user/project/dump.md"
-        tool.path_in_scratch: false
-        tool.path_in_workspace: true
-        tool.write_class: "code-heavy"
-        run.id: ""
-    }
-    expect rule DenyCodeHeavyMarkdown matched
-    expect rule AllowMarkdownAuthoring not matched
-}
-
-test "Edit of .md file with code-heavy content is denied" {
-    given {
-        agent.role: "ambient-orchestrator"
-        agent.depth: 0
-        agent.dispatch_id: ""
-        tool.name: "Edit"
-        tool.command: ""
-        tool.command_class: ""
-        tool.file_path: "/home/user/project/codedump.md"
-        tool.path_in_scratch: false
-        tool.path_in_workspace: true
-        tool.write_class: "code-heavy"
-        run.id: ""
-    }
-    expect rule DenyCodeHeavyMarkdown matched
-    expect rule AllowMarkdownAuthoring not matched
 }
 
 # ── HaltAmbient (kill_switch) ─────────────────────────────────────────────────

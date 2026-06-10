@@ -557,6 +557,20 @@ func TestAllowMarkdownAuthoring_WriteSpec(t *testing.T) {
 	}
 }
 
+// TestAllowMarkdownAuthoring_WriteSpecCodeHeavy: Write to .md with code-dominant
+// content is allowed (no write_class guard any more; specs may embed code freely).
+func TestAllowMarkdownAuthoring_WriteSpecCodeHeavy(t *testing.T) {
+	p := fableTranscript(t)
+	content := buildMarkdownContent(10, 120)
+	decision := runAmbientHookFull(t, p, "Write", map[string]any{
+		"file_path": "/tmp/spec.md",
+		"content":   content,
+	})
+	if decision != "allow" {
+		t.Errorf("expected allow for Write spec.md with code-dominant content, got %q", decision)
+	}
+}
+
 // TestAllowMarkdownAuthoring_EditPlan: Edit to notes/plan.md is allowed.
 func TestAllowMarkdownAuthoring_EditPlan(t *testing.T) {
 	p := fableTranscript(t)
@@ -702,7 +716,7 @@ func TestDenyHyphaDaemons_HubServe(t *testing.T) {
 	}
 }
 
-// ─── DenyCodeHeavyMarkdown ────────────────────────────────────────────────────
+// ─── AllowMarkdownAuthoring content tests ────────────────────────────────────
 
 // buildMarkdownContent builds a simple markdown document with the given counts
 // of prose lines and fenced code lines (inside a single code block).
@@ -721,7 +735,7 @@ func buildMarkdownContent(proseLines, fencedLines int) string {
 	return sb.String()
 }
 
-// TestAllowMarkdownAuthoring_ProseSpec: 200 prose + 30 fenced → allow (doc).
+// TestAllowMarkdownAuthoring_ProseSpec: 200 prose + 30 fenced → allow.
 func TestAllowMarkdownAuthoring_ProseSpec(t *testing.T) {
 	p := fableTranscript(t)
 	content := buildMarkdownContent(200, 30)
@@ -734,29 +748,31 @@ func TestAllowMarkdownAuthoring_ProseSpec(t *testing.T) {
 	}
 }
 
-// TestDenyCodeHeavyMarkdown_CodeDump: 10 prose + 120 fenced → deny (code-heavy).
-func TestDenyCodeHeavyMarkdown_CodeDump(t *testing.T) {
+// TestAllowMarkdownAuthoring_CodeDominantSpec: 10 prose + 120 fenced → allow.
+// Regression: code-dominant .md is now always allowed; the write_class guard
+// was removed so the ambient orchestrator may write code-heavy specs freely.
+func TestAllowMarkdownAuthoring_CodeDominantSpec(t *testing.T) {
 	p := fableTranscript(t)
 	content := buildMarkdownContent(10, 120)
 	decision := runAmbientHookFull(t, p, "Write", map[string]any{
-		"file_path": "/tmp/dump.md",
+		"file_path": "/tmp/spec.md",
 		"content":   content,
 	})
-	if decision != "deny" {
-		t.Errorf("expected deny for code-dominant dump.md (10 prose + 120 fenced), got %q", decision)
+	if decision != "allow" {
+		t.Errorf("expected allow for code-dominant spec.md (10 prose + 120 fenced), got %q", decision)
 	}
 }
 
-// TestDenyCodeHeavyMarkdown_Edit: Edit .md with code-heavy new_string → deny.
-func TestDenyCodeHeavyMarkdown_Edit(t *testing.T) {
+// TestAllowMarkdownAuthoring_CodeDominantEdit: Edit .md with code-heavy new_string → allow.
+func TestAllowMarkdownAuthoring_CodeDominantEdit(t *testing.T) {
 	p := fableTranscript(t)
 	content := buildMarkdownContent(5, 80)
 	decision := runAmbientHookFull(t, p, "Edit", map[string]any{
 		"file_path":  "/tmp/codedump.md",
 		"new_string": content,
 	})
-	if decision != "deny" {
-		t.Errorf("expected deny for code-dominant edit (5 prose + 80 fenced), got %q", decision)
+	if decision != "allow" {
+		t.Errorf("expected allow for code-dominant edit (5 prose + 80 fenced), got %q", decision)
 	}
 }
 

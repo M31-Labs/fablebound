@@ -7,21 +7,41 @@ import (
 	"strings"
 )
 
+// sectionKind represents the kind of the current section in the TOML parser.
+type sectionKind int
+
+const (
+	sectionNone    sectionKind = iota
+	sectionTiers               // [tiers.<name>]
+	sectionAdapter             // [adapter.<name>]
+)
+
 // parse parses the hand-rolled TOML subset used for models.toml.
 //
 // Supported syntax:
 //
 //	# comment lines
 //	blank lines
-//	[tiers.<name>]  — section headers
+//	[tiers.<name>]    — tier section headers
 //	candidates = ["a:p/m", "b:p/m"]  — single-line string arrays
+//	[adapter.<name>]  — command adapter section headers
+//	argv    = ["cmd", "{brief}", "{report}"]  — single-line string array
+//	report  = "stdout"  — string value
+//	timeout = "5m"      — string value
 //
 // Any other content is rejected. Line numbers in errors are 1-based.
 func parse(data []byte) (*Config, error) {
-	cfg := &Config{tiers: make(map[string][]Candidate)}
+	cfg := &Config{
+		tiers:    make(map[string][]Candidate),
+		adapters: make(map[string]*AdapterConfig),
+	}
 
 	scanner := bufio.NewScanner(bytes.NewReader(data))
-	var currentTier string
+	var (
+		currentKind    sectionKind
+		currentTier    string
+		currentAdapter string
+	)
 	lineNum := 0
 
 	for scanner.Scan() {
@@ -34,48 +54,96 @@ func parse(data []byte) (*Config, error) {
 			continue
 		}
 
-		// Section header: [tiers.<name>]
+		// Section header: [tiers.<name>] or [adapter.<name>]
 		if strings.HasPrefix(line, "[") {
 			if !strings.HasSuffix(line, "]") {
 				return nil, fmt.Errorf("line %d: malformed section header: %q", lineNum, line)
 			}
 			inner := line[1 : len(line)-1]
-			const prefix = "tiers."
-			if !strings.HasPrefix(inner, prefix) {
-				return nil, fmt.Errorf("line %d: unsupported section %q (want [tiers.<name>])", lineNum, line)
-			}
-			name := inner[len(prefix):]
-			if name == "" || strings.ContainsAny(name, " \t.[]") {
-				return nil, fmt.Errorf("line %d: invalid tier name in section header: %q", lineNum, line)
-			}
-			currentTier = name
-			// Initialise empty candidate slice so override detection works even
-			// for tiers with no candidates key yet (parser enforces candidates
-			// must follow).
-			if _, exists := cfg.tiers[currentTier]; !exists {
-				cfg.tiers[currentTier] = nil
+
+			const tiersPrefix = "tiers."
+			const adapterPrefix = "adapter."
+
+			switch {
+			case strings.HasPrefix(inner, tiersPrefix):
+				name := inner[len(tiersPrefix):]
+				if name == "" || strings.ContainsAny(name, " \t.[]") {
+					return nil, fmt.Errorf("line %d: invalid tier name in section header: %q", lineNum, line)
+				}
+				currentKind = sectionTiers
+				currentTier = name
+				currentAdapter = ""
+				// Initialise empty candidate slice so override detection works even
+				// for tiers with no candidates key yet.
+				if _, exists := cfg.tiers[currentTier]; !exists {
+					cfg.tiers[currentTier] = nil
+				}
+
+			case strings.HasPrefix(inner, adapterPrefix):
+				name := inner[len(adapterPrefix):]
+				if name == "" || strings.ContainsAny(name, " \t[]") {
+					return nil, fmt.Errorf("line %d: invalid adapter name in section header: %q", lineNum, line)
+				}
+				currentKind = sectionAdapter
+				currentAdapter = name
+				currentTier = ""
+				if _, exists := cfg.adapters[currentAdapter]; !exists {
+					cfg.adapters[currentAdapter] = &AdapterConfig{Report: "stdout"}
+				}
+
+			default:
+				return nil, fmt.Errorf("line %d: unsupported section %q (want [tiers.<name>] or [adapter.<name>])", lineNum, line)
 			}
 			continue
 		}
 
-		// Key-value: candidates = [...]
-		if strings.HasPrefix(line, "candidates") {
-			if currentTier == "" {
-				return nil, fmt.Errorf("line %d: candidates key outside of a [tiers.*] section", lineNum)
+		switch currentKind {
+		case sectionTiers:
+			// Key-value: candidates = [...]
+			if strings.HasPrefix(line, "candidates") {
+				cands, err := parseCandidatesLine(line, lineNum)
+				if err != nil {
+					return nil, err
+				}
+				if len(cands) == 0 {
+					return nil, fmt.Errorf("line %d: candidates list must not be empty", lineNum)
+				}
+				cfg.tiers[currentTier] = cands
+				continue
 			}
-			cands, err := parseCandidatesLine(line, lineNum)
-			if err != nil {
-				return nil, err
-			}
-			if len(cands) == 0 {
-				return nil, fmt.Errorf("line %d: candidates list must not be empty", lineNum)
-			}
-			cfg.tiers[currentTier] = cands
-			continue
-		}
+			return nil, fmt.Errorf("line %d: unexpected content in [tiers.%s]: %q", lineNum, currentTier, line)
 
-		// Anything else is unexpected.
-		return nil, fmt.Errorf("line %d: unexpected content: %q", lineNum, line)
+		case sectionAdapter:
+			ac := cfg.adapters[currentAdapter]
+			if strings.HasPrefix(line, "argv") {
+				argv, err := parseStringArrayLine(line, "argv", lineNum)
+				if err != nil {
+					return nil, err
+				}
+				ac.Argv = argv
+				continue
+			}
+			if strings.HasPrefix(line, "report") {
+				val, err := parseStringValue(line, "report", lineNum)
+				if err != nil {
+					return nil, err
+				}
+				ac.Report = val
+				continue
+			}
+			if strings.HasPrefix(line, "timeout") {
+				val, err := parseStringValue(line, "timeout", lineNum)
+				if err != nil {
+					return nil, err
+				}
+				ac.Timeout = val
+				continue
+			}
+			return nil, fmt.Errorf("line %d: unexpected content in [adapter.%s]: %q", lineNum, currentAdapter, line)
+
+		default:
+			return nil, fmt.Errorf("line %d: unexpected content outside a section: %q", lineNum, line)
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("scan error: %w", err)
@@ -89,6 +157,63 @@ func parse(data []byte) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// parseStringValue parses a line of the form:
+//
+//	<key> = "<value>"
+func parseStringValue(line, key string, lineNum int) (string, error) {
+	eqIdx := strings.IndexByte(line, '=')
+	if eqIdx < 0 {
+		return "", fmt.Errorf("line %d: missing '=' in %s assignment", lineNum, key)
+	}
+	k := strings.TrimSpace(line[:eqIdx])
+	if k != key {
+		return "", fmt.Errorf("line %d: unexpected key %q (want %s)", lineNum, k, key)
+	}
+	val := strings.TrimSpace(line[eqIdx+1:])
+	if !strings.HasPrefix(val, "\"") || !strings.HasSuffix(val, "\"") || len(val) < 2 {
+		return "", fmt.Errorf("line %d: %s value must be a quoted string", lineNum, key)
+	}
+	return val[1 : len(val)-1], nil
+}
+
+// parseStringArrayLine parses a line of the form:
+//
+//	<key> = ["v1", "v2", ...]
+func parseStringArrayLine(line, key string, lineNum int) ([]string, error) {
+	eqIdx := strings.IndexByte(line, '=')
+	if eqIdx < 0 {
+		return nil, fmt.Errorf("line %d: missing '=' in %s assignment", lineNum, key)
+	}
+	k := strings.TrimSpace(line[:eqIdx])
+	if k != key {
+		return nil, fmt.Errorf("line %d: unexpected key %q (want %s)", lineNum, k, key)
+	}
+	val := strings.TrimSpace(line[eqIdx+1:])
+	if !strings.HasPrefix(val, "[") || !strings.HasSuffix(val, "]") {
+		return nil, fmt.Errorf("line %d: %s value must be a single-line array [\"...\"]", lineNum, key)
+	}
+	inner := val[1 : len(val)-1]
+
+	var result []string
+	rest := strings.TrimSpace(inner)
+	for rest != "" {
+		if rest[0] != '"' {
+			return nil, fmt.Errorf("line %d: expected '\"' in %s array, got %q", lineNum, key, rest)
+		}
+		closeIdx := strings.IndexByte(rest[1:], '"')
+		if closeIdx < 0 {
+			return nil, fmt.Errorf("line %d: unterminated string in %s array", lineNum, key)
+		}
+		token := rest[1 : closeIdx+1]
+		result = append(result, token)
+		rest = strings.TrimSpace(rest[closeIdx+2:])
+		if rest != "" && rest[0] == ',' {
+			rest = strings.TrimSpace(rest[1:])
+		}
+	}
+	return result, nil
 }
 
 // parseCandidatesLine parses a line of the form:

@@ -234,6 +234,159 @@ candidates = "not-an-array"
 	}
 }
 
+// TestAdapterSection verifies that [adapter.<name>] sections are parsed and
+// accessible via Config.AdapterConfig.
+func TestAdapterSection(t *testing.T) {
+	tmpDir := t.TempDir()
+	tillerDir := filepath.Join(tmpDir, ".tiller")
+	if err := os.MkdirAll(tillerDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	content := `[tiers.execute]
+candidates = ["command:echo-agent/-"]
+
+[adapter.echo-agent]
+argv = ["/usr/bin/echo", "{brief}", "{report}"]
+report = "stdout"
+timeout = "5m"
+`
+	if err := os.WriteFile(filepath.Join(tillerDir, "models.toml"), []byte(content), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cfg, err := tier.Load(tmpDir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	ac := cfg.AdapterConfig("echo-agent")
+	if ac == nil {
+		t.Fatal("AdapterConfig(\"echo-agent\") returned nil")
+	}
+	wantArgv := []string{"/usr/bin/echo", "{brief}", "{report}"}
+	if len(ac.Argv) != len(wantArgv) {
+		t.Fatalf("Argv len = %d, want %d", len(ac.Argv), len(wantArgv))
+	}
+	for i, want := range wantArgv {
+		if ac.Argv[i] != want {
+			t.Errorf("Argv[%d] = %q, want %q", i, ac.Argv[i], want)
+		}
+	}
+	if ac.Report != "stdout" {
+		t.Errorf("Report = %q, want %q", ac.Report, "stdout")
+	}
+	if ac.Timeout != "5m" {
+		t.Errorf("Timeout = %q, want %q", ac.Timeout, "5m")
+	}
+}
+
+// TestAdapterSectionMissing verifies that AdapterConfig returns nil for unknown names.
+func TestAdapterSectionMissing(t *testing.T) {
+	cfg, err := tier.Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.AdapterConfig("nonexistent"); got != nil {
+		t.Errorf("AdapterConfig(nonexistent) = %v, want nil", got)
+	}
+}
+
+// TestAdapterSectionDefaults verifies that an [adapter.<name>] with only argv
+// gets sensible defaults (report="stdout", timeout="").
+func TestAdapterSectionDefaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	tillerDir := filepath.Join(tmpDir, ".tiller")
+	if err := os.MkdirAll(tillerDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	content := `[tiers.execute]
+candidates = ["command:minimal/-"]
+
+[adapter.minimal]
+argv = ["/usr/bin/true"]
+`
+	if err := os.WriteFile(filepath.Join(tillerDir, "models.toml"), []byte(content), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cfg, err := tier.Load(tmpDir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ac := cfg.AdapterConfig("minimal")
+	if ac == nil {
+		t.Fatal("AdapterConfig returned nil")
+	}
+	if ac.Report != "stdout" {
+		t.Errorf("Report default = %q, want %q", ac.Report, "stdout")
+	}
+	if ac.Timeout != "" {
+		t.Errorf("Timeout default = %q, want %q", ac.Timeout, "")
+	}
+}
+
+// TestAdapterSectionMalformedArgv verifies that a malformed argv line is rejected.
+func TestAdapterSectionMalformedArgv(t *testing.T) {
+	cases := []struct {
+		name     string
+		content  string
+		wantLine int
+	}{
+		{
+			name: "argv_not_array",
+			content: `[tiers.execute]
+candidates = ["command:bad/-"]
+
+[adapter.bad]
+argv = "not-an-array"
+`,
+			wantLine: 5,
+		},
+		{
+			name: "report_not_quoted",
+			content: `[tiers.execute]
+candidates = ["command:bad/-"]
+
+[adapter.bad]
+argv = ["/bin/true"]
+report = unquoted
+`,
+			wantLine: 6,
+		},
+		{
+			name: "unexpected_key",
+			content: `[tiers.execute]
+candidates = ["command:bad/-"]
+
+[adapter.bad]
+argv = ["/bin/true"]
+unknown_key = "value"
+`,
+			wantLine: 6,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			tillerDir := filepath.Join(tmpDir, ".tiller")
+			if err := os.MkdirAll(tillerDir, 0755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(tillerDir, "models.toml"), []byte(tc.content), 0644); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			_, err := tier.Load(tmpDir)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			wantLineStr := fmt.Sprintf("line %d", tc.wantLine)
+			if !strings.Contains(err.Error(), wantLineStr) {
+				t.Errorf("error should contain %q, got: %v", wantLineStr, err)
+			}
+			t.Logf("got expected error: %v", err)
+		})
+	}
+}
+
 // TestDashModelIsLegal verifies that a model name of "-" is accepted.
 func TestDashModelIsLegal(t *testing.T) {
 	tmpDir := t.TempDir()

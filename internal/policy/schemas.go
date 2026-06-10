@@ -4,14 +4,15 @@ package policy
 
 // DispatchRequest is the input schema for dispatch.arb.
 type DispatchRequest struct {
-	Role         string `arb:"dispatch.role"`       // requested role
-	Tier         string `arb:"dispatch.tier"`       // requested tier: reason|scrutiny|execute; "" = policy default
+	Role         string `arb:"dispatch.role"`        // requested role
+	Tier         string `arb:"dispatch.tier"`        // requested tier: reason|scrutiny|execute; "" = policy default
 	Background   bool   `arb:"dispatch.background"`
 	BriefBytes   int    `arb:"dispatch.brief_bytes"`
-	Queued       bool   `arb:"dispatch.queued"`     // true when --queue flag is set (write pending, no spawn)
-	CallerRole   string `arb:"caller.role"`        // "user" when invoked outside a run
-	CallerDepth  int    `arb:"caller.depth"`       // TILLER_DEPTH of requester
-	CallerID     string `arb:"caller.dispatch_id"` // TILLER_DISPATCH_ID (lineage)
+	Queued       bool   `arb:"dispatch.queued"`      // true when --queue flag is set (write pending, no spawn)
+	Enforcement  string `arb:"dispatch.enforcement"` // "full"|"degraded"; default "full" (spec §5.1)
+	CallerRole   string `arb:"caller.role"`          // "user" when invoked outside a run
+	CallerDepth  int    `arb:"caller.depth"`         // TILLER_DEPTH of requester
+	CallerID     string `arb:"caller.dispatch_id"`   // TILLER_DISPATCH_ID (lineage)
 	RunID        string `arb:"run.id"`
 	ActiveCount  int    `arb:"run.active_dispatches"`  // scan of meta.json status==running
 	ReasonCount  int    `arb:"run.reason_dispatches"`  // dispatches where tier == "reason"

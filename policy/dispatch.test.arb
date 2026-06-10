@@ -1108,6 +1108,90 @@ test "depth-2 worker direct dispatch is denied by DenyDirectSpawnAtDepth" {
     expect rule DenyDirectSpawnAtDepth matched
 }
 
+# ── DenyDegradedInsight ───────────────────────────────────────────────────────
+
+test "degraded adapter with scrutiny tier is denied (DenyDegradedInsight)" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.tier: "scrutiny"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        dispatch.queued: false
+        dispatch.enforcement: "degraded"
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.reason_dispatches: 0
+        run.reason_budget: 2
+        run.max_depth: 4
+    }
+    expect rule DenyDegradedInsight matched
+}
+
+test "degraded adapter with reason tier is denied (DenyDegradedInsight)" {
+    given {
+        dispatch.role: "chief-architect"
+        dispatch.tier: "reason"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        dispatch.queued: false
+        dispatch.enforcement: "degraded"
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.reason_dispatches: 0
+        run.reason_budget: 2
+        run.max_depth: 4
+    }
+    expect rule DenyDegradedInsight matched
+}
+
+test "degraded adapter with execute tier is allowed (DenyDegradedInsight not matched)" {
+    given {
+        dispatch.role: "worker"
+        dispatch.tier: "execute"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        dispatch.queued: false
+        dispatch.enforcement: "degraded"
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.reason_dispatches: 0
+        run.reason_budget: 2
+        run.max_depth: 4
+    }
+    expect rule DenyDegradedInsight not matched
+    expect rule AllowDispatch matched
+}
+
+test "full adapter with scrutiny tier does NOT fire DenyDegradedInsight" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.tier: "scrutiny"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        dispatch.queued: false
+        dispatch.enforcement: "full"
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.reason_dispatches: 0
+        run.reason_budget: 2
+        run.max_depth: 4
+    }
+    expect rule DenyDegradedInsight not matched
+    expect rule AllowDispatch matched
+}
+
 # ── DenyBriefTooLarge ─────────────────────────────────────────────────────────
 
 test "brief exceeding 256KB is denied (DenyBriefTooLarge)" {

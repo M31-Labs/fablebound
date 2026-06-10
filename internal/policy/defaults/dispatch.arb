@@ -84,6 +84,11 @@ rule DenyWorkerScope priority 3 {
     then Deny { reason: "execution roles may dispatch only investigators and debuggers" }
 }
 
+rule DenyDegradedInsight priority 4 {
+    when { dispatch.enforcement == "degraded" and dispatch.tier != "execute" }
+    then Deny { reason: "degraded adapters may only serve execute-tier roles; promote to a full adapter for reason/scrutiny" }
+}
+
 rule DenyBriefTooLarge priority 5 {
     when { dispatch.brief_bytes > 262144 }
     then Deny { reason: "brief exceeds 256KB limit; summarise the task before dispatching" }

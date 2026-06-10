@@ -12,6 +12,8 @@ import (
 
 	"m31labs.dev/tiller/internal/adapter"
 	"m31labs.dev/tiller/internal/adapter/claudeheadless"
+	"m31labs.dev/tiller/internal/adapter/command"
+	"m31labs.dev/tiller/internal/tier"
 )
 
 // DenialError wraps a policy-denial reason. Main exits with code 3.
@@ -34,12 +36,31 @@ type subcommand struct {
 }
 
 // buildRegistry constructs the adapter registry used by the dispatch handler.
-// claude-headless is registered; additional adapters can be registered here as providers expand.
+// claude-headless and command adapters are registered; additional adapters can
+// be added here as providers expand.
 // binary is the tiller executable path (empty = resolve at Run time via os.Executable).
-func buildRegistry(binary string) *adapter.Registry {
+// tierCfg provides [adapter.<name>] config for the command adapter; if nil it
+// is loaded from the project directory at dispatch time.
+func buildRegistry(binary string, tierCfg *tier.Config) *adapter.Registry {
 	reg := adapter.NewRegistry()
 	reg.Register(claudeheadless.New(binary))
+	if tierCfg != nil {
+		reg.Register(command.New(tierCfg))
+	} else {
+		// Register with a nil-config command adapter; it will error at Run time
+		// if actually invoked without config. This keeps the adapter name in the
+		// registry for --queue dispatches and pool preview without requiring a
+		// project directory at CLI startup.
+		reg.Register(command.New(emptyTierConfig()))
+	}
 	return reg
+}
+
+// emptyTierConfig returns a zero Config that will cause the command adapter
+// to return "no [adapter.*] section found" at Run time if invoked unconfigured.
+func emptyTierConfig() *tier.Config {
+	cfg, _ := tier.Load("") // embedded defaults only; no adapter sections
+	return cfg
 }
 
 // Main is the entry point called from cmd/tiller/main.go.
@@ -51,7 +72,11 @@ func Main(args []string) {
 
 	// Build the adapter registry for this invocation.
 	// binary is resolved at Run time by claudeheadless (os.Executable).
-	reg := buildRegistry("")
+	// Tier config is loaded from cwd (project dir); ignore errors here —
+	// a misconfigured models.toml will fail at dispatch time with a clear message.
+	cwd, _ := os.Getwd()
+	tierCfg, _ := tier.Load(cwd)
+	reg := buildRegistry("", tierCfg)
 
 	// Subcommands that need the registry are wired here via closure; all others
 	// remain as plain function references. Route resolution selects the adapter

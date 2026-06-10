@@ -129,6 +129,26 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 		return fmt.Errorf("dispatch: dispatch facts: %w", err)
 	}
 
+	// Resolve tier config to determine adapter enforcement for the policy gate.
+	// This is done before policy evaluation so DenyDegradedInsight can fire.
+	tierCfgForReq, _ := tier.Load(filepath.Dir(filepath.Dir(filepath.Dir(runDir))))
+	enforcementForReq := "full"
+	if tierCfgForReq != nil {
+		reqTier := *tierFlag
+		if reqTier == "" {
+			// Pre-resolve the tier from the role using the default dispatch routing.
+			// For policy gate purposes we use a best-effort mapping identical to
+			// DispatchRoute strategy: reason roles → "reason", scrutiny → "scrutiny",
+			// execute → "execute". If we can't determine, default to "execute".
+			reqTier = roleToDefaultTier(*role)
+		}
+		if cand, err := tierCfgForReq.Resolve(reqTier, runIDBucket(runID)); err == nil {
+			if cand.Adapter == "command" {
+				enforcementForReq = "degraded"
+			}
+		}
+	}
+
 	// Build dispatch request.
 	req := policy.DispatchRequest{
 		Role:         *role,
@@ -136,6 +156,7 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 		Background:   *background,
 		BriefBytes:   len(briefContent),
 		Queued:       *queue,
+		Enforcement:  enforcementForReq,
 		CallerRole:   callerRole,
 		CallerDepth:  callerDepth,
 		CallerID:     callerID,
@@ -268,6 +289,7 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 			Tier:           result.Route.Tier,
 			Provider:       candidate.Provider,
 			Adapter:        candidate.Adapter,
+			Enforcement:    adp.Enforcement(),
 		}
 		if err := st.WriteDispatch(runID, d); err != nil {
 			return fmt.Errorf("dispatch: write dispatch record: %w", err)
@@ -441,4 +463,18 @@ func runIDBucket(runID string) int {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(runID))
 	return int(h.Sum32())
+}
+
+// roleToDefaultTier returns the default tier for a role, mirroring the
+// DispatchRoute strategy in dispatch.arb. Used to pre-compute enforcement
+// before the full policy evaluation when no --tier flag is set.
+func roleToDefaultTier(role string) string {
+	switch role {
+	case "orchestrator", "chief-architect", "deep-report":
+		return "reason"
+	case "investigator", "reviewer":
+		return "scrutiny"
+	default:
+		return "execute"
+	}
 }

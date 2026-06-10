@@ -1,0 +1,27 @@
+#!/bin/sh
+# echo-agent — deterministic command adapter stub for tiller P5.2 demo.
+#
+# Called by the command adapter with: echo-agent {brief}
+# Reads the brief file at $1, emits a deterministic markdown report to stdout.
+#
+# Output format:
+#   # echo-agent report
+#   brief: <first line of brief>
+#   marker: ECHO-AGENT-OK
+
+set -e
+
+brief_path="$1"
+
+if [ -z "$brief_path" ]; then
+    printf '# echo-agent report\nbrief: (no brief path given)\nmarker: ECHO-AGENT-OK\n'
+    exit 0
+fi
+
+if [ ! -f "$brief_path" ]; then
+    printf '# echo-agent report\nbrief: (brief file not found: %s)\nmarker: ECHO-AGENT-OK\n' "$brief_path"
+    exit 0
+fi
+
+first_line=$(head -n1 "$brief_path")
+printf '# echo-agent report\nbrief: %s\nmarker: ECHO-AGENT-OK\n' "$first_line"

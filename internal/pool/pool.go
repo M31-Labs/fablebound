@@ -500,12 +500,20 @@ func (p *Pool) evalGate(_ context.Context, runID, dispatchID string) (bool, gate
 		return false, gateResult{}, fmt.Errorf("count running dispatches: %w", err)
 	}
 
+	// Derive enforcement from the dispatch record (written by cli/dispatch.go at
+	// queue time). Default to "full" when absent (pre-v2 or claude-headless records).
+	enforcement := d.Enforcement
+	if enforcement == "" {
+		enforcement = "full"
+	}
+
 	req := policy.DispatchRequest{
 		Role:         d.Role,
 		Tier:         d.Tier,
 		Background:   false,
 		BriefBytes:   0,
 		Queued:       true, // pool always uses queued semantics — DenyDirectSpawnAtDepth must not fire
+		Enforcement:  enforcement,
 		CallerRole:   "orchestrator",
 		CallerDepth:  callerDepth,
 		CallerID:     d.Parent,

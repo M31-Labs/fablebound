@@ -5,6 +5,14 @@
 // Configuration is loaded from the embedded defaults/models.toml, with an
 // optional per-project override at .tiller/models.toml. Override files
 // replace the tiers they define; unmentioned tiers keep the embedded defaults.
+//
+// In addition to [tiers.<name>] sections, models.toml supports
+// [adapter.<name>] sections for configuring command-backed adapters:
+//
+//	[adapter.echo-agent]
+//	argv    = ["/usr/local/bin/echo-agent", "--brief", "{brief}", "--out", "{report}"]
+//	report  = "stdout"           # "stdout" or a file path template
+//	timeout = "5m"               # Go duration string; 0 = no timeout
 package tier
 
 import (
@@ -30,9 +38,38 @@ func (c Candidate) String() string {
 	return c.Adapter + ":" + c.Provider + "/" + c.Model
 }
 
-// Config holds the resolved tier → candidates mapping.
+// AdapterConfig holds the configuration for a command-backed adapter instance.
+// It is keyed by the provider name used in a Candidate (e.g. "echo-agent" in
+// "command:echo-agent/-").
+type AdapterConfig struct {
+	// Argv is the command and arguments to execute. {brief} and {report} are
+	// placeholder tokens that are substituted at dispatch time.
+	Argv []string
+
+	// Report specifies how the adapter collects its output:
+	//   "stdout" — capture the subprocess stdout
+	//   anything else — read the named file after subprocess exit
+	// Default is "stdout".
+	Report string
+
+	// Timeout is the maximum execution duration for the subprocess.
+	// Zero means no timeout.
+	Timeout string // Go duration string
+}
+
+// Config holds the resolved tier → candidates mapping and adapter configs.
 type Config struct {
-	tiers map[string][]Candidate
+	tiers    map[string][]Candidate
+	adapters map[string]*AdapterConfig // keyed by provider name
+}
+
+// AdapterConfig returns the named adapter configuration, or nil if no
+// [adapter.<name>] section exists for that name.
+func (c *Config) AdapterConfig(name string) *AdapterConfig {
+	if c.adapters == nil {
+		return nil
+	}
+	return c.adapters[name]
 }
 
 // Resolve returns the Candidate for the given tier name and bucket index.
@@ -74,6 +111,9 @@ func Load(projectDir string) (*Config, error) {
 			}
 			for name, cands := range override.tiers {
 				cfg.tiers[name] = cands
+			}
+			for name, ac := range override.adapters {
+				cfg.adapters[name] = ac
 			}
 		}
 	}

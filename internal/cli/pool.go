@@ -9,6 +9,7 @@ import (
 
 	"m31labs.dev/tiller/internal/pool"
 	"m31labs.dev/tiller/internal/storeutil"
+	"m31labs.dev/tiller/internal/tier"
 )
 
 // runPool is the handler for `tiller pool`.
@@ -110,7 +111,10 @@ func runPool(args []string) error {
 		projectDir, _ = os.Getwd()
 	}
 
-	reg := buildRegistry("") // resolves tiller binary at Run time
+	// Load tier config for the command adapter. Ignore errors — a misconfigured
+	// models.toml will fail at dispatch time with a clear message.
+	poolTierCfg, _ := tier.Load(projectDir)
+	reg := buildRegistry("", poolTierCfg) // resolves tiller binary at Run time
 
 	p, err := pool.New(pool.Options{
 		Store:           st,

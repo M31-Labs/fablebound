@@ -10,6 +10,7 @@ import (
 
 	"m31labs.dev/tiller/internal/policy"
 	"m31labs.dev/tiller/internal/roles"
+	"m31labs.dev/tiller/internal/tier"
 )
 
 // runInit implements `tiller init`.
@@ -38,6 +39,11 @@ func runInit(_ []string) error {
 		filepath.Join(fbDir, "roles"),
 	); err != nil {
 		return fmt.Errorf("materialize roles: %w", err)
+	}
+
+	// Materialize .tiller/models.toml from embedded default (idempotent).
+	if err := materializeModelsToml(tier.EmbeddedDefaultsFS(), fbDir); err != nil {
+		return fmt.Errorf("materialize models.toml: %w", err)
 	}
 
 	// Create runs/ directory.
@@ -83,6 +89,23 @@ func materializeDefaults(srcFS fs.ReadDirFS, destDir string) error {
 		}
 	}
 	return nil
+}
+
+// materializeModelsToml copies models.toml from srcFS into tillerDir,
+// skipping if the file already exists (idempotent).
+func materializeModelsToml(srcFS fs.ReadDirFS, tillerDir string) error {
+	if err := os.MkdirAll(tillerDir, 0755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", tillerDir, err)
+	}
+	dest := filepath.Join(tillerDir, "models.toml")
+	if _, err := os.Stat(dest); err == nil {
+		return nil // already exists
+	}
+	data, err := fs.ReadFile(srcFS, "models.toml")
+	if err != nil {
+		return fmt.Errorf("read embedded models.toml: %w", err)
+	}
+	return os.WriteFile(dest, data, 0644)
 }
 
 // appendGitignore adds line to the project .gitignore if not already present.

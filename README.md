@@ -1,6 +1,6 @@
 # tiller
 
-A harness that gates Claude Code sessions with compiled [Arbiter](https://github.com/M31-Labs/arbiter) policies, enforces model-cost discipline, and makes the fable model's orchestrator-only role the default ambient experience.
+A harness that gates Claude Code sessions with compiled [Arbiter](https://github.com/odvcencio/arbiter) policies, enforces model-cost discipline, and makes the fable model's orchestrator-only role the default ambient experience.
 
 ## Why
 

@@ -192,8 +192,10 @@ func TestPromoteWithHyphaStub(t *testing.T) {
 	if !strings.Contains(argv, "--sign") {
 		t.Errorf("expected '--sign' in hypha argv, got: %s", argv)
 	}
-	if !strings.Contains(argv, HyphaSpace) {
-		t.Errorf("expected space URI in hypha argv, got: %s", argv)
+	// Note: hypha spore submit does not accept --space (v0.1.9); the space URI
+	// must NOT appear in argv.
+	if strings.Contains(argv, HyphaSpace) {
+		t.Errorf("spore submit argv must not contain --space (unsupported in v0.1.9): %s", argv)
 	}
 	if !strings.Contains(argv, "identity://odvcencio") {
 		t.Errorf("expected --as in hypha argv, got: %s", argv)

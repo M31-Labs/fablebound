@@ -6,8 +6,8 @@ package hyphae
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
-	"io"
 	"os/exec"
 	"strings"
 )
@@ -27,9 +27,8 @@ type Logger func(format string, args ...any)
 // Hypha is a wrapper around the hypha CLI binary. All methods are no-ops if
 // the binary is not found on PATH.
 type Hypha struct {
-	path   string // resolved path; "" if not found
-	log    Logger
-	stdout io.Writer // capture for tests; nil → discard
+	path string // resolved path; "" if not found
+	log  Logger
 }
 
 // New returns a Hypha instance. If hypha is not on PATH, the instance is
@@ -62,9 +61,6 @@ func (h *Hypha) run(args ...string) (string, error) {
 	cmd := exec.Command(h.path, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
-	if h.stdout != nil {
-		cmd.Stdout = h.stdout
-	}
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		h.log("hypha %s: %v (stderr: %s)", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
@@ -74,8 +70,12 @@ func (h *Hypha) run(args ...string) (string, error) {
 }
 
 // TraceStart opens a new hypha trace for a tiller run.
-// Returns the trace id (stdout of hypha trace start) or "" on failure.
+// Returns the trace id or "" on failure.
 // Args: --agent <agent> --task <runID> --phase <phase> --space <space>
+//
+// hypha ≥ v0.1.9 emits a JSON envelope on stdout; TraceStart parses d.ID from
+// it. If stdout is not valid JSON (older hypha emits plain text), the first
+// whitespace-delimited word is used as the id.
 func (h *Hypha) TraceStart(runID, phase, space string) string {
 	if !h.Available() {
 		return ""
@@ -93,8 +93,7 @@ func (h *Hypha) TraceStart(runID, phase, space string) string {
 	if err != nil {
 		return ""
 	}
-	// The trace id is the first word of stdout.
-	id := firstWord(out)
+	id := parseEnvelopeID(out)
 	if id != "" {
 		h.log("hypha trace start: trace id=%s", id)
 	}
@@ -102,38 +101,87 @@ func (h *Hypha) TraceStart(runID, phase, space string) string {
 }
 
 // TraceTick appends a tick event to an existing trace.
-// id is the trace id returned by TraceStart; message is the tick text.
+// id is the trace id returned by TraceStart; message is the tick text;
+// space is the hyphae space URI (required on multi-space installs).
 // No-op if id is empty.
 func (h *Hypha) TraceTick(id, message string) {
 	if !h.Available() || id == "" {
 		return
 	}
-	h.run("trace", "tick", id, message) //nolint:errcheck
+	h.run("trace", "tick", id, message, "--space", HyphaSpace) //nolint:errcheck
 }
 
 // TraceDone finalises a trace with the given status (e.g. "completed", "failed").
+// --space is required on multi-space installs (observed in v0.1.9 live probe).
 // No-op if id is empty.
 func (h *Hypha) TraceDone(id, status string) {
 	if !h.Available() || id == "" {
 		return
 	}
-	h.run("trace", "done", id, "--status", status) //nolint:errcheck
+	h.run("trace", "done", id, "--status", status, "--space", HyphaSpace) //nolint:errcheck
 }
 
-// SporeSubmit runs `hypha spore submit <path> --sign [--space s] [--as a]`.
-// Returns the raw stdout. Soft-fails on error.
-func (h *Hypha) SporeSubmit(sporePath, space, as string) (string, error) {
+// SporeSubmit runs `hypha spore submit <path> --sign [--as a]`.
+// Returns a display string: if stdout is a JSON envelope containing d.FilePath,
+// that path is returned; otherwise raw stdout is returned. Soft-fails on error.
+//
+// Note: `hypha spore submit` does not accept a --space flag (v0.1.9).
+func (h *Hypha) SporeSubmit(sporePath, _ /*space*/, as string) (string, error) {
 	if !h.Available() {
 		return "", fmt.Errorf("hypha not available")
 	}
 	args := []string{"spore", "submit", sporePath, "--sign"}
-	if space != "" {
-		args = append(args, "--space", space)
-	}
 	if as != "" {
 		args = append(args, "--as", as)
 	}
-	return h.run(args...)
+	out, err := h.run(args...)
+	if err != nil {
+		return out, err
+	}
+	// Prefer the receipt file path from the JSON envelope when present.
+	if fp := parseEnvelopeFilePath(out); fp != "" {
+		return fp, nil
+	}
+	return out, nil
+}
+
+// parseEnvelopeID extracts the trace id from a hypha v0.1.9 JSON envelope
+// (field path: .d.ID). Falls back to firstWord for legacy plain-text output.
+func parseEnvelopeID(out string) string {
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return ""
+	}
+	if strings.HasPrefix(out, "{") {
+		var env struct {
+			D struct {
+				ID string `json:"ID"`
+			} `json:"d"`
+		}
+		if err := json.Unmarshal([]byte(out), &env); err == nil && env.D.ID != "" {
+			return env.D.ID
+		}
+	}
+	// Legacy plain-text or malformed JSON: use first word.
+	return firstWord(out)
+}
+
+// parseEnvelopeFilePath extracts the file path from a hypha v0.1.9 JSON
+// envelope (field path: .d.FilePath). Returns "" if not present or not JSON.
+func parseEnvelopeFilePath(out string) string {
+	out = strings.TrimSpace(out)
+	if !strings.HasPrefix(out, "{") {
+		return ""
+	}
+	var env struct {
+		D struct {
+			FilePath string `json:"FilePath"`
+		} `json:"d"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err == nil {
+		return env.D.FilePath
+	}
+	return ""
 }
 
 // firstWord returns the first whitespace-delimited token from s.

@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS dispatch (
     -- dispatch pool / lease fields (active from P4)
     claimed_by       TEXT        NOT NULL DEFAULT '',
     lease_until      TIMESTAMPTZ,
+    -- adapter routing fields (populated by the dispatch requester)
+    adapter_name     TEXT        NOT NULL DEFAULT '',  -- stub|claude-headless|…
+    provider         TEXT        NOT NULL DEFAULT '',  -- anthropic|openai|local|…
     -- adapter config (settings.json body); stored as TEXT to preserve exact bytes
     adapter_config   TEXT,
     PRIMARY KEY (run_id, id)
@@ -74,6 +77,12 @@ CREATE TABLE IF NOT EXISTS dispatch (
 CREATE INDEX IF NOT EXISTS dispatch_run_id_idx    ON dispatch (run_id);
 CREATE INDEX IF NOT EXISTS dispatch_status_idx    ON dispatch (status);
 CREATE INDEX IF NOT EXISTS dispatch_lease_idx     ON dispatch (lease_until) WHERE status = 'claimed';
+
+-- Idempotent migration: add adapter_name and provider to dispatch (schema version 5).
+-- These ALTER TABLE statements must appear AFTER the CREATE TABLE dispatch above so
+-- that fresh-schema creation (test isolation schemas) succeeds in a single ExecContext.
+ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS adapter_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT '';
 
 -- dispatch_seq is an atomic per-run dispatch counter for AllocDispatch.
 -- One row per run; next_n is incremented atomically via INSERT ... ON CONFLICT.
@@ -183,4 +192,8 @@ ON CONFLICT (version) DO NOTHING;
 
 INSERT INTO schema_version (version, description)
 VALUES (4, 'add max_depth column to run table (spec §4.3)')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO schema_version (version, description)
+VALUES (5, 'add adapter_name and provider columns to dispatch table')
 ON CONFLICT (version) DO NOTHING;

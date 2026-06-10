@@ -128,7 +128,7 @@ func (s *Store) ListPendingDispatches(runID string) ([]*scratch.Dispatch, error)
 		SELECT id, parent_id, role, model, profile, status, depth,
 		       supervisor_pid, max_turns, timeout_minutes, started_at, ended_at,
 		       exit_code, cost_usd, num_turns, session_id, tier, enforcement,
-		       claimed_by, lease_until
+		       claimed_by, lease_until, adapter_name, provider
 		  FROM dispatch
 		 WHERE run_id = $1 AND status = 'pending'
 		 ORDER BY id`,

@@ -22,7 +22,7 @@ import (
 var schemaDDL string
 
 // SchemaVersion is the expected version number written by schema.sql.
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 // DB wraps a *sql.DB opened against a PostgreSQL DSN.
 type DB struct {

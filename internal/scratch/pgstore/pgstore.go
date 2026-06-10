@@ -231,7 +231,7 @@ func (s *Store) ReadDispatch(runID, dispatchID string) (*scratch.Dispatch, error
 		SELECT id, parent_id, role, model, profile, status, depth,
 		       supervisor_pid, max_turns, timeout_minutes, started_at, ended_at,
 		       exit_code, cost_usd, num_turns, session_id, tier, enforcement,
-		       claimed_by, lease_until
+		       claimed_by, lease_until, adapter_name, provider
 		FROM dispatch WHERE run_id=$1 AND id=$2`, runID, dispatchID)
 	return scanDispatch(row)
 }
@@ -243,17 +243,19 @@ func (s *Store) WriteDispatch(runID string, d *scratch.Dispatch) error {
 			run_id, id, parent_id, role, model, profile, status, depth,
 			supervisor_pid, max_turns, timeout_minutes, started_at, ended_at,
 			exit_code, cost_usd, num_turns, session_id, tier, enforcement,
-			claimed_by, lease_until)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+			claimed_by, lease_until, adapter_name, provider)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
 		ON CONFLICT (run_id, id) DO UPDATE SET
 			parent_id=$3, role=$4, model=$5, profile=$6, status=$7, depth=$8,
 			supervisor_pid=$9, max_turns=$10, timeout_minutes=$11, started_at=$12,
 			ended_at=$13, exit_code=$14, cost_usd=$15, num_turns=$16, session_id=$17,
-			tier=$18, enforcement=$19, claimed_by=$20, lease_until=$21`,
+			tier=$18, enforcement=$19, claimed_by=$20, lease_until=$21,
+			adapter_name=$22, provider=$23`,
 		runID, d.ID, d.Parent, d.Role, d.Model, d.Profile, d.Status, d.Depth,
 		d.SupervisorPID, d.MaxTurns, d.TimeoutMinutes, d.StartedAt, d.EndedAt,
 		d.Exit, d.CostUSD, d.NumTurns, d.SessionID,
 		d.Tier, d.Enforcement, d.ClaimedBy, d.LeaseUntil,
+		d.Adapter, d.Provider,
 	)
 	if err != nil {
 		return fmt.Errorf("pgstore.WriteDispatch %s/%s: %w", runID, d.ID, err)
@@ -267,7 +269,7 @@ func (s *Store) ListDispatches(runID string) ([]*scratch.Dispatch, error) {
 		SELECT id, parent_id, role, model, profile, status, depth,
 		       supervisor_pid, max_turns, timeout_minutes, started_at, ended_at,
 		       exit_code, cost_usd, num_turns, session_id, tier, enforcement,
-		       claimed_by, lease_until
+		       claimed_by, lease_until, adapter_name, provider
 		FROM dispatch WHERE run_id=$1 ORDER BY id`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("pgstore.ListDispatches %s: %w", runID, err)
@@ -532,6 +534,11 @@ func spoolAuditEvent(spoolDir, runID, kind string, ev audit.DecisionEvent) error
 // so that file-needing adapters (claudeheadless) can run against a remote store.
 // dir is the dispatch-level spool directory (e.g. <workspace>/.tiller/runs/<runID>/dispatches/<dispID>/).
 func (s *Store) Materialize(runID, dispatchID, dir string) error {
+	if dir == "" {
+		// No directory provided; skip file materialization.
+		// In pgstore, adapters that need on-disk files must supply a non-empty dir.
+		return nil
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("pgstore.Materialize: mkdir %s: %w", dir, err)
 	}
@@ -609,6 +616,7 @@ func scanDispatch(row rowScanner) (*scratch.Dispatch, error) {
 		&d.Status, &d.Depth, &d.SupervisorPID, &d.MaxTurns, &d.TimeoutMinutes,
 		&d.StartedAt, &d.EndedAt, &d.Exit, &d.CostUSD, &d.NumTurns,
 		&d.SessionID, &d.Tier, &d.Enforcement, &d.ClaimedBy, &d.LeaseUntil,
+		&d.Adapter, &d.Provider,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("dispatch not found")

@@ -60,6 +60,7 @@ func Main(args []string) {
 		{"init", runInit},
 		{"run", runRun},
 		{"dispatch", makeDispatchHandler(reg)},
+		{"pool", runPool},
 		{"poll", runPoll},
 		{"await", runAwait},
 		{"note", runNote},
@@ -105,6 +106,7 @@ Subcommands:
   init                   materialize .tiller/{policy,roles}, gitignore runs/
   run "<task>"           start a governed RLM run
   dispatch               dispatch a child agent (governed by dispatch.arb)
+  pool                   run executor pool (host-managed daemon; drains pending dispatches)
   poll <id>              print dispatch status
   await <id>             wait for dispatch to reach terminal status
   note add [-|"text"]    append a timestamped note

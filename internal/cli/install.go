@@ -4,8 +4,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"m31labs.dev/fablebound/internal/agents"
 )
 
 // settingsHookEntry is a single hook entry in the Claude Code settings JSON.
@@ -19,13 +23,19 @@ type settingsHookCommand struct {
 	Command string `json:"command"`
 }
 
-// runInstall implements `fablebound install [--print]`.
-// Idempotently adds fablebound PreToolUse and PostToolUse hook entries to
-// ~/.claude/settings.json without clobbering existing hooks or keys.
+// runInstall implements `fablebound install [--print] [--project]`.
+// Idempotently:
+//
+//	(a) merges PreToolUse + PostToolUse hook entries into settings.json, and
+//	(b) writes the fb-* subagent definition files into the agents/ directory.
+//
+// --print: show what would change, write nothing.
+// --project: install into ./.claude/ instead of ~/.claude/ (repo-local scope).
 func runInstall(args []string) error {
-	fs := flag.NewFlagSet("install", flag.ContinueOnError)
-	printOnly := fs.Bool("print", false, "print the JSON snippet without writing")
-	if err := fs.Parse(args); err != nil {
+	fset := flag.NewFlagSet("install", flag.ContinueOnError)
+	printOnly := fset.Bool("print", false, "print what would change without writing")
+	project := fset.Bool("project", false, "install into ./.claude/ instead of ~/.claude/")
+	if err := fset.Parse(args); err != nil {
 		return err
 	}
 
@@ -33,7 +43,6 @@ func runInstall(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
 	}
-	// Use absolute path to the binary for the hook command.
 	command := exe + " hook"
 
 	entry := settingsHookEntry{
@@ -43,23 +52,16 @@ func runInstall(args []string) error {
 		},
 	}
 
-	if *printOnly {
-		snippet := map[string]interface{}{
-			"hooks": map[string]interface{}{
-				"PreToolUse":  []interface{}{entry},
-				"PostToolUse": []interface{}{entry},
-			},
-		}
-		data, _ := json.MarshalIndent(snippet, "", "  ")
-		fmt.Println(string(data))
-		return nil
-	}
-
-	settingsPath, err := claudeSettingsPath()
+	settingsPath, agentsDir, err := claudePaths(*project)
 	if err != nil {
 		return err
 	}
 
+	if *printOnly {
+		return printInstallPlan(settingsPath, agentsDir, entry, command)
+	}
+
+	// ── (a) Hooks ─────────────────────────────────────────────────────────────
 	settings, err := loadOrInitSettings(settingsPath)
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
@@ -68,30 +70,71 @@ func runInstall(args []string) error {
 	added := mergeHookEntries(settings, entry)
 	if len(added) == 0 {
 		fmt.Println("fablebound: hooks already installed in", settingsPath)
-		return nil
+	} else {
+		if err := writeSettings(settingsPath, settings); err != nil {
+			return fmt.Errorf("write settings: %w", err)
+		}
+		for _, ev := range added {
+			fmt.Printf("fablebound: added %s hook → %s\n", ev, command)
+		}
+		fmt.Println("fablebound: hooks installed in", settingsPath)
 	}
 
-	if err := writeSettings(settingsPath, settings); err != nil {
-		return fmt.Errorf("write settings: %w", err)
+	// ── (b) Agents ────────────────────────────────────────────────────────────
+	written, err := installAgents(agentsDir, false)
+	if err != nil {
+		return fmt.Errorf("install agents: %w", err)
+	}
+	if len(written) == 0 {
+		fmt.Println("fablebound: fb-* agents already up-to-date in", agentsDir)
+	} else {
+		for _, name := range written {
+			fmt.Printf("fablebound: wrote agent → %s\n", filepath.Join(agentsDir, name))
+		}
+		fmt.Println("fablebound: agents installed in", agentsDir)
 	}
 
-	for _, ev := range added {
-		fmt.Printf("fablebound: added %s hook → %s\n", ev, command)
-	}
-	fmt.Println("fablebound: installed in", settingsPath)
 	return nil
 }
 
-// runUninstall implements `fablebound uninstall [--print]`.
-// Removes only fablebound's hook entries from ~/.claude/settings.json.
+// printInstallPlan prints what install would do without writing anything.
+func printInstallPlan(settingsPath, agentsDir string, entry settingsHookEntry, command string) error {
+	fmt.Println("# fablebound install --print (no files written)")
+	fmt.Println()
+
+	// Hook snippet.
+	snippet := map[string]interface{}{
+		"hooks": map[string]interface{}{
+			"PreToolUse":  []interface{}{entry},
+			"PostToolUse": []interface{}{entry},
+		},
+	}
+	data, _ := json.MarshalIndent(snippet, "", "  ")
+	fmt.Printf("## hooks → %s\n%s\n\n", settingsPath, string(data))
+
+	// Agent files.
+	fmt.Printf("## agents → %s\n", agentsDir)
+	agentFS := agents.EmbeddedDefaults()
+	entries, _ := fs.ReadDir(agentFS, ".")
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), "fb-") {
+			fmt.Printf("  %s\n", filepath.Join(agentsDir, e.Name()))
+		}
+	}
+	return nil
+}
+
+// runUninstall implements `fablebound uninstall [--print] [--project]`.
+// Removes only fablebound's hook entries and fb-*.md agent files.
 func runUninstall(args []string) error {
-	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
-	printOnly := fs.Bool("print", false, "print what would be removed without writing")
-	if err := fs.Parse(args); err != nil {
+	fset := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	printOnly := fset.Bool("print", false, "print what would be removed without writing")
+	project := fset.Bool("project", false, "uninstall from ./.claude/ instead of ~/.claude/")
+	if err := fset.Parse(args); err != nil {
 		return err
 	}
 
-	settingsPath, err := claudeSettingsPath()
+	settingsPath, agentsDir, err := claudePaths(*project)
 	if err != nil {
 		return err
 	}
@@ -101,31 +144,69 @@ func runUninstall(args []string) error {
 		return fmt.Errorf("load settings: %w", err)
 	}
 
-	removed := removeHookEntries(settings)
-	if len(removed) == 0 {
-		fmt.Println("fablebound: no fablebound hooks found in", settingsPath)
+	removedHooks := removeHookEntries(settings)
+	agentFiles := fbAgentFilesIn(agentsDir)
+
+	if len(removedHooks) == 0 && len(agentFiles) == 0 {
+		fmt.Println("fablebound: nothing to uninstall")
 		return nil
 	}
 
 	if *printOnly {
-		for _, ev := range removed {
-			fmt.Printf("would remove: %s hook entry\n", ev)
+		for _, ev := range removedHooks {
+			fmt.Printf("would remove: %s hook entry from %s\n", ev, settingsPath)
+		}
+		for _, name := range agentFiles {
+			fmt.Printf("would remove: %s\n", filepath.Join(agentsDir, name))
 		}
 		return nil
 	}
 
-	if err := writeSettings(settingsPath, settings); err != nil {
-		return fmt.Errorf("write settings: %w", err)
+	// Remove hooks.
+	if len(removedHooks) > 0 {
+		if err := writeSettings(settingsPath, settings); err != nil {
+			return fmt.Errorf("write settings: %w", err)
+		}
+		for _, ev := range removedHooks {
+			fmt.Printf("fablebound: removed %s hook entry from %s\n", ev, settingsPath)
+		}
 	}
 
-	for _, ev := range removed {
-		fmt.Printf("fablebound: removed %s hook entry\n", ev)
+	// Remove agent files.
+	for _, name := range agentFiles {
+		p := filepath.Join(agentsDir, name)
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove agent %s: %w", p, err)
+		}
+		fmt.Printf("fablebound: removed agent %s\n", p)
 	}
-	fmt.Println("fablebound: uninstalled from", settingsPath)
+
+	fmt.Println("fablebound: uninstalled")
 	return nil
 }
 
+// claudePaths returns the settings.json path and agents/ directory for the
+// chosen scope (project = ./.claude, default = ~/.claude).
+func claudePaths(project bool) (settingsPath, agentsDir string, err error) {
+	var claudeDir string
+	if project {
+		cwd, cerr := os.Getwd()
+		if cerr != nil {
+			return "", "", fmt.Errorf("getwd: %w", cerr)
+		}
+		claudeDir = filepath.Join(cwd, ".claude")
+	} else {
+		home, herr := os.UserHomeDir()
+		if herr != nil {
+			return "", "", fmt.Errorf("home dir: %w", herr)
+		}
+		claudeDir = filepath.Join(home, ".claude")
+	}
+	return filepath.Join(claudeDir, "settings.json"), filepath.Join(claudeDir, "agents"), nil
+}
+
 // claudeSettingsPath returns the path to ~/.claude/settings.json.
+// Kept for backward compatibility with existing test helpers.
 func claudeSettingsPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -134,7 +215,69 @@ func claudeSettingsPath() (string, error) {
 	return filepath.Join(home, ".claude", "settings.json"), nil
 }
 
-// loadOrInitSettings reads ~/.claude/settings.json into a map, or returns
+// installAgents writes the embedded fb-*.md files into agentsDir.
+// If dryRun is true it returns the list of names that would be written without
+// writing anything.  Only fb-* files are touched (non-fb files are left alone).
+// Returns the list of files actually written (or that would be written).
+func installAgents(agentsDir string, dryRun bool) ([]string, error) {
+	agentFS := agents.EmbeddedDefaults()
+	entries, err := fs.ReadDir(agentFS, ".")
+	if err != nil {
+		return nil, fmt.Errorf("read embedded agents: %w", err)
+	}
+
+	if !dryRun {
+		if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+			return nil, fmt.Errorf("mkdir agents dir: %w", err)
+		}
+	}
+
+	var written []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "fb-") {
+			continue
+		}
+		dest := filepath.Join(agentsDir, e.Name())
+
+		// Read embedded content.
+		content, err := fs.ReadFile(agentFS, e.Name())
+		if err != nil {
+			return nil, fmt.Errorf("read embedded %s: %w", e.Name(), err)
+		}
+
+		// Check if already identical on disk.
+		if existing, err := os.ReadFile(dest); err == nil {
+			if string(existing) == string(content) {
+				continue // already up-to-date
+			}
+		}
+
+		if !dryRun {
+			if err := os.WriteFile(dest, content, 0o644); err != nil {
+				return nil, fmt.Errorf("write %s: %w", dest, err)
+			}
+		}
+		written = append(written, e.Name())
+	}
+	return written, nil
+}
+
+// fbAgentFilesIn returns the list of fb-*.md filenames present in agentsDir.
+func fbAgentFilesIn(agentsDir string) []string {
+	entries, err := os.ReadDir(agentsDir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), "fb-") && strings.HasSuffix(e.Name(), ".md") {
+			out = append(out, e.Name())
+		}
+	}
+	return out
+}
+
+// loadOrInitSettings reads the settings file into a map, or returns
 // an empty map if the file does not exist.
 func loadOrInitSettings(path string) (map[string]interface{}, error) {
 	data, err := os.ReadFile(path)

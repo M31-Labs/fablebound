@@ -423,6 +423,11 @@ func lastFableModelInTranscript(transcriptPath string) (model string, isFable bo
 
 // handleAmbientPreToolUse evaluates the ambient policy for a fable session.
 // Returns output JSON to write to stdout, or an error.
+//
+// TODO(ambient): Agent tool_input does not expose target model; cannot block
+// fable-for-execution subagents at the hook layer — relying on persona model
+// frontmatter + deny-reason nudge to steer the orchestrator toward the right
+// fb-* persona for each task type.
 func handleAmbientPreToolUse(event HookEvent, stdout io.Writer) error {
 	req := policy.ToolCallRequest{
 		Role:  "ambient-orchestrator",
@@ -458,7 +463,7 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer) error {
 	toolName := event.ToolName
 	reason := result.Reason
 	if decision == "deny" && toolName != "" {
-		reason = fmt.Sprintf("fablebound: fable runs orchestrator-only — dispatch a subagent (Task) to execute; %s is not permitted for the root fable agent.", toolName)
+		reason = fmt.Sprintf("fablebound: fable is orchestrator-only — delegate this with the Task tool: code changes → fb-worker (sonnet), debugging → fb-debugger (sonnet), investigation → fb-investigator (opus), review → fb-reviewer (opus); reserve fable for fb-architect/fb-deep-report. (%s blocked for the root fable agent.)", toolName)
 	}
 
 	decisionReason := fmt.Sprintf("RULE: %s: %s", result.Rule, reason)

@@ -5,7 +5,8 @@
 # No match → deny (combinator default).
 #
 # Coverage targets: HaltAmbient (kill_switch), AllowRead, AllowAgent,
-# AllowTodoWrite, AllowWebFetch, DenyExecution.
+# AllowTodoWrite, AllowWebFetch, DenyHyphaDaemons, AllowReadOnlyBash,
+# AllowMarkdownAuthoring, DenyCodeHeavyMarkdown, DenyExecution.
 
 # ── AllowRead ────────────────────────────────────────────────────────────────
 
@@ -16,9 +17,11 @@ test "Read is allowed in ambient mode" {
         agent.dispatch_id: ""
         tool.name: "Read"
         tool.command: ""
+        tool.command_class: ""
         tool.file_path: "/home/user/project/main.go"
         tool.path_in_scratch: false
         tool.path_in_workspace: true
+        tool.write_class: ""
         run.id: ""
     }
     expect rule AllowRead matched
@@ -32,9 +35,11 @@ test "Glob is allowed in ambient mode" {
         agent.dispatch_id: ""
         tool.name: "Glob"
         tool.command: ""
+        tool.command_class: ""
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: true
+        tool.write_class: ""
         run.id: ""
     }
     expect rule AllowRead matched
@@ -48,9 +53,11 @@ test "Grep is allowed in ambient mode" {
         agent.dispatch_id: ""
         tool.name: "Grep"
         tool.command: ""
+        tool.command_class: ""
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: true
+        tool.write_class: ""
         run.id: ""
     }
     expect rule AllowRead matched
@@ -66,9 +73,11 @@ test "Agent (Task dispatch) is allowed in ambient mode" {
         agent.dispatch_id: ""
         tool.name: "Agent"
         tool.command: ""
+        tool.command_class: ""
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false
+        tool.write_class: ""
         run.id: ""
     }
     expect rule AllowAgent matched
@@ -84,9 +93,11 @@ test "TodoWrite is allowed in ambient mode" {
         agent.dispatch_id: ""
         tool.name: "TodoWrite"
         tool.command: ""
+        tool.command_class: ""
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false
+        tool.write_class: ""
         run.id: ""
     }
     expect rule AllowTodoWrite matched
@@ -102,9 +113,11 @@ test "WebFetch is allowed in ambient mode" {
         agent.dispatch_id: ""
         tool.name: "WebFetch"
         tool.command: ""
+        tool.command_class: ""
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false
+        tool.write_class: ""
         run.id: ""
     }
     expect rule AllowWebFetch matched
@@ -120,9 +133,11 @@ test "Edit is denied in ambient mode (DenyExecution)" {
         agent.dispatch_id: ""
         tool.name: "Edit"
         tool.command: ""
+        tool.command_class: ""
         tool.file_path: "/home/user/project/main.go"
         tool.path_in_scratch: false
         tool.path_in_workspace: true
+        tool.write_class: ""
         run.id: ""
     }
     expect rule DenyExecution matched
@@ -136,9 +151,11 @@ test "Write is denied in ambient mode (DenyExecution)" {
         agent.dispatch_id: ""
         tool.name: "Write"
         tool.command: ""
+        tool.command_class: ""
         tool.file_path: "/home/user/project/newfile.go"
         tool.path_in_scratch: false
         tool.path_in_workspace: true
+        tool.write_class: ""
         run.id: ""
     }
     expect rule DenyExecution matched
@@ -151,159 +168,269 @@ test "NotebookEdit is denied in ambient mode (DenyExecution)" {
         agent.dispatch_id: ""
         tool.name: "NotebookEdit"
         tool.command: ""
+        tool.command_class: ""
         tool.file_path: "/home/user/analysis.ipynb"
         tool.path_in_scratch: false
         tool.path_in_workspace: true
+        tool.write_class: ""
         run.id: ""
     }
     expect rule DenyExecution matched
 }
 
-test "Bash is denied in ambient mode (DenyExecution)" {
+test "Bash go build is denied (DenyExecution — not readonly)" {
     given {
         agent.role: "ambient-orchestrator"
         agent.depth: 0
         agent.dispatch_id: ""
         tool.name: "Bash"
         tool.command: "go build ./..."
+        tool.command_class: "other"
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: true
+        tool.write_class: ""
         run.id: ""
     }
     expect rule DenyExecution matched
+    expect rule AllowReadOnlyBash not matched
 }
 
-# ── AllowHyphaKnowledge ───────────────────────────────────────────────────────
+# ── DenyHyphaDaemons (defense-in-depth, priority 14) ─────────────────────────
 
-test "hypha recall is allowed (ambient knowledge command)" {
-    given {
-        agent.role: "ambient-orchestrator"
-        agent.depth: 0
-        agent.dispatch_id: ""
-        tool.name: "Bash"
-        tool.command: "hypha recall ambient policy"
-        tool.file_path: ""
-        tool.path_in_scratch: false
-        tool.path_in_workspace: false
-        run.id: ""
-    }
-    # AllowHyphaKnowledge (priority 15) wins over DenyExecution (priority 20).
-    # Both rules match because Bash is in denied_tools; the lower priority wins.
-    expect rule AllowHyphaKnowledge matched
-}
-
-test "hypha pulse is allowed (ambient knowledge command)" {
-    given {
-        agent.role: "ambient-orchestrator"
-        agent.depth: 0
-        agent.dispatch_id: ""
-        tool.name: "Bash"
-        tool.command: "hypha pulse"
-        tool.file_path: ""
-        tool.path_in_scratch: false
-        tool.path_in_workspace: false
-        run.id: ""
-    }
-    expect rule AllowHyphaKnowledge matched
-}
-
-test "hypha mcp serve is denied (persistent daemon forbidden)" {
+test "hypha mcp serve is denied (daemon guard, priority 14)" {
     given {
         agent.role: "ambient-orchestrator"
         agent.depth: 0
         agent.dispatch_id: ""
         tool.name: "Bash"
         tool.command: "hypha mcp serve"
+        tool.command_class: "other"
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false
+        tool.write_class: ""
         run.id: ""
     }
-    expect rule AllowHyphaKnowledge not matched
-    expect rule DenyExecution matched
+    expect rule DenyHyphaDaemons matched
+    expect rule AllowReadOnlyBash not matched
 }
 
-test "hypha hub serve is denied (persistent daemon forbidden)" {
+test "hypha hub serve is denied (daemon guard, priority 14)" {
     given {
         agent.role: "ambient-orchestrator"
         agent.depth: 0
         agent.dispatch_id: ""
         tool.name: "Bash"
         tool.command: "hypha hub serve"
+        tool.command_class: "other"
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false
+        tool.write_class: ""
         run.id: ""
     }
-    expect rule AllowHyphaKnowledge not matched
-    expect rule DenyExecution matched
+    expect rule DenyHyphaDaemons matched
+    expect rule AllowReadOnlyBash not matched
 }
 
-test "shell-chained hypha command is denied (metacharacter guard)" {
+# ── AllowReadOnlyBash (priority 15) ─────────────────────────────────────────
+
+test "hypha recall is allowed (readonly bash)" {
     given {
         agent.role: "ambient-orchestrator"
         agent.depth: 0
         agent.dispatch_id: ""
         tool.name: "Bash"
-        tool.command: "hypha recall x; rm -rf /"
+        tool.command: "hypha recall ambient policy"
+        tool.command_class: "readonly"
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false
+        tool.write_class: ""
         run.id: ""
     }
-    expect rule AllowHyphaKnowledge not matched
-    expect rule DenyExecution matched
+    expect rule AllowReadOnlyBash matched
 }
 
-test "bare ls command is denied (not a hypha command)" {
+test "hypha recall with 2>&1 pipe is allowed (readonly bash)" {
     given {
         agent.role: "ambient-orchestrator"
         agent.depth: 0
         agent.dispatch_id: ""
         tool.name: "Bash"
-        tool.command: "ls -la"
+        tool.command: "hypha recall galaxy-migration 2>&1 | head -80"
+        tool.command_class: "readonly"
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false
+        tool.write_class: ""
         run.id: ""
     }
-    expect rule AllowHyphaKnowledge not matched
+    expect rule AllowReadOnlyBash matched
+}
+
+test "hypha pulse piped to head is allowed (readonly bash)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "hypha pulse | head -5"
+        tool.command_class: "readonly"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowReadOnlyBash matched
+}
+
+test "git log is allowed (readonly bash)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "git log --oneline -3"
+        tool.command_class: "readonly"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowReadOnlyBash matched
+}
+
+test "gts callgraph piped to wc is allowed (readonly bash)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "FOO=1 gts callgraph X | wc -l"
+        tool.command_class: "readonly"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowReadOnlyBash matched
+}
+
+test "ls semicolon rm is denied (other bash)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "ls; rm -rf /"
+        tool.command_class: "other"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowReadOnlyBash not matched
+    expect rule DenyExecution matched
+}
+
+test "cat with redirect is denied (other bash)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "cat x > y"
+        tool.command_class: "other"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowReadOnlyBash not matched
+    expect rule DenyExecution matched
+}
+
+test "git branch new-feature is denied (other bash)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "git branch new-feature"
+        tool.command_class: "other"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowReadOnlyBash not matched
+    expect rule DenyExecution matched
+}
+
+test "echo with command substitution is denied (other bash)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "echo $(whoami)"
+        tool.command_class: "other"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowReadOnlyBash not matched
     expect rule DenyExecution matched
 }
 
 # ── AllowMarkdownAuthoring ────────────────────────────────────────────────────
 
-test "Write to .md file is allowed (markdown authoring)" {
+test "Write to .md file with doc content is allowed (markdown authoring)" {
     given {
         agent.role: "ambient-orchestrator"
         agent.depth: 0
         agent.dispatch_id: ""
         tool.name: "Write"
         tool.command: ""
+        tool.command_class: ""
         tool.file_path: "/home/user/project/spec.md"
         tool.path_in_scratch: false
         tool.path_in_workspace: true
+        tool.write_class: "doc"
         run.id: ""
     }
     # AllowMarkdownAuthoring (priority 15) wins over DenyExecution (priority 20).
     # Both rules match; the lower priority wins.
     expect rule AllowMarkdownAuthoring matched
+    expect rule DenyCodeHeavyMarkdown not matched
 }
 
-test "Edit of notes/plan.md is allowed (markdown authoring)" {
+test "Edit of notes/plan.md with doc content is allowed (markdown authoring)" {
     given {
         agent.role: "ambient-orchestrator"
         agent.depth: 0
         agent.dispatch_id: ""
         tool.name: "Edit"
         tool.command: ""
+        tool.command_class: ""
         tool.file_path: "/home/user/project/notes/plan.md"
         tool.path_in_scratch: false
         tool.path_in_workspace: true
+        tool.write_class: "doc"
         run.id: ""
     }
     expect rule AllowMarkdownAuthoring matched
+    expect rule DenyCodeHeavyMarkdown not matched
 }
 
 test "Write to .go file is denied (code file, not markdown)" {
@@ -313,9 +440,11 @@ test "Write to .go file is denied (code file, not markdown)" {
         agent.dispatch_id: ""
         tool.name: "Write"
         tool.command: ""
+        tool.command_class: ""
         tool.file_path: "/home/user/project/main.go"
         tool.path_in_scratch: false
         tool.path_in_workspace: true
+        tool.write_class: ""
         run.id: ""
     }
     expect rule AllowMarkdownAuthoring not matched
@@ -329,13 +458,53 @@ test "NotebookEdit is denied (not a markdown file tool)" {
         agent.dispatch_id: ""
         tool.name: "NotebookEdit"
         tool.command: ""
+        tool.command_class: ""
         tool.file_path: "/home/user/analysis.ipynb"
         tool.path_in_scratch: false
         tool.path_in_workspace: true
+        tool.write_class: ""
         run.id: ""
     }
     expect rule AllowMarkdownAuthoring not matched
     expect rule DenyExecution matched
+}
+
+# ── DenyCodeHeavyMarkdown (priority 16) ──────────────────────────────────────
+
+test "Write to .md file with code-heavy content is denied" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Write"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: "/home/user/project/dump.md"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        tool.write_class: "code-heavy"
+        run.id: ""
+    }
+    expect rule DenyCodeHeavyMarkdown matched
+    expect rule AllowMarkdownAuthoring not matched
+}
+
+test "Edit of .md file with code-heavy content is denied" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Edit"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: "/home/user/project/codedump.md"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        tool.write_class: "code-heavy"
+        run.id: ""
+    }
+    expect rule DenyCodeHeavyMarkdown matched
+    expect rule AllowMarkdownAuthoring not matched
 }
 
 # ── HaltAmbient (kill_switch) ─────────────────────────────────────────────────
@@ -347,9 +516,11 @@ test "HaltAmbient kill switch is off by default — Read proceeds" {
         agent.dispatch_id: ""
         tool.name: "Read"
         tool.command: ""
+        tool.command_class: ""
         tool.file_path: "/home/user/project/main.go"
         tool.path_in_scratch: false
         tool.path_in_workspace: true
+        tool.write_class: ""
         run.id: ""
     }
     expect rule HaltAmbient not matched
@@ -364,9 +535,11 @@ test "unknown tool is denied by default (no rule matches)" {
         agent.dispatch_id: ""
         tool.name: "SomeUnknownTool"
         tool.command: ""
+        tool.command_class: ""
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false
+        tool.write_class: ""
         run.id: ""
     }
     expect rule AllowRead not matched

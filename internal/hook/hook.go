@@ -52,6 +52,12 @@ type ToolInput struct {
 	// File tools (Read, Write, Edit, Glob, Grep, NotebookEdit)
 	FilePath string `json:"file_path"`
 
+	// Write: new file content.
+	Content string `json:"content"`
+
+	// Edit: replacement text (used for write-class classification).
+	NewString string `json:"new_string"`
+
 	// Grep/Glob
 	Pattern string `json:"pattern"`
 	Query   string `json:"query"`
@@ -383,13 +389,29 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer) error {
 		Depth: 0,
 		Tool:  event.ToolName,
 	}
-	// Parse tool input for file_path / command.
+	// Parse tool input for file_path / command / content.
 	var input ToolInput
 	if len(event.ToolInput) > 0 {
 		_ = json.Unmarshal(event.ToolInput, &input)
 	}
 	req.Command = input.Command
 	req.FilePath = input.FilePath
+
+	// Populate CommandClass for Bash calls (used by AllowReadOnlyBash rule).
+	if event.ToolName == "Bash" {
+		req.CommandClass = ClassifyCommand(input.Command)
+	}
+
+	// Populate WriteClass for Write/Edit *.md calls (used by AllowMarkdownAuthoring
+	// and DenyCodeHeavyMarkdown rules).
+	if (event.ToolName == "Write" || event.ToolName == "Edit") &&
+		strings.HasSuffix(input.FilePath, ".md") {
+		content := input.Content
+		if event.ToolName == "Edit" {
+			content = input.NewString
+		}
+		req.WriteClass = ClassifyWrite(content)
+	}
 
 	loaded, err := policy.Load("ambient", "")
 	if err != nil {

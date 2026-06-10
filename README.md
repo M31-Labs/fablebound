@@ -67,6 +67,38 @@ fablebound promote <run-id>
 
 `fablebound run` blocks until the orchestrator finishes. Progress appears on stderr. Use `fablebound runs list` to see all runs and their cost summaries.
 
+## Ambient Mode (auto-enable on fable)
+
+Install fablebound once globally and it self-activates whenever your main Claude Code session is running the fable model — without any project-level setup. For any other model it is completely invisible.
+
+```sh
+fablebound install        # adds hooks to ~/.claude/settings.json
+fablebound uninstall      # removes them
+fablebound install --print  # preview the JSON without writing
+```
+
+**How it works.** The installed `PreToolUse` hook reads the session transcript to find the model of the most recent assistant turn. If that model is `claude-fable-5` or `fable`, the hook evaluates `ambient.arb` — an orchestrator-only policy that denies Edit, Write, NotebookEdit, and Bash, while allowing Read, Glob, Grep, Agent (Task dispatch), TodoWrite, and WebFetch. For any other model the hook exits 0 immediately — it has zero effect. Subagent calls (where `agent_id` is present) also pass through unconditionally, so tools inside Task-spawned agents are unrestricted by ambient mode.
+
+**Fail-open.** Any error reading the transcript (missing path, no assistant line yet, unreadable file) causes the hook to exit 0 — it never blocks a non-fable session. The deny reason is instructive: `fablebound: fable runs orchestrator-only — dispatch a subagent (Task) to execute; <tool> is not permitted for the root fable agent.`
+
+**Ambient vs managed mode.** Ambient mode is invisible infrastructure: interactive, Task-based, model-switch-aware, no run artifacts. Managed mode (`fablebound run`) is explicit and heavy: it spawns processes, enforces depth, writes audit traces, and creates a full run artifact tree. Ambient mode does not write any artifacts; if there is no `FABLEBOUND_RUN_DIR`, PostToolUse exits cleanly.
+
+**Enforcement layering.** Ambient mode is one enforcement point. It governs only the root fable session. Subagents spawned via Task run at a different model and are unaffected by ambient policy (they pass through). For full process-tree enforcement, use `fablebound run`.
+
+## Canonical Personas
+
+| Role | Model | Tier | Profile |
+|---|---|---|---|
+| `orchestrator` | fable | planning, specs, deep synthesis | orchestrator |
+| `chief-architect` | fable | planning, specs, deep synthesis | insight |
+| `deep-report` | fable | planning, specs, deep synthesis | insight |
+| `investigator` | opus | adversarial verification, deep tracing | readonly |
+| `reviewer` | opus | adversarial verification, deep tracing | readonly |
+| `worker` | sonnet | writing code, executing specs | execution |
+| `debugger` | sonnet | systematic debugging, writing code | execution |
+
+Fable is reserved for roles that genuinely require the most capable model (orchestration, architecture, exhaustive synthesis). Investigator and reviewer use opus for rigorous, adversarial verification. Worker and debugger use sonnet for execution.
+
 ## Role × Model × Depth Matrix
 
 | Role | Settings profile | Model (policy-routed) | Edit/Write | Bash | May dispatch | Depth cap |
@@ -74,12 +106,12 @@ fablebound promote <run-id>
 | `orchestrator` | orchestrator | fable | denied | `fablebound *`, `hypha *` only | all roles | 0–1 |
 | `chief-architect` | insight | fable | hook-gated: scratch only | `fablebound *`, `hypha *`, read-only prefixes | investigator | 0–1 |
 | `deep-report` | insight | fable | hook-gated: scratch only | same as chief-architect | investigator | 0–1 |
-| `investigator` | readonly | sonnet (10% haiku canary) | denied | read-only prefixes + `fablebound *`, `hypha *` | investigator | 0–1 |
+| `investigator` | readonly | opus | denied | read-only prefixes + `fablebound *`, `hypha *` | investigator | 0–1 |
 | `worker` | execution | sonnet | yes (workspace) | yes, minus deny rules | investigator, debugger | 0–1 |
 | `debugger` | execution | sonnet | yes (workspace) | yes, minus deny rules | investigator | 0–1 |
-| `reviewer` | readonly | sonnet | hook-gated: scratch only | read-only prefixes | none | 0–1 |
+| `reviewer` | readonly | opus | hook-gated: scratch only | read-only prefixes | none | 0–1 |
 
-Depth-2 agents are blocked at three independent points: `dispatch.arb` `DenyTerminalDepth` rule, `toolgate.arb` `DenyTerminalDispatch` rule, and generated settings that remove `Bash(fablebound dispatch*)` from the allow list. Fable is routed only to `chief-architect` and `deep-report`, only when called by the orchestrator, and only within the per-run `fable_budget` (default 2). Execution roles cannot dispatch fable roles.
+Depth-2 agents are blocked at three independent points: `dispatch.arb` `DenyTerminalDepth` rule, `toolgate.arb` `DenyTerminalDispatch` rule, and generated settings that remove `Bash(fablebound dispatch*)` from the allow list. Fable is routed only to `orchestrator`, `chief-architect`, and `deep-report`, only when called by the orchestrator, and only within the per-run `fable_budget` (default 2). Execution roles cannot dispatch fable roles.
 
 Read-only Bash prefixes (investigator/reviewer/insight profiles): `ls`, `rg`, `grep`, `find`, `git log`, `git show`, `git diff`, `go doc`, `go vet`, `gts`, `wc`, `head`, `tail`, `fablebound`, `hypha`.
 

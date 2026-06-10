@@ -1,0 +1,40 @@
+# fablebound ambient policy. Input schema: ToolCallRequest.
+# Applied when FABLEBOUND_ROLE is unset (not inside a managed run) but
+# the active main-session model is fable. Enforces orchestrator-only
+# capability: the root fable agent may read and dispatch (Agent/TodoWrite),
+# but may not directly edit, write, or execute.
+
+segment denied_tools {
+    tool.name in ["Edit", "Write", "NotebookEdit", "Bash"]
+}
+
+rule HaltAmbient priority 0 {
+    kill_switch
+    when { true }
+    then Deny { reason: "fablebound ambient halt" }
+}
+
+rule AllowRead priority 10 {
+    when { tool.name in ["Read", "Glob", "Grep"] }
+    then Allow { reason: "reading is permitted for the ambient orchestrator" }
+}
+
+rule AllowAgent priority 10 {
+    when { tool.name == "Agent" }
+    then Allow { reason: "fable dispatches via Agent (Task); subagents execute" }
+}
+
+rule AllowTodoWrite priority 10 {
+    when { tool.name == "TodoWrite" }
+    then Allow { reason: "todo management is permitted for planning" }
+}
+
+rule AllowWebFetch priority 10 {
+    when { tool.name == "WebFetch" }
+    then Allow { reason: "web reading is permitted for the ambient orchestrator" }
+}
+
+rule DenyExecution priority 20 {
+    when segment denied_tools { true }
+    then Deny { reason: "fablebound: fable runs orchestrator-only — dispatch a subagent (Task) to execute; {tool.name} is not permitted for the root fable agent." }
+}

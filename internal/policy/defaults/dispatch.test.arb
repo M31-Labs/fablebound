@@ -1,14 +1,16 @@
 # Tests for dispatch.arb — fablebound dispatch gate.
 #
+# Canonical model combos (flat defaults):
+#   orchestrator → fable   chief-architect → fable   deep-report → fable
+#   investigator → opus    reviewer        → opus
+#   worker       → sonnet  debugger        → sonnet
+#
 # Coverage targets: every rule (HaltAll, DenyFableForExecution,
 # DenyFableFromNonRoot, DenyTerminalDepth, DenyFableBudget,
 # DenyConcurrencyCap, DenyExecutionSpawnsInsight, DenyReviewerDispatch,
 # DenyInvestigatorScope, DenyInsightScope, DenyWorkerScope, AllowDispatch)
 # and every DispatchRoute strategy arm (Architect, DeepReport,
-# InvestigatorCanary, Investigator, Worker, Debugger, Reviewer).
-#
-# run.id "20260101-000000-0001" → RolloutBucket("inv-haiku", id)=1519/10000 (not canary)
-# run.id "20260101-000000-0012" → RolloutBucket("inv-haiku", id)=26/10000   (canary)
+# Investigator, Worker, Debugger, Reviewer).
 
 # ── Baseline allow paths ────────────────────────────────────────────────────
 
@@ -51,7 +53,7 @@ test "debugger dispatch by orchestrator at depth 0 is allowed" {
 test "reviewer dispatch by orchestrator at depth 0 is allowed" {
     given {
         dispatch.role: "reviewer"
-        dispatch.model: "sonnet"
+        dispatch.model: "opus"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -68,7 +70,7 @@ test "reviewer dispatch by orchestrator at depth 0 is allowed" {
 test "investigator dispatch by orchestrator at depth 0 is allowed" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "sonnet"
+        dispatch.model: "opus"
         dispatch.background: false
         dispatch.brief_bytes: 400
         caller.role: "orchestrator"
@@ -300,7 +302,7 @@ test "fable model from orchestrator does NOT fire DenyFableFromNonRoot" {
 test "depth-2 caller is denied (DenyTerminalDepth)" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "sonnet"
+        dispatch.model: "opus"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "worker"
@@ -317,7 +319,7 @@ test "depth-2 caller is denied (DenyTerminalDepth)" {
 test "depth-3 caller is also denied (DenyTerminalDepth)" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "sonnet"
+        dispatch.model: "opus"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "investigator"
@@ -334,7 +336,7 @@ test "depth-3 caller is also denied (DenyTerminalDepth)" {
 test "depth-1 caller does NOT fire DenyTerminalDepth" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "sonnet"
+        dispatch.model: "opus"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "worker"
@@ -423,7 +425,7 @@ test "active dispatch cap of 4 reached is denied (DenyConcurrencyCap)" {
 test "active dispatches exceed cap is denied (DenyConcurrencyCap)" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "sonnet"
+        dispatch.model: "opus"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "orchestrator"
@@ -563,7 +565,7 @@ test "reviewer caller is denied all dispatches (DenyReviewerDispatch)" {
 test "reviewer cannot dispatch an investigator (DenyReviewerDispatch)" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "sonnet"
+        dispatch.model: "opus"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "reviewer"
@@ -580,7 +582,7 @@ test "reviewer cannot dispatch an investigator (DenyReviewerDispatch)" {
 test "non-reviewer caller does NOT fire DenyReviewerDispatch" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "sonnet"
+        dispatch.model: "opus"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "worker"
@@ -633,7 +635,7 @@ test "investigator dispatching debugger is denied (DenyInvestigatorScope)" {
 test "investigator dispatching another investigator is allowed" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "sonnet"
+        dispatch.model: "opus"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "investigator"
@@ -687,7 +689,7 @@ test "deep-report cannot dispatch a debugger (DenyInsightScope)" {
 test "chief-architect dispatching investigator is NOT denied by insight scope" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "sonnet"
+        dispatch.model: "opus"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "chief-architect"
@@ -707,7 +709,7 @@ test "chief-architect dispatching investigator is NOT denied by insight scope" {
 test "worker cannot dispatch a reviewer (DenyWorkerScope)" {
     given {
         dispatch.role: "reviewer"
-        dispatch.model: "sonnet"
+        dispatch.model: "opus"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "worker"
@@ -724,7 +726,7 @@ test "worker cannot dispatch a reviewer (DenyWorkerScope)" {
 test "debugger cannot dispatch a reviewer (DenyWorkerScope)" {
     given {
         dispatch.role: "reviewer"
-        dispatch.model: "sonnet"
+        dispatch.model: "opus"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "debugger"
@@ -741,7 +743,7 @@ test "debugger cannot dispatch a reviewer (DenyWorkerScope)" {
 test "worker dispatching investigator does NOT fire DenyWorkerScope" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "sonnet"
+        dispatch.model: "opus"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "worker"
@@ -793,7 +795,7 @@ test "unknown role dispatched by orchestrator matches nothing (combinator denies
 
 # ── DispatchRoute strategy arms ──────────────────────────────────────────────
 
-test "chief-architect routes to Architect arm" {
+test "chief-architect routes to Architect arm (fable)" {
     given {
         dispatch.role: "chief-architect"
         dispatch.model: "fable"
@@ -810,7 +812,7 @@ test "chief-architect routes to Architect arm" {
     expect strategy DispatchRoute selected Architect { model: "fable", profile: "insight" }
 }
 
-test "deep-report routes to DeepReport arm" {
+test "deep-report routes to DeepReport arm (fable)" {
     given {
         dispatch.role: "deep-report"
         dispatch.model: "fable"
@@ -827,7 +829,7 @@ test "deep-report routes to DeepReport arm" {
     expect strategy DispatchRoute selected DeepReport { model: "fable", profile: "insight" }
 }
 
-test "investigator routes to Investigator arm for non-canary run" {
+test "investigator routes to Investigator arm (opus)" {
     given {
         dispatch.role: "investigator"
         dispatch.model: ""
@@ -842,25 +844,24 @@ test "investigator routes to Investigator arm for non-canary run" {
         run.fable_budget: 2
     }
     expect rule AllowDispatch matched
-    expect strategy DispatchRoute selected Investigator { model: "sonnet", profile: "readonly" }
+    expect strategy DispatchRoute selected Investigator { model: "opus", profile: "readonly" }
 }
 
-test "investigator routes to InvestigatorCanary arm for canary run" {
+test "reviewer routes to Reviewer arm (opus)" {
     given {
-        dispatch.role: "investigator"
+        dispatch.role: "reviewer"
         dispatch.model: ""
         dispatch.background: false
         dispatch.brief_bytes: 200
         caller.role: "orchestrator"
         caller.depth: 0
         caller.dispatch_id: "root"
-        run.id: "20260101-000000-0012"
+        run.id: "20260101-000000-0001"
         run.active_dispatches: 0
         run.fable_dispatches: 0
         run.fable_budget: 2
     }
-    expect rule AllowDispatch matched
-    expect strategy DispatchRoute selected InvestigatorCanary { model: "haiku", profile: "readonly" }
+    expect strategy DispatchRoute selected Reviewer { model: "opus", profile: "readonly" }
 }
 
 test "worker routes to Worker arm (sonnet + execution profile)" {
@@ -895,23 +896,6 @@ test "debugger routes to Debugger arm (sonnet + execution profile)" {
         run.fable_budget: 2
     }
     expect strategy DispatchRoute selected Debugger { model: "sonnet", profile: "execution" }
-}
-
-test "reviewer routes to Reviewer arm (sonnet + readonly profile)" {
-    given {
-        dispatch.role: "reviewer"
-        dispatch.model: ""
-        dispatch.background: false
-        dispatch.brief_bytes: 200
-        caller.role: "orchestrator"
-        caller.depth: 0
-        caller.dispatch_id: "root"
-        run.id: "20260101-000000-0001"
-        run.active_dispatches: 0
-        run.fable_dispatches: 0
-        run.fable_budget: 2
-    }
-    expect strategy DispatchRoute selected Reviewer { model: "sonnet", profile: "readonly" }
 }
 
 # ── Combined / spec-quoted scenarios ─────────────────────────────────────────
@@ -959,7 +943,7 @@ test "orchestrator dispatching chief-architect with budget remaining is fully al
 test "depth-2 worker attempting dispatch is denied by DenyTerminalDepth" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "sonnet"
+        dispatch.model: "opus"
         dispatch.background: false
         dispatch.brief_bytes: 100
         caller.role: "worker"
@@ -1013,7 +997,7 @@ test "brief at exactly 256KB (262144 bytes) is NOT denied by DenyBriefTooLarge" 
 test "normal brief does NOT fire DenyBriefTooLarge" {
     given {
         dispatch.role: "investigator"
-        dispatch.model: "sonnet"
+        dispatch.model: "opus"
         dispatch.background: false
         dispatch.brief_bytes: 1024
         caller.role: "orchestrator"

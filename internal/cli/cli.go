@@ -41,6 +41,8 @@ var subcommands = []subcommand{
 	{"promote", runPromote},
 	{"policy", runPolicy},
 	{"hook", runHook},
+	{"install", runInstall},
+	{"uninstall", runUninstall},
 	{"_supervise", runSupervise},
 	{"version", runVersion},
 }
@@ -90,6 +92,8 @@ Subcommands:
   promote <run-id>       distill run into a hyphae spore
   policy vet             compile+typecheck both policies
   hook                   internal: PreToolUse/PostToolUse gate (stdin JSON)
+  install [--print]      install PreToolUse/PostToolUse hooks in ~/.claude/settings.json
+  uninstall [--print]    remove fablebound hooks from ~/.claude/settings.json
   _supervise <run> <id>  internal: detached child supervisor
   version                print version
 

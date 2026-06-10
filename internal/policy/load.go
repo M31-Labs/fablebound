@@ -114,8 +114,10 @@ func structNameForKind(kind string) (string, error) {
 		return "DispatchRequest", nil
 	case "toolgate":
 		return "ToolCallRequest", nil
+	case "ambient":
+		return "ToolCallRequest", nil
 	default:
-		return "", fmt.Errorf("unknown policy kind %q (want dispatch or toolgate)", kind)
+		return "", fmt.Errorf("unknown policy kind %q (want dispatch, toolgate, or ambient)", kind)
 	}
 }
 

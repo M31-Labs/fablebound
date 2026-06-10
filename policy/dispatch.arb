@@ -1,12 +1,17 @@
 # fablebound dispatch policy. Input schema: DispatchRequest (arbiter check'd).
 # Depth semantics: spawn capability exists at exactly two levels — depth 0
 # (root orchestrator) and depth 1. Depth >= 2 is terminal (fail-closed).
+#
+# Canonical model assignments (flat defaults, no canary):
+#   orchestrator → fable   chief-architect → fable   deep-report → fable
+#   investigator → opus    reviewer        → opus
+#   worker       → sonnet  debugger        → sonnet
 
 segment fable_request {
     dispatch.model == "fable"
 }
 segment insight_role {
-    dispatch.role in ["chief-architect", "deep-report"]
+    dispatch.role in ["orchestrator", "chief-architect", "deep-report"]
 }
 segment execution_caller {
     caller.role in ["worker", "debugger", "investigator", "reviewer"]
@@ -20,9 +25,9 @@ rule HaltAll priority 0 {
 
 rule DenyFableForExecution priority 1 {
     when segment fable_request {
-        not (dispatch.role in ["chief-architect", "deep-report"])
+        not (dispatch.role in ["orchestrator", "chief-architect", "deep-report"])
     }
-    then Deny { reason: "fable is reserved for insight roles; execution goes to lesser models" }
+    then Deny { reason: "fable is reserved for orchestrator/chief-architect/deep-report; execution roles route to opus or sonnet" }
 }
 
 rule DenyFableFromNonRoot priority 1 {
@@ -97,16 +102,13 @@ strategy DispatchRoute returns Route {
         then Architect { model: "fable", profile: "insight", max_turns: 80, timeout_minutes: 30 }
     when { dispatch.role == "deep-report" }
         then DeepReport { model: "fable", profile: "insight", max_turns: 60, timeout_minutes: 30 }
-    rollout percent 10 by run.id namespace "inv-haiku"
     when { dispatch.role == "investigator" }
-        then InvestigatorCanary { model: "haiku", profile: "readonly", max_turns: 40, timeout_minutes: 15 }
-    when { dispatch.role == "investigator" }
-        then Investigator { model: "sonnet", profile: "readonly", max_turns: 40, timeout_minutes: 15 }
+        then Investigator { model: "opus", profile: "readonly", max_turns: 40, timeout_minutes: 15 }
+    when { dispatch.role == "reviewer" }
+        then Reviewer { model: "opus", profile: "readonly", max_turns: 30, timeout_minutes: 15 }
     when { dispatch.role == "worker" }
         then Worker { model: "sonnet", profile: "execution", max_turns: 60, timeout_minutes: 45 }
     when { dispatch.role == "debugger" }
         then Debugger { model: "sonnet", profile: "execution", max_turns: 60, timeout_minutes: 45 }
-    when { dispatch.role == "reviewer" }
-        then Reviewer { model: "sonnet", profile: "readonly", max_turns: 30, timeout_minutes: 15 }
     else Reject { model: "", profile: "", max_turns: 0, timeout_minutes: 0 }
 }

@@ -1,7 +1,6 @@
 package policy
 
 import (
-	"fmt"
 	"testing"
 )
 
@@ -143,50 +142,46 @@ func TestDispatch_InvestigatorScope_Deny(t *testing.T) {
 	}
 }
 
-// TestDispatch_InvestigatorRoute_BothArms verifies that the haiku canary
-// (10%) and sonnet main (90%) are both reachable by varying run.id values.
-// We sample 200 run ids and assert at least one of each.
-func TestDispatch_InvestigatorRoute_BothArms(t *testing.T) {
-	gotHaiku := false
-	gotSonnet := false
+// TestDispatch_InvestigatorRoute_Opus verifies that investigator always routes
+// to opus (canonical combo; canary removed).
+func TestDispatch_InvestigatorRoute_Opus(t *testing.T) {
+	req := DispatchRequest{
+		Role:        "investigator",
+		CallerRole:  "orchestrator",
+		CallerDepth: 0,
+		RunID:       "20260609-000000-aa07",
+		FableBudget: 2,
+	}
+	res, err := EvalDispatch(dispatchLoaded, req)
+	if err != nil {
+		t.Fatalf("EvalDispatch: %v", err)
+	}
+	if res.Verdict != VerdictAllow {
+		t.Fatalf("verdict = %s, want Allow (rule=%s)", res.Verdict, res.Rule)
+	}
+	if res.Route.Model != "opus" {
+		t.Errorf("route.model = %q, want opus", res.Route.Model)
+	}
+}
 
-	base := []string{
-		"aa", "bb", "cc", "dd", "ee", "ff", "gg", "hh", "ii", "jj",
-		"kk", "ll", "mm", "nn", "oo", "pp", "qq", "rr", "ss", "tt",
+// TestDispatch_ReviewerRoute_Opus verifies that reviewer routes to opus.
+func TestDispatch_ReviewerRoute_Opus(t *testing.T) {
+	req := DispatchRequest{
+		Role:        "reviewer",
+		CallerRole:  "orchestrator",
+		CallerDepth: 0,
+		RunID:       "20260609-000000-aa08",
+		FableBudget: 2,
 	}
-	for i, suffix := range base {
-		for j := 0; j < 10; j++ {
-			rid := fmt.Sprintf("20260609-%06d-%s%d", i*10+j, suffix, j)
-			req := DispatchRequest{
-				Role:        "investigator",
-				CallerRole:  "orchestrator",
-				CallerDepth: 0,
-				RunID:       rid,
-				FableBudget: 2,
-			}
-			res, err := EvalDispatch(dispatchLoaded, req)
-			if err != nil {
-				t.Fatalf("EvalDispatch for run %s: %v", rid, err)
-			}
-			if res.Verdict != VerdictAllow {
-				t.Fatalf("unexpected deny for investigator run %s: rule=%s", rid, res.Rule)
-			}
-			switch res.Route.Model {
-			case "haiku":
-				gotHaiku = true
-			case "sonnet":
-				gotSonnet = true
-			}
-			if gotHaiku && gotSonnet {
-				return // both arms covered
-			}
-		}
+	res, err := EvalDispatch(dispatchLoaded, req)
+	if err != nil {
+		t.Fatalf("EvalDispatch: %v", err)
 	}
-	if !gotHaiku {
-		t.Error("haiku canary arm was never selected across 200 run ids")
+	if res.Verdict != VerdictAllow {
+		t.Fatalf("verdict = %s, want Allow (rule=%s)", res.Verdict, res.Rule)
 	}
-	if !gotSonnet {
-		t.Error("sonnet main arm was never selected across 200 run ids")
+	if res.Route.Model != "opus" {
+		t.Errorf("route.model = %q, want opus", res.Route.Model)
 	}
 }
 

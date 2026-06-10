@@ -1,0 +1,213 @@
+# Tests for ambient.arb — fablebound ambient orchestrator-only gate.
+# Applied when FABLEBOUND_ROLE is unset and the session model is fable.
+# Denied: Edit, Write, NotebookEdit, Bash.
+# Allowed: Read, Glob, Grep, Agent, TodoWrite, WebFetch.
+# No match → deny (combinator default).
+#
+# Coverage targets: HaltAmbient (kill_switch), AllowRead, AllowAgent,
+# AllowTodoWrite, AllowWebFetch, DenyExecution.
+
+# ── AllowRead ────────────────────────────────────────────────────────────────
+
+test "Read is allowed in ambient mode" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Read"
+        tool.command: ""
+        tool.file_path: "/home/user/project/main.go"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: ""
+    }
+    expect rule AllowRead matched
+    expect rule DenyExecution not matched
+}
+
+test "Glob is allowed in ambient mode" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Glob"
+        tool.command: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: ""
+    }
+    expect rule AllowRead matched
+    expect rule DenyExecution not matched
+}
+
+test "Grep is allowed in ambient mode" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Grep"
+        tool.command: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: ""
+    }
+    expect rule AllowRead matched
+    expect rule DenyExecution not matched
+}
+
+# ── AllowAgent ───────────────────────────────────────────────────────────────
+
+test "Agent (Task dispatch) is allowed in ambient mode" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Agent"
+        tool.command: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: ""
+    }
+    expect rule AllowAgent matched
+    expect rule DenyExecution not matched
+}
+
+# ── AllowTodoWrite ────────────────────────────────────────────────────────────
+
+test "TodoWrite is allowed in ambient mode" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "TodoWrite"
+        tool.command: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: ""
+    }
+    expect rule AllowTodoWrite matched
+    expect rule DenyExecution not matched
+}
+
+# ── AllowWebFetch ─────────────────────────────────────────────────────────────
+
+test "WebFetch is allowed in ambient mode" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "WebFetch"
+        tool.command: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: ""
+    }
+    expect rule AllowWebFetch matched
+    expect rule DenyExecution not matched
+}
+
+# ── DenyExecution ─────────────────────────────────────────────────────────────
+
+test "Edit is denied in ambient mode (DenyExecution)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Edit"
+        tool.command: ""
+        tool.file_path: "/home/user/project/main.go"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: ""
+    }
+    expect rule DenyExecution matched
+    expect rule AllowRead not matched
+}
+
+test "Write is denied in ambient mode (DenyExecution)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Write"
+        tool.command: ""
+        tool.file_path: "/home/user/project/newfile.go"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: ""
+    }
+    expect rule DenyExecution matched
+}
+
+test "NotebookEdit is denied in ambient mode (DenyExecution)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "NotebookEdit"
+        tool.command: ""
+        tool.file_path: "/home/user/analysis.ipynb"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: ""
+    }
+    expect rule DenyExecution matched
+}
+
+test "Bash is denied in ambient mode (DenyExecution)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "go build ./..."
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: ""
+    }
+    expect rule DenyExecution matched
+}
+
+# ── HaltAmbient (kill_switch) ─────────────────────────────────────────────────
+
+test "HaltAmbient kill switch is off by default — Read proceeds" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Read"
+        tool.command: ""
+        tool.file_path: "/home/user/project/main.go"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: ""
+    }
+    expect rule HaltAmbient not matched
+}
+
+# ── Combinator fallthrough — unknown tool is denied ───────────────────────────
+
+test "unknown tool is denied by default (no rule matches)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "SomeUnknownTool"
+        tool.command: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: ""
+    }
+    expect rule AllowRead not matched
+    expect rule AllowAgent not matched
+    expect rule AllowTodoWrite not matched
+    expect rule AllowWebFetch not matched
+    expect rule DenyExecution not matched
+}

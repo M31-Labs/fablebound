@@ -112,8 +112,10 @@ func modelCost(model string) int {
 		return 0
 	case "sonnet":
 		return 1
-	case "fable":
+	case "opus":
 		return 2
+	case "fable":
+		return 3
 	default:
 		return 1 // unknown = treat as sonnet
 	}

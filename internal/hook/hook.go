@@ -11,6 +11,7 @@
 package hook
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -353,6 +354,133 @@ func canonPath(p string) string {
 	return filepath.Clean(p)
 }
 
+// fableModels is the set of model IDs considered "fable" for ambient gating.
+var fableModels = map[string]bool{
+	"claude-fable-5": true,
+	"fable":          true,
+}
+
+// HookEventFull is a superset HookEvent that also captures ambient-mode fields.
+type HookEventFull struct {
+	HookEventName  string          `json:"hook_event_name"`
+	ToolName       string          `json:"tool_name"`
+	ToolInput      json.RawMessage `json:"tool_input"`
+	ToolResponse   json.RawMessage `json:"tool_response"`
+	TranscriptPath string          `json:"transcript_path"`
+	AgentID        string          `json:"agent_id"`
+}
+
+// transcriptAssistantLine is the minimal struct we need from a transcript line.
+type transcriptAssistantLine struct {
+	Type    string `json:"type"`
+	Message struct {
+		Model string `json:"model"`
+	} `json:"message"`
+}
+
+// lastFableModelInTranscript reads up to the last 400 lines of the transcript
+// at transcriptPath and returns the model of the last assistant turn with a
+// non-empty model field, plus whether that model is in the fable set.
+// On any error it returns ("", false) — fail open.
+func lastFableModelInTranscript(transcriptPath string) (model string, isFable bool) {
+	if transcriptPath == "" {
+		return "", false
+	}
+	f, err := os.Open(transcriptPath)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+
+	// Collect up to the last 400 lines.
+	const maxLines = 400
+	lines := make([]string, 0, maxLines)
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		if len(lines) >= maxLines {
+			lines = lines[1:]
+		}
+		lines = append(lines, line)
+	}
+	if sc.Err() != nil {
+		return "", false
+	}
+
+	// Scan backwards for the last assistant line with a model.
+	for i := len(lines) - 1; i >= 0; i-- {
+		var tl transcriptAssistantLine
+		if err := json.Unmarshal([]byte(lines[i]), &tl); err != nil {
+			continue
+		}
+		if tl.Type == "assistant" && tl.Message.Model != "" {
+			m := tl.Message.Model
+			return m, fableModels[m]
+		}
+	}
+	return "", false
+}
+
+// handleAmbientPreToolUse evaluates the ambient policy for a fable session.
+// Returns output JSON to write to stdout, or an error.
+func handleAmbientPreToolUse(event HookEvent, stdout io.Writer) error {
+	req := policy.ToolCallRequest{
+		Role:  "ambient-orchestrator",
+		Depth: 0,
+		Tool:  event.ToolName,
+	}
+	// Parse tool input for file_path / command.
+	var input ToolInput
+	if len(event.ToolInput) > 0 {
+		_ = json.Unmarshal(event.ToolInput, &input)
+	}
+	req.Command = input.Command
+	req.FilePath = input.FilePath
+
+	loaded, err := policy.Load("ambient", "")
+	if err != nil {
+		return fmt.Errorf("load ambient policy: %w", err)
+	}
+
+	result, err := policy.EvalToolCall(loaded, req)
+	if err != nil {
+		return fmt.Errorf("eval ambient policy: %w", err)
+	}
+
+	decision := "deny"
+	switch result.Verdict {
+	case policy.VerdictAllow:
+		decision = "allow"
+	case policy.VerdictAsk:
+		decision = "ask"
+	}
+
+	toolName := event.ToolName
+	reason := result.Reason
+	if decision == "deny" && toolName != "" {
+		reason = fmt.Sprintf("fablebound: fable runs orchestrator-only — dispatch a subagent (Task) to execute; %s is not permitted for the root fable agent.", toolName)
+	}
+
+	decisionReason := fmt.Sprintf("RULE: %s: %s", result.Rule, reason)
+	if reason == "" {
+		decisionReason = fmt.Sprintf("RULE: %s", result.Rule)
+	}
+
+	out := HookSpecificOutputWrapper{
+		HookSpecificOutput: PreToolOutput{
+			HookEventName:            "PreToolUse",
+			PermissionDecision:       decision,
+			PermissionDecisionReason: decisionReason,
+		},
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return fmt.Errorf("marshal ambient output: %w", err)
+	}
+	_, err = fmt.Fprintf(stdout, "%s\n", data)
+	return err
+}
+
 // Run is the main entry point for `fablebound hook`.
 // Reads stdin, dispatches on hook_event_name, writes output and exits.
 // On internal error it writes to stderr and returns an error (caller exits 2).
@@ -360,8 +488,8 @@ func canonPath(p string) string {
 func Run(stdin io.Reader, stdout io.Writer, workspaceDir string) error {
 	id, ok := ReadIdentity()
 	if !ok {
-		// Not a fablebound session; exit 0 silently.
-		return nil
+		// Not a managed fablebound session — check ambient mode.
+		return runAmbient(stdin, stdout)
 	}
 
 	data, err := io.ReadAll(stdin)
@@ -401,6 +529,53 @@ func Run(stdin io.Reader, stdout io.Writer, workspaceDir string) error {
 		fmt.Fprintf(os.Stderr, "fablebound hook: warning: unknown hook_event_name %q (ignored)\n", event.HookEventName)
 		return nil
 	}
+}
+
+// runAmbient handles the case where FABLEBOUND_ROLE is unset: ambient mode.
+// For PreToolUse, it checks the transcript model and enforces orchestrator-only
+// policy if and only if the model is fable. For all other events or models,
+// it exits 0 (passthrough / fail open).
+func runAmbient(stdin io.Reader, stdout io.Writer) error {
+	data, err := io.ReadAll(stdin)
+	if err != nil {
+		// Fail open — don't block on read error.
+		return nil
+	}
+
+	// Parse just enough to detect event type, agent_id, and transcript_path.
+	var full HookEventFull
+	if err := json.Unmarshal(data, &full); err != nil {
+		// Fail open — unparseable input.
+		return nil
+	}
+
+	// Only gate PreToolUse events.
+	if full.HookEventName != "PreToolUse" {
+		// PostToolUse in ambient mode: no run dir, skip trace, exit 0.
+		return nil
+	}
+
+	// Subagent calls carry agent_id — pass through; they are not the root model.
+	if full.AgentID != "" {
+		return nil
+	}
+
+	// Determine model from transcript.
+	_, isFable := lastFableModelInTranscript(full.TranscriptPath)
+	if !isFable {
+		// Not fable — ambient mode is invisible.
+		return nil
+	}
+
+	// Model is fable: evaluate ambient orchestrator-only policy.
+	// Reconstruct a plain HookEvent from the full event.
+	event := HookEvent{
+		HookEventName: full.HookEventName,
+		ToolName:      full.ToolName,
+		ToolInput:     full.ToolInput,
+		ToolResponse:  full.ToolResponse,
+	}
+	return handleAmbientPreToolUse(event, stdout)
 }
 
 // WorkspaceDir returns the workspace directory for path containment checks.

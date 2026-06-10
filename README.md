@@ -37,11 +37,42 @@ Then, in any `claude` session:
 /model fable
 ```
 
-Ambient mode engages immediately. The fable root is restricted to orchestration-only tools (Read, Glob, Grep, Agent/Task, TodoWrite, WebFetch). Execution is automatically delegated to tiller-* subagents on cheaper models.
+Ambient mode engages immediately. The fable root is restricted to orchestration-only tools — with targeted carve-outs described below. Execution is automatically delegated to tiller-* subagents on cheaper models.
 
-**How it works.** The installed `PreToolUse` hook reads the session transcript to find the model of the most recent assistant turn. If that model maps to the reason tier (`claude-fable-5` or `fable`), the hook evaluates `ambient.arb` — an orchestrator-only policy that denies Edit, Write, NotebookEdit, and Bash, while allowing Read, Glob, Grep, Agent/Task dispatch, TodoWrite, and WebFetch. For any other model the hook exits 0 immediately. Subagent calls (where `agent_id` is present) pass through unconditionally.
+**How it works.** The installed `PreToolUse` hook reads the session transcript to find the model of the most recent assistant turn. The transcript is read backward from EOF so detection costs ~0.5 ms even on 50 MB files. If that model maps to the reason tier (`claude-fable-5` or `fable`), the hook evaluates `ambient.arb` — the orchestrator-only policy. For any other model the hook exits 0 immediately. Subagent calls (where `agent_id` is present) pass through unconditionally.
 
 **Fail-open.** Any error reading the transcript (missing path, no assistant line, unreadable file) causes the hook to exit 0. It never blocks a non-reason-tier session. Model switches (e.g. `/model sonnet` → `/model fable`) are tracked live via the transcript.
+
+**What the ambient orchestrator can do.** The ambient policy is not fully read-only. The following carve-outs apply to the root reason-tier session (ground truth: `internal/policy/defaults/ambient.arb`):
+
+| Carve-out rule | What is permitted |
+|---|---|
+| `AllowReadOnlyBash` | Read-only Bash: `git log`, `ls`, `cat`, `gts *`, `hypha recall` (including `\| head` pipelines via `2>&1`), and equivalent read commands. Unquoted `>`, `>>`, `` ` ``, `$(` → denied. |
+| `AllowMarkdownAuthoring` | `Write`/`Edit` on `*.md` paths — specs, plans, prompts, directives, briefs, code-in-docs. Code files, notebooks, no-extension paths → denied. |
+| `AllowOrchestrationTools` | `ToolSearch`, `Skill`, `AskUserQuestion`, `EnterPlanMode`/`ExitPlanMode`, and `TaskCreate`/`TaskGet`/`TaskList`/`TaskUpdate`/`TaskOutput`/`TaskStop`. |
+
+Everything else (mutations to code files, running commands, launching daemons) stays denied. `DenyHyphaDaemons` explicitly blocks `hypha mcp serve` and `hypha hub serve` regardless of classifier output.
+
+**Subagent model guards.** Two rules protect against silent reason-tier budget leak in `Task`/`Agent` dispatches:
+
+- `DenyReasonModelSubagent` — blocks any `Task`/`Agent` call that carries an explicit reason-tier model override for a persona that is not `tiller-architect` or `tiller-deep-report`. Pass a cheaper model or pick the right persona.
+- `DenyImplicitReasonInheritance` — blocks generic subagent types (`general-purpose`, `claude`, `Explore`, `Plan`, or blank) with no explicit model field; in a reason-tier ambient session these silently inherit the parent model. Either name a cheaper model explicitly or use a named `tiller-*` persona whose frontmatter pins the model.
+
+## Upgrading
+
+tiller hooks exec the binary fresh on every tool call and the ambient policy is embedded in the binary, so upgrading is a single command:
+
+```sh
+go install m31labs.dev/tiller/cmd/tiller@latest
+```
+
+All running ambient sessions pick up the new binary and policy on their next tool call — **no session restart needed** for policy changes.
+
+Exceptions that do require a session restart:
+- Hook re-registration (if the hook entry format changes) — run `tiller install` again.
+- Persona file changes — run `tiller install` again to redeploy `~/.claude/agents/tiller-*.md`.
+
+The executor pool (`tiller pool`) must be restarted to pick up a new binary.
 
 ## Canonical Subagent Personas
 
@@ -347,6 +378,10 @@ Input structs are in `internal/policy/schemas.go`. `dispatch.arb` input: `Dispat
 ## Horizon Backstop (Deferred)
 
 Intended kernel-level backstop: a Horizon-compiled LSM exec-deny profile. Requires `CONFIG_BPF_LSM` (not in stock WSL2), Horizon DSL v0.3+ helpers, and `CAP_BPF`. Until prerequisites are met, the enforcement ceiling is settings + hook + policy.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## License
 

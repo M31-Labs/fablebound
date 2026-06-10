@@ -8,6 +8,7 @@ package claudecode
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"io"
 	"os"
@@ -73,6 +74,101 @@ func scanTranscriptLines(r io.Reader, fn func(line string)) error {
 	return err
 }
 
+// tailLines reads up to maxLines complete lines from the end of f using a
+// backward-chunk strategy, avoiding a full-file scan on large transcripts.
+//
+// Strategy:
+//   - Read backward in chunkSize blocks from EOF.
+//   - Accumulate raw bytes until we have maxLines complete lines or have read
+//     the whole file.
+//   - Lines longer than maxLineBytes are capped (the partial suffix is dropped
+//     and the line is skipped rather than returned — same fail-open semantics as
+//     scanTranscriptLines).
+//   - CRLF line endings are normalised to LF.
+//
+// Returns the tail lines in file order (oldest first, newest last), ready for
+// backward scan by the caller.
+func tailLines(f *os.File, maxLines int) ([]string, error) {
+	const chunkSize = 256 * 1024   // 256 KB per backward read
+	const maxLineBytes = 4 * 1<<20 // 4 MiB cap — matches scanTranscriptLines
+
+	size, err := f.Seek(0, io.SeekEnd)
+	if err != nil {
+		return nil, err
+	}
+	if size == 0 {
+		return nil, nil
+	}
+
+	// rawBuf accumulates bytes read so far (in reverse order of chunks, but
+	// within each chunk the bytes are in file order).  We prepend each chunk.
+	// To avoid O(n²) prepends we collect chunks in a slice and reverse later.
+	type chunk struct{ data []byte }
+	var chunks []chunk
+	remaining := size
+	linesFound := 0
+
+	for remaining > 0 && linesFound < maxLines {
+		readSize := int64(chunkSize)
+		if readSize > remaining {
+			readSize = remaining
+		}
+		offset := remaining - readSize
+		buf := make([]byte, readSize)
+		n, err := f.ReadAt(buf, offset)
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		buf = buf[:n]
+		remaining -= int64(n)
+
+		// Count complete newlines in this chunk to know how many lines it adds.
+		// We append chunks in reverse read order; final assembly reverses them.
+		linesInChunk := bytes.Count(buf, []byte{'\n'})
+		linesFound += linesInChunk
+		chunks = append(chunks, chunk{buf})
+
+		// If we already have enough lines we can stop reading earlier.
+		// We may overshoot slightly — that's fine, we trim below.
+	}
+
+	// Assemble bytes in file order (chunks were collected latest-first).
+	totalSize := 0
+	for _, c := range chunks {
+		totalSize += len(c.data)
+	}
+	assembled := make([]byte, 0, totalSize)
+	for i := len(chunks) - 1; i >= 0; i-- {
+		assembled = append(assembled, chunks[i].data...)
+	}
+
+	// Normalise CRLF → LF.
+	assembled = bytes.ReplaceAll(assembled, []byte("\r\n"), []byte("\n"))
+
+	// Split into lines.  bytes.Split on \n gives an empty trailing element if
+	// the file ends with a newline — we trim that.
+	parts := bytes.Split(assembled, []byte("\n"))
+	if len(parts) > 0 && len(parts[len(parts)-1]) == 0 {
+		parts = parts[:len(parts)-1]
+	}
+
+	// Keep only the last maxLines entries.
+	if len(parts) > maxLines {
+		parts = parts[len(parts)-maxLines:]
+	}
+
+	// Convert to strings, capping pathologically long lines.
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if len(p) > maxLineBytes {
+			// Skip oversized line (fail-open: same as scanTranscriptLines).
+			continue
+		}
+		result = append(result, string(p))
+	}
+	return result, nil
+}
+
 // DetectTier reads up to the last 400 lines of the transcript at
 // transcriptPath and returns the tier and whether detection succeeded.
 //
@@ -87,6 +183,8 @@ func scanTranscriptLines(r io.Reader, fn func(line string)) error {
 //   - Fix 3: uses a 4 MiB scanner buffer; oversized lines are skipped, not fatal.
 //   - Fix 4: if the 400-line tail contains no qualifying line, falls back to a
 //     full-file scan before returning unknown.
+//   - Fix 5: tail is assembled by reading backward from EOF in 256 KB chunks,
+//     avoiding a full-file scan on the hot path.
 //
 // On any error or no qualifier found returns ("", false) — fail open.
 func DetectTier(transcriptPath string) (tier string, ok bool) {
@@ -99,15 +197,14 @@ func DetectTier(transcriptPath string) (tier string, ok bool) {
 	}
 	defer f.Close()
 
-	// Fix 3 + Fix 4: Collect up to the last 400 lines using the enlarged scanner.
+	// Fix 5: Read backward from EOF to build the 400-line tail without
+	// scanning the whole file.
 	const maxLines = 400
-	tail := make([]string, 0, maxLines)
-	_ = scanTranscriptLines(f, func(line string) {
-		if len(tail) >= maxLines {
-			tail = tail[1:]
-		}
-		tail = append(tail, line)
-	})
+	tail, err := tailLines(f, maxLines)
+	if err != nil {
+		// tailLines error (seek failure, etc.) — fail open.
+		return "", false
+	}
 
 	// Scan backwards in the tail for the last qualifying assistant line.
 	for i := len(tail) - 1; i >= 0; i-- {

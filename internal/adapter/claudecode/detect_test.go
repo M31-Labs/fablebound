@@ -15,8 +15,10 @@ package claudecode
 //   qualifier → returns ("reason", true). Consistent with rules 2+5.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -163,6 +165,96 @@ func TestIsFableModel(t *testing.T) {
 		got := IsFableModel(c.model)
 		if got != c.want {
 			t.Errorf("IsFableModel(%q) = %v, want %v", c.model, got, c.want)
+		}
+	}
+}
+
+// ─── Large-transcript correctness + benchmark ────────────────────────────────
+
+// tbHelper is the minimal interface shared by *testing.T and *testing.B.
+type tbHelper interface {
+	Helper()
+	Fatalf(format string, args ...any)
+	TempDir() string
+}
+
+// buildLargeTranscript writes a synthetic ~50 MB transcript to dir and returns
+// the path. The qualifying fable assistant line is near EOF (last 10 lines).
+// Bulk content is made up of non-assistant JSON lines with a ~1 KB payload to
+// reach the target size quickly.
+func buildLargeTranscript(tb tbHelper, dir string) string {
+	tb.Helper()
+	const targetBytes = 50 * 1024 * 1024 // 50 MB
+
+	// Non-qualifying filler line (~1 KB).
+	filler := fmt.Sprintf(
+		`{"type":"tool_result","content":"%s"}`,
+		strings.Repeat("x", 980),
+	) + "\n"
+
+	// Non-fable assistant line interspersed every 50 lines.
+	opusLine := `{"type":"assistant","isSidechain":false,"message":{"model":"claude-opus-4-8","role":"assistant","content":[{"type":"text","text":"working"}]}}` + "\n"
+
+	// The single qualifying fable line placed near EOF.
+	fableLine := `{"type":"assistant","isSidechain":false,"message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"text","text":"done"}]}}` + "\n"
+
+	p := filepath.Join(dir, "large.jsonl")
+	f, err := os.Create(p)
+	if err != nil {
+		tb.Fatalf("create large transcript: %v", err)
+	}
+	defer f.Close()
+
+	written := 0
+	lineNum := 0
+	for written < targetBytes-len(fableLine)-50*len(filler) {
+		if lineNum%50 == 0 {
+			n, _ := f.WriteString(opusLine)
+			written += n
+		} else {
+			n, _ := f.WriteString(filler)
+			written += n
+		}
+		lineNum++
+	}
+	// Place the fable line near EOF (within the last 400 lines).
+	if _, err := f.WriteString(fableLine); err != nil {
+		tb.Fatalf("write fable line: %v", err)
+	}
+	// A few trailing non-qualifying lines after the fable line.
+	for i := 0; i < 5; i++ {
+		f.WriteString(filler) //nolint:errcheck
+	}
+	return p
+}
+
+// TestDetectTierLarge verifies that DetectTier returns ("reason", true) for a
+// ~50 MB transcript where the qualifying fable line is near EOF.
+func TestDetectTierLarge(t *testing.T) {
+	dir := t.TempDir()
+	p := buildLargeTranscript(t, dir)
+
+	tier, ok := DetectTier(p)
+	if !ok {
+		t.Errorf("DetectTier large transcript: got ok=false, want true")
+	}
+	if tier != "reason" {
+		t.Errorf("DetectTier large transcript: got tier=%q, want reason", tier)
+	}
+}
+
+// BenchmarkDetectTierLarge measures DetectTier on a ~50 MB transcript with a
+// qualifying fable line near EOF. Target: <5ms warm.
+func BenchmarkDetectTierLarge(b *testing.B) {
+	dir := b.TempDir()
+	p := buildLargeTranscript(b, dir)
+	b.Cleanup(func() {}) // ensure dir survives iterations
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tier, ok := DetectTier(p)
+		if !ok || tier != "reason" {
+			b.Fatalf("unexpected result: tier=%q ok=%v", tier, ok)
 		}
 	}
 }

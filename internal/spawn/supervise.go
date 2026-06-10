@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"m31labs.dev/fablebound/internal/hook"
+	"m31labs.dev/fablebound/internal/hyphae"
 	"m31labs.dev/fablebound/internal/policy"
 	"m31labs.dev/fablebound/internal/run"
 )
@@ -234,6 +235,20 @@ func Supervise(a SuperviseArgs) error {
 	}
 
 	logf("dispatch %s finalized as %s", a.DispatchID, finalStatus)
+
+	// Hypha trace tick: "<did> <status> $<cost>" (soft-fail; log to supervise.log).
+	{
+		hyp := hyphae.New(func(format string, args ...any) {
+			logf("[hypha] "+format, args...)
+		})
+		if hyp.Available() {
+			if mf, err := run.ReadManifest(a.RunDir); err == nil && mf.HyphaTraceID != "" {
+				tick := fmt.Sprintf("%s %s $%.4f", a.DispatchID, finalStatus, claudeRes.CostUSD)
+				hyp.TraceTick(mf.HyphaTraceID, tick)
+			}
+		}
+	}
+
 	return nil
 }
 

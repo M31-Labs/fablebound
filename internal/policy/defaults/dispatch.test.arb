@@ -1,0 +1,975 @@
+# Tests for dispatch.arb — fablebound dispatch gate.
+#
+# Coverage targets: every rule (HaltAll, DenyFableForExecution,
+# DenyFableFromNonRoot, DenyTerminalDepth, DenyFableBudget,
+# DenyConcurrencyCap, DenyExecutionSpawnsInsight, DenyReviewerDispatch,
+# DenyInvestigatorScope, DenyInsightScope, DenyWorkerScope, AllowDispatch)
+# and every DispatchRoute strategy arm (Architect, DeepReport,
+# InvestigatorCanary, Investigator, Worker, Debugger, Reviewer).
+#
+# run.id "20260101-000000-0001" → RolloutBucket("inv-haiku", id)=1519/10000 (not canary)
+# run.id "20260101-000000-0012" → RolloutBucket("inv-haiku", id)=26/10000   (canary)
+
+# ── Baseline allow paths ────────────────────────────────────────────────────
+
+test "worker dispatch by orchestrator at depth 0 is allowed" {
+    given {
+        dispatch.role: "worker"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 512
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule AllowDispatch matched
+    expect rule DenyFableForExecution not matched
+    expect rule DenyTerminalDepth not matched
+}
+
+test "debugger dispatch by orchestrator at depth 0 is allowed" {
+    given {
+        dispatch.role: "debugger"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 256
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 1
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule AllowDispatch matched
+}
+
+test "reviewer dispatch by orchestrator at depth 0 is allowed" {
+    given {
+        dispatch.role: "reviewer"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule AllowDispatch matched
+}
+
+test "investigator dispatch by orchestrator at depth 0 is allowed" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 400
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule AllowDispatch matched
+}
+
+test "chief-architect dispatch by orchestrator at depth 0 is allowed" {
+    given {
+        dispatch.role: "chief-architect"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 1024
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule AllowDispatch matched
+    expect rule DenyFableForExecution not matched
+    expect rule DenyFableFromNonRoot not matched
+}
+
+test "worker dispatch by depth-1 agent is allowed" {
+    given {
+        dispatch.role: "worker"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 300
+        caller.role: "worker"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule AllowDispatch matched
+    expect rule DenyTerminalDepth not matched
+}
+
+# ── HaltAll (kill_switch) ────────────────────────────────────────────────────
+
+test "HaltAll kill switch is off by default — normal dispatch proceeds" {
+    given {
+        dispatch.role: "worker"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule HaltAll not matched
+}
+
+# ── DenyFableForExecution ────────────────────────────────────────────────────
+
+test "fable model requested for worker is denied (DenyFableForExecution)" {
+    given {
+        dispatch.role: "worker"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyFableForExecution matched
+}
+
+test "fable model requested for debugger is denied (DenyFableForExecution)" {
+    given {
+        dispatch.role: "debugger"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyFableForExecution matched
+}
+
+test "fable model requested for investigator is denied (DenyFableForExecution)" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyFableForExecution matched
+}
+
+test "fable model requested for reviewer is denied (DenyFableForExecution)" {
+    given {
+        dispatch.role: "reviewer"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyFableForExecution matched
+}
+
+test "fable model for chief-architect does NOT fire DenyFableForExecution" {
+    given {
+        dispatch.role: "chief-architect"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyFableForExecution not matched
+}
+
+test "fable model for deep-report does NOT fire DenyFableForExecution" {
+    given {
+        dispatch.role: "deep-report"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyFableForExecution not matched
+}
+
+# ── DenyFableFromNonRoot ─────────────────────────────────────────────────────
+
+test "fable model from worker caller is denied (DenyFableFromNonRoot)" {
+    given {
+        dispatch.role: "chief-architect"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "worker"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyFableFromNonRoot matched
+}
+
+test "fable model from investigator caller is denied (DenyFableFromNonRoot)" {
+    given {
+        dispatch.role: "chief-architect"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "investigator"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyFableFromNonRoot matched
+}
+
+test "fable model from orchestrator does NOT fire DenyFableFromNonRoot" {
+    given {
+        dispatch.role: "chief-architect"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyFableFromNonRoot not matched
+}
+
+# ── DenyTerminalDepth ─────────────────────────────────────────────────────────
+
+test "depth-2 caller is denied (DenyTerminalDepth)" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "worker"
+        caller.depth: 2
+        caller.dispatch_id: "d02"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyTerminalDepth matched
+}
+
+test "depth-3 caller is also denied (DenyTerminalDepth)" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "investigator"
+        caller.depth: 3
+        caller.dispatch_id: "d03"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyTerminalDepth matched
+}
+
+test "depth-1 caller does NOT fire DenyTerminalDepth" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "worker"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyTerminalDepth not matched
+}
+
+# ── DenyFableBudget ───────────────────────────────────────────────────────────
+
+test "fable budget exhausted denies fable dispatch (DenyFableBudget)" {
+    given {
+        dispatch.role: "chief-architect"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 2
+        run.fable_budget: 2
+    }
+    expect rule DenyFableBudget matched
+}
+
+test "fable dispatches exceed budget is denied (DenyFableBudget)" {
+    given {
+        dispatch.role: "deep-report"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 3
+        run.fable_budget: 2
+    }
+    expect rule DenyFableBudget matched
+}
+
+test "fable budget not yet exhausted does NOT fire DenyFableBudget" {
+    given {
+        dispatch.role: "chief-architect"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 1
+        run.fable_budget: 2
+    }
+    expect rule DenyFableBudget not matched
+}
+
+# ── DenyConcurrencyCap ────────────────────────────────────────────────────────
+
+test "active dispatch cap of 4 reached is denied (DenyConcurrencyCap)" {
+    given {
+        dispatch.role: "worker"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 4
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyConcurrencyCap matched
+}
+
+test "active dispatches exceed cap is denied (DenyConcurrencyCap)" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 5
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyConcurrencyCap matched
+}
+
+test "active dispatches below cap does NOT fire DenyConcurrencyCap" {
+    given {
+        dispatch.role: "worker"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 3
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyConcurrencyCap not matched
+}
+
+# ── DenyExecutionSpawnsInsight ────────────────────────────────────────────────
+
+test "worker cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
+    given {
+        dispatch.role: "chief-architect"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "worker"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyExecutionSpawnsInsight matched
+}
+
+test "debugger cannot spawn deep-report (DenyExecutionSpawnsInsight)" {
+    given {
+        dispatch.role: "deep-report"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "debugger"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyExecutionSpawnsInsight matched
+}
+
+test "investigator cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
+    given {
+        dispatch.role: "chief-architect"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "investigator"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyExecutionSpawnsInsight matched
+}
+
+test "reviewer cannot spawn chief-architect (DenyExecutionSpawnsInsight)" {
+    given {
+        dispatch.role: "chief-architect"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "reviewer"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyExecutionSpawnsInsight matched
+}
+
+test "orchestrator spawning chief-architect does NOT fire DenyExecutionSpawnsInsight" {
+    given {
+        dispatch.role: "chief-architect"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyExecutionSpawnsInsight not matched
+}
+
+# ── DenyReviewerDispatch ──────────────────────────────────────────────────────
+
+test "reviewer caller is denied all dispatches (DenyReviewerDispatch)" {
+    given {
+        dispatch.role: "worker"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "reviewer"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyReviewerDispatch matched
+}
+
+test "reviewer cannot dispatch an investigator (DenyReviewerDispatch)" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "reviewer"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyReviewerDispatch matched
+}
+
+test "non-reviewer caller does NOT fire DenyReviewerDispatch" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "worker"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyReviewerDispatch not matched
+}
+
+# ── DenyInvestigatorScope ─────────────────────────────────────────────────────
+
+test "investigator dispatching worker is denied (DenyInvestigatorScope)" {
+    given {
+        dispatch.role: "worker"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "investigator"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyInvestigatorScope matched
+}
+
+test "investigator dispatching debugger is denied (DenyInvestigatorScope)" {
+    given {
+        dispatch.role: "debugger"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "investigator"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyInvestigatorScope matched
+}
+
+test "investigator dispatching another investigator is allowed" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "investigator"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyInvestigatorScope not matched
+    expect rule AllowDispatch matched
+}
+
+# ── DenyInsightScope ──────────────────────────────────────────────────────────
+
+test "chief-architect cannot dispatch a worker (DenyInsightScope)" {
+    given {
+        dispatch.role: "worker"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "chief-architect"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyInsightScope matched
+}
+
+test "deep-report cannot dispatch a debugger (DenyInsightScope)" {
+    given {
+        dispatch.role: "debugger"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "deep-report"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyInsightScope matched
+}
+
+test "chief-architect dispatching investigator is NOT denied by insight scope" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "chief-architect"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyInsightScope not matched
+    expect rule AllowDispatch matched
+}
+
+# ── DenyWorkerScope ───────────────────────────────────────────────────────────
+
+test "worker cannot dispatch a reviewer (DenyWorkerScope)" {
+    given {
+        dispatch.role: "reviewer"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "worker"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyWorkerScope matched
+}
+
+test "debugger cannot dispatch a reviewer (DenyWorkerScope)" {
+    given {
+        dispatch.role: "reviewer"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "debugger"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyWorkerScope matched
+}
+
+test "worker dispatching investigator does NOT fire DenyWorkerScope" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "worker"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyWorkerScope not matched
+}
+
+test "worker dispatching debugger does NOT fire DenyWorkerScope" {
+    given {
+        dispatch.role: "debugger"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "worker"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule DenyWorkerScope not matched
+}
+
+# ── Unknown role fallback ─────────────────────────────────────────────────────
+
+test "unknown role dispatched by orchestrator matches nothing (combinator denies)" {
+    given {
+        dispatch.role: "unknown-role"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule AllowDispatch not matched
+}
+
+# ── DispatchRoute strategy arms ──────────────────────────────────────────────
+
+test "chief-architect routes to Architect arm" {
+    given {
+        dispatch.role: "chief-architect"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 512
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect strategy DispatchRoute selected Architect { model: "fable", profile: "insight" }
+}
+
+test "deep-report routes to DeepReport arm" {
+    given {
+        dispatch.role: "deep-report"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 512
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect strategy DispatchRoute selected DeepReport { model: "fable", profile: "insight" }
+}
+
+test "investigator routes to Investigator arm for non-canary run" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.model: ""
+        dispatch.background: false
+        dispatch.brief_bytes: 200
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule AllowDispatch matched
+    expect strategy DispatchRoute selected Investigator { model: "sonnet", profile: "readonly" }
+}
+
+test "investigator routes to InvestigatorCanary arm for canary run" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.model: ""
+        dispatch.background: false
+        dispatch.brief_bytes: 200
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0012"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect rule AllowDispatch matched
+    expect strategy DispatchRoute selected InvestigatorCanary { model: "haiku", profile: "readonly" }
+}
+
+test "worker routes to Worker arm (sonnet + execution profile)" {
+    given {
+        dispatch.role: "worker"
+        dispatch.model: ""
+        dispatch.background: false
+        dispatch.brief_bytes: 300
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect strategy DispatchRoute selected Worker { model: "sonnet", profile: "execution" }
+}
+
+test "debugger routes to Debugger arm (sonnet + execution profile)" {
+    given {
+        dispatch.role: "debugger"
+        dispatch.model: ""
+        dispatch.background: false
+        dispatch.brief_bytes: 300
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect strategy DispatchRoute selected Debugger { model: "sonnet", profile: "execution" }
+}
+
+test "reviewer routes to Reviewer arm (sonnet + readonly profile)" {
+    given {
+        dispatch.role: "reviewer"
+        dispatch.model: ""
+        dispatch.background: false
+        dispatch.brief_bytes: 200
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    expect strategy DispatchRoute selected Reviewer { model: "sonnet", profile: "readonly" }
+}
+
+# ── Combined / spec-quoted scenarios ─────────────────────────────────────────
+
+test "fable+worker triggers DenyFableForExecution (combined)" {
+    given {
+        dispatch.role: "worker"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    # DenyFableForExecution (priority 1) wins over AllowDispatch (priority 99)
+    expect rule DenyFableForExecution matched
+}
+
+test "orchestrator dispatching chief-architect with budget remaining is fully allowed" {
+    given {
+        dispatch.role: "chief-architect"
+        dispatch.model: "fable"
+        dispatch.background: false
+        dispatch.brief_bytes: 2048
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 1
+        run.fable_dispatches: 1
+        run.fable_budget: 2
+    }
+    expect rule AllowDispatch matched
+    expect rule DenyFableForExecution not matched
+    expect rule DenyFableFromNonRoot not matched
+    expect rule DenyFableBudget not matched
+    expect rule DenyTerminalDepth not matched
+    expect strategy DispatchRoute selected Architect
+}
+
+test "depth-2 worker attempting dispatch is denied by DenyTerminalDepth" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.model: "sonnet"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        caller.role: "worker"
+        caller.depth: 2
+        caller.dispatch_id: "d02"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.fable_dispatches: 0
+        run.fable_budget: 2
+    }
+    # DenyTerminalDepth (priority 1) wins; combinator denies even though AllowDispatch also matches
+    expect rule DenyTerminalDepth matched
+}

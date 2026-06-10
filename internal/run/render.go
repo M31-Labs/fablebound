@@ -83,13 +83,13 @@ func formatMetaWithReport(m *Meta, runDir string) string {
 
 // RunSummary is the derived structure emitted by `runs show --json`.
 type RunSummary struct {
-	RunID       string            `json:"run_id"`
-	Task        string            `json:"task"`
-	Status      string            `json:"status"`
-	CreatedAt   string            `json:"created_at,omitempty"`
-	EndedAt     string            `json:"ended_at,omitempty"`
-	FableBudget int               `json:"fable_budget"`
-	PolicySHAs  map[string]string `json:"policy_shas,omitempty"`
+	RunID       string             `json:"run_id"`
+	Task        string             `json:"task"`
+	Status      string             `json:"status"`
+	CreatedAt   string             `json:"created_at,omitempty"`
+	EndedAt     string             `json:"ended_at,omitempty"`
+	FableBudget int                `json:"fable_budget"`
+	PolicySHAs  map[string]string  `json:"policy_shas,omitempty"`
 	Dispatches  []*DispatchSummary `json:"dispatches"`
 }
 
@@ -104,7 +104,7 @@ type DispatchSummary struct {
 	Depth    int                `json:"depth"`
 	CostUSD  float64            `json:"cost_usd,omitempty"`
 	NumTurns int                `json:"num_turns,omitempty"`
-	Report   string             `json:"report,omitempty"`  // relative path if exists
+	Report   string             `json:"report,omitempty"` // relative path if exists
 	Children []*DispatchSummary `json:"children,omitempty"`
 }
 

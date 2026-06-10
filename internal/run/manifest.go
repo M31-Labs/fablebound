@@ -9,15 +9,16 @@ import (
 
 // Manifest is the run-level record written to manifest.json.
 type Manifest struct {
-	RunID         string    `json:"run_id"`
-	Task          string    `json:"task"`           // first line of task.md
-	Workspace     string    `json:"workspace"`      // absolute path to workspace root
-	Status        string    `json:"status"`         // created|running|completed|failed|halted
-	FableBudget   int       `json:"fable_budget"`   // max insight (fable) dispatches; default 2
-	CreatedAt     time.Time `json:"created_at"`
-	EndedAt       *time.Time `json:"ended_at,omitempty"`
-	RootSessionID string    `json:"root_session_id,omitempty"`
-	PolicySHAs    map[string]string `json:"policy_shas,omitempty"` // kind→sha256
+	RunID         string            `json:"run_id"`
+	Task          string            `json:"task"`         // first line of task.md
+	Workspace     string            `json:"workspace"`    // absolute path to workspace root
+	Status        string            `json:"status"`       // created|running|completed|failed|halted
+	FableBudget   int               `json:"fable_budget"` // max insight (fable) dispatches; default 2
+	CreatedAt     time.Time         `json:"created_at"`
+	EndedAt       *time.Time        `json:"ended_at,omitempty"`
+	RootSessionID string            `json:"root_session_id,omitempty"`
+	PolicySHAs    map[string]string `json:"policy_shas,omitempty"`    // kind→sha256
+	HyphaTraceID  string            `json:"hypha_trace_id,omitempty"` // set if hypha trace was opened
 }
 
 // manifestPath returns the path to manifest.json inside a run directory.

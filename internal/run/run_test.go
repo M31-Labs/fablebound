@@ -40,7 +40,10 @@ func TestNewRunID_Format(t *testing.T) {
 }
 
 func TestNewDispatchID(t *testing.T) {
-	cases := []struct{ n int; want string }{{0, "d01"}, {1, "d02"}, {9, "d10"}, {98, "d99"}}
+	cases := []struct {
+		n    int
+		want string
+	}{{0, "d01"}, {1, "d02"}, {9, "d10"}, {98, "d99"}}
 	for _, c := range cases {
 		got := run.NewDispatchID(c.n)
 		if got != c.want {

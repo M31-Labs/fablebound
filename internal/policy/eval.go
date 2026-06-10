@@ -17,11 +17,11 @@ type Route struct {
 
 // DispatchResult is the full result of evaluating a DispatchRequest.
 type DispatchResult struct {
-	Verdict    Verdict
-	Rule       string
-	Reason     string
-	Route      Route
-	Arbitrace  *govern.Arbitrace
+	Verdict   Verdict
+	Rule      string
+	Reason    string
+	Route     Route
+	Arbitrace *govern.Arbitrace
 }
 
 // ToolCallResult is the full result of evaluating a ToolCallRequest.

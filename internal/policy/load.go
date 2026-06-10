@@ -128,3 +128,9 @@ func EmbeddedDefaults() fs.ReadDirFS {
 	}
 	return sub.(fs.ReadDirFS)
 }
+
+// EmbeddedSchemasGo returns the source bytes of the embedded schemas.go file.
+// Used by policyvet to pass the file path to `arbiter check --go`.
+func EmbeddedSchemasGo() ([]byte, error) {
+	return embeddedFS.ReadFile("schemas.go")
+}

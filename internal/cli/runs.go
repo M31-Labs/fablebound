@@ -6,15 +6,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"text/tabwriter"
 
 	"m31labs.dev/fablebound/internal/run"
 )
 
-// runRuns is the handler for `fablebound runs list|show`.
+// runRuns is the handler for `fablebound runs list|show|gc`.
 func runRuns(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("runs: subcommand required: list|show")
+		return fmt.Errorf("runs: subcommand required: list|show|gc")
 	}
 
 	switch args[0] {
@@ -22,8 +23,10 @@ func runRuns(args []string) error {
 		return runRunsList(args[1:])
 	case "show":
 		return runRunsShow(args[1:])
+	case "gc":
+		return runRunsGC(args[1:])
 	default:
-		return fmt.Errorf("runs: unknown subcommand %q (want list|show)", args[0])
+		return fmt.Errorf("runs: unknown subcommand %q (want list|show|gc)", args[0])
 	}
 }
 
@@ -166,5 +169,104 @@ func runRunsShowJSON(runDir string) error {
 	}
 
 	fmt.Println(string(data))
+	return nil
+}
+
+// runRunsGC implements `fablebound runs gc --keep N [--dry-run]`.
+// It deletes the oldest TERMINAL runs beyond the N most-recent ones.
+// Running runs are never deleted. --dry-run lists victims only.
+func runRunsGC(args []string) error {
+	fs := flag.NewFlagSet("runs gc", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	var (
+		keep   = fs.Int("keep", 20, "number of most-recent runs to keep")
+		dryRun = fs.Bool("dry-run", false, "list victims without deleting")
+	)
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if *keep < 0 {
+		return fmt.Errorf("runs gc: --keep must be >= 0")
+	}
+
+	workspace, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("runs gc: getwd: %w", err)
+	}
+
+	runsBase := filepath.Join(workspace, ".fablebound", "runs")
+	entries, err := os.ReadDir(runsBase)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // nothing to gc
+		}
+		return fmt.Errorf("runs gc: read runs dir: %w", err)
+	}
+
+	type gcItem struct {
+		runID     string
+		runDir    string
+		status    string
+		createdAt string // sortable ISO string
+	}
+
+	var items []gcItem
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		rd := filepath.Join(runsBase, e.Name())
+		manifest, err := run.ReadManifest(rd)
+		if err != nil {
+			continue // skip unreadable runs
+		}
+		items = append(items, gcItem{
+			runID:     manifest.RunID,
+			runDir:    rd,
+			status:    manifest.Status,
+			createdAt: manifest.CreatedAt.UTC().Format("20060102-150405"),
+		})
+	}
+
+	// Sort by createdAt ascending (oldest first).
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].createdAt < items[j].createdAt
+	})
+
+	// Separate terminal from running runs.
+	var terminal []gcItem
+	for _, it := range items {
+		switch it.status {
+		case "completed", "failed", "halted":
+			terminal = append(terminal, it)
+			// "running" and anything else: keep always
+		}
+	}
+
+	// Determine victims: oldest terminal runs beyond keep count.
+	if len(terminal) <= *keep {
+		if *dryRun {
+			fmt.Println("(no runs to gc)")
+		}
+		return nil
+	}
+
+	victims := terminal[:len(terminal)-*keep]
+
+	for _, v := range victims {
+		if *dryRun {
+			fmt.Printf("would delete: %s (%s)\n", v.runID, v.status)
+			continue
+		}
+		if err := os.RemoveAll(v.runDir); err != nil {
+			fmt.Fprintf(os.Stderr, "runs gc: remove %s: %v\n", v.runID, err)
+		} else {
+			fmt.Printf("deleted: %s\n", v.runID)
+		}
+	}
+
 	return nil
 }

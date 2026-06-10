@@ -46,7 +46,7 @@ func Settings(profile string, depth int) ([]byte, error) {
 	doc := map[string]interface{}{
 		"permissions": perms,
 		"hooks": map[string]interface{}{
-			"PreToolUse": []interface{}{hookBlock},
+			"PreToolUse":  []interface{}{hookBlock},
 			"PostToolUse": []interface{}{hookBlock},
 		},
 	}
@@ -87,7 +87,7 @@ func buildPermissions(profile string, depth int) (map[string]interface{}, error)
 // arbitrary Bash.
 func orchestratorPerms(fableEntry string) map[string]interface{} {
 	return map[string]interface{}{
-		"deny":  orchestratorDeny(),
+		"deny": orchestratorDeny(),
 		"allow": []interface{}{
 			"Read",
 			"Glob",

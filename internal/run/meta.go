@@ -13,8 +13,8 @@ type Meta struct {
 	Parent         string     `json:"parent,omitempty"` // parent dispatch id; "" for root
 	Role           string     `json:"role"`
 	Model          string     `json:"model"`
-	Profile        string     `json:"profile"`          // settings/toolgate class
-	Status         string     `json:"status"`           // running|completed|failed|halted
+	Profile        string     `json:"profile"` // settings/toolgate class
+	Status         string     `json:"status"`  // running|completed|failed|halted
 	Depth          int        `json:"depth"`
 	MaxTurns       int        `json:"max_turns,omitempty"`
 	TimeoutMinutes int        `json:"timeout_minutes,omitempty"`

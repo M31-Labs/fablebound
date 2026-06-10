@@ -13,6 +13,7 @@ import (
 	"m31labs.dev/arbiter/audit"
 	"m31labs.dev/fablebound/internal/auditlog"
 	"m31labs.dev/fablebound/internal/hook"
+	"m31labs.dev/fablebound/internal/hyphae"
 	"m31labs.dev/fablebound/internal/policy"
 	"m31labs.dev/fablebound/internal/run"
 	"m31labs.dev/fablebound/internal/spawn"
@@ -239,6 +240,23 @@ func runDispatch(args []string) error {
 	// Spawn detached supervisor.
 	if err := spawn.SpawnDetached(fablebound, runDir, dispatchID); err != nil {
 		return fmt.Errorf("dispatch: spawn supervisor: %w", err)
+	}
+
+	// Hypha trace tick: "<did> <role>(<model>) dispatched by <parent>" (soft-fail).
+	{
+		hyp := hyphae.New(func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, "fablebound dispatch [hypha]: "+format+"\n", args...)
+		})
+		if hyp.Available() {
+			if mf, err := run.ReadManifest(runDir); err == nil && mf.HyphaTraceID != "" {
+				parent := callerID
+				if parent == "" {
+					parent = "user"
+				}
+				tick := fmt.Sprintf("%s %s(%s) dispatched by %s", dispatchID, *role, result.Route.Model, parent)
+				hyp.TraceTick(mf.HyphaTraceID, tick)
+			}
+		}
 	}
 
 	fmt.Fprintf(os.Stderr, "dispatched %s as %s (role=%s, model=%s)\n",

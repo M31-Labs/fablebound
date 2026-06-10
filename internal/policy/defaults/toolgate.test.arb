@@ -1,0 +1,822 @@
+# Tests for toolgate.arb — fablebound PreToolUse hook gate.
+#
+# Coverage targets: every rule (HaltAllTools, DenyHyphaDaemons,
+# DenyDestructive, DenyTerminalDispatch, OrchestratorRead,
+# OrchestratorEffector, OrchestratorDenyRest, ScratchWrite,
+# DenyWriteOutsideScratch, ReadOnlyBash, ReadTools, ExecutionAllow).
+#
+# Roles and segments:
+#   orchestrator            → Read/Glob/Grep + fablebound/hypha bash only
+#   scratch_writers         → chief-architect, deep-report, reviewer
+#   readonly_bash_roles     → investigator, reviewer, chief-architect, deep-report
+#   execution               → worker, debugger
+
+# ── HaltAllTools (kill_switch) ───────────────────────────────────────────────
+
+test "HaltAllTools kill switch is off by default — bash call proceeds" {
+    given {
+        agent.role: "worker"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "ls /tmp"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule HaltAllTools not matched
+}
+
+# ── DenyHyphaDaemons ─────────────────────────────────────────────────────────
+
+test "hypha mcp serve is denied for worker (DenyHyphaDaemons)" {
+    given {
+        agent.role: "worker"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "hypha mcp serve"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyHyphaDaemons matched
+}
+
+test "hypha hub serve is denied for orchestrator (DenyHyphaDaemons)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "Bash"
+        tool.command: "hypha hub serve"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyHyphaDaemons matched
+}
+
+test "hypha mcp serve with extra args is denied (DenyHyphaDaemons)" {
+    given {
+        agent.role: "investigator"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "hypha  mcp  serve --port 8080"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyHyphaDaemons matched
+}
+
+test "hypha recall does NOT fire DenyHyphaDaemons" {
+    given {
+        agent.role: "worker"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "hypha recall go patterns"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyHyphaDaemons not matched
+}
+
+# ── DenyDestructive ──────────────────────────────────────────────────────────
+
+test "rm -rf / is denied (DenyDestructive)" {
+    given {
+        agent.role: "worker"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "rm -rf /"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyDestructive matched
+}
+
+test "rm -rf ~ is denied (DenyDestructive)" {
+    given {
+        agent.role: "worker"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "rm -rf ~/src"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyDestructive matched
+}
+
+test "git push --force is denied (DenyDestructive)" {
+    given {
+        agent.role: "worker"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "git push origin --force"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyDestructive matched
+}
+
+test "git push --force for orchestrator also denied (DenyDestructive)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "Bash"
+        tool.command: "git push main --force"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyDestructive matched
+}
+
+test "regular rm command does NOT fire DenyDestructive" {
+    given {
+        agent.role: "worker"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "rm /tmp/myfile.txt"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyDestructive not matched
+}
+
+# ── DenyTerminalDispatch ──────────────────────────────────────────────────────
+
+test "depth-2 agent running fablebound dispatch is denied (DenyTerminalDispatch)" {
+    given {
+        agent.role: "worker"
+        agent.depth: 2
+        agent.dispatch_id: "d02"
+        tool.name: "Bash"
+        tool.command: "fablebound dispatch --role investigator --brief - <<EOF task EOF"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyTerminalDispatch matched
+}
+
+test "depth-2 investigator cannot fablebound dispatch (DenyTerminalDispatch)" {
+    given {
+        agent.role: "investigator"
+        agent.depth: 2
+        agent.dispatch_id: "d02"
+        tool.name: "Bash"
+        tool.command: "fablebound dispatch --role investigator --brief -"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyTerminalDispatch matched
+}
+
+test "depth-1 agent running fablebound dispatch does NOT fire DenyTerminalDispatch" {
+    given {
+        agent.role: "worker"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "fablebound dispatch --role investigator --brief -"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyTerminalDispatch not matched
+}
+
+test "depth-2 agent running fablebound note is NOT denied by DenyTerminalDispatch" {
+    given {
+        agent.role: "worker"
+        agent.depth: 2
+        agent.dispatch_id: "d02"
+        tool.name: "Bash"
+        tool.command: "fablebound note add - <<EOF some note EOF"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyTerminalDispatch not matched
+}
+
+# ── OrchestratorRead ──────────────────────────────────────────────────────────
+
+test "orchestrator Read tool is allowed (OrchestratorRead)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "Read"
+        tool.command: ""
+        tool.file_path: "/home/user/project/README.md"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorRead matched
+}
+
+test "orchestrator Glob tool is allowed (OrchestratorRead)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "Glob"
+        tool.command: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorRead matched
+}
+
+test "orchestrator Grep tool is allowed (OrchestratorRead)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "Grep"
+        tool.command: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorRead matched
+}
+
+# ── OrchestratorEffector ──────────────────────────────────────────────────────
+
+test "orchestrator running fablebound dispatch is allowed (OrchestratorEffector)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "Bash"
+        tool.command: "fablebound dispatch --role worker --brief -"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorEffector matched
+}
+
+test "orchestrator running fablebound runs show is allowed (OrchestratorEffector)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "Bash"
+        tool.command: "fablebound runs show 20260101-000000-0001"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorEffector matched
+}
+
+test "orchestrator running hypha recall is allowed (OrchestratorEffector)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "Bash"
+        tool.command: "hypha recall arbiter policy"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorEffector matched
+}
+
+test "orchestrator running hypha trace is allowed (OrchestratorEffector)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "Bash"
+        tool.command: "hypha trace list --active"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorEffector matched
+}
+
+# ── OrchestratorDenyRest ──────────────────────────────────────────────────────
+
+test "orchestrator running ls is denied (OrchestratorDenyRest)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "Bash"
+        tool.command: "ls /tmp"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorDenyRest matched
+}
+
+test "orchestrator attempting Edit is denied (OrchestratorDenyRest)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "Edit"
+        tool.command: ""
+        tool.file_path: "/home/user/project/foo.go"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorDenyRest matched
+}
+
+test "orchestrator attempting Write is denied (OrchestratorDenyRest)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "Write"
+        tool.command: ""
+        tool.file_path: "/home/user/project/foo.txt"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorDenyRest matched
+}
+
+test "orchestrator running git log is denied (orchestrator bash not in fablebound/hypha)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "Bash"
+        tool.command: "git log --oneline -10"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorDenyRest matched
+}
+
+# ── ScratchWrite ──────────────────────────────────────────────────────────────
+
+test "chief-architect writing to scratch is allowed (ScratchWrite)" {
+    given {
+        agent.role: "chief-architect"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Write"
+        tool.command: ""
+        tool.file_path: "/scratch/run/report.md"
+        tool.path_in_scratch: true
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ScratchWrite matched
+}
+
+test "reviewer editing scratch file is allowed (ScratchWrite)" {
+    given {
+        agent.role: "reviewer"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Edit"
+        tool.command: ""
+        tool.file_path: "/scratch/run/notes/review.md"
+        tool.path_in_scratch: true
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ScratchWrite matched
+}
+
+test "deep-report writing to scratch is allowed (ScratchWrite)" {
+    given {
+        agent.role: "deep-report"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Write"
+        tool.command: ""
+        tool.file_path: "/scratch/run/analysis.md"
+        tool.path_in_scratch: true
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ScratchWrite matched
+}
+
+# ── DenyWriteOutsideScratch ───────────────────────────────────────────────────
+
+test "reviewer writing outside scratch is denied (DenyWriteOutsideScratch)" {
+    given {
+        agent.role: "reviewer"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Write"
+        tool.command: ""
+        tool.file_path: "/home/user/project/important.go"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyWriteOutsideScratch matched
+}
+
+test "chief-architect editing outside scratch is denied (DenyWriteOutsideScratch)" {
+    given {
+        agent.role: "chief-architect"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Edit"
+        tool.command: ""
+        tool.file_path: "/home/user/project/main.go"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyWriteOutsideScratch matched
+}
+
+test "deep-report writing outside scratch is denied (DenyWriteOutsideScratch)" {
+    given {
+        agent.role: "deep-report"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Write"
+        tool.command: ""
+        tool.file_path: "/tmp/output.md"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyWriteOutsideScratch matched
+}
+
+test "reviewer write in scratch: ScratchWrite (priority 10) wins over DenyWriteOutsideScratch (priority 11)" {
+    given {
+        agent.role: "reviewer"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Write"
+        tool.command: ""
+        tool.file_path: "/scratch/run/review.md"
+        tool.path_in_scratch: true
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    # Both rules match but ScratchWrite has lower priority number (10 < 11) so it wins
+    expect rule ScratchWrite matched
+    expect rule DenyWriteOutsideScratch matched
+}
+
+# ── ReadOnlyBash ──────────────────────────────────────────────────────────────
+
+test "investigator running ls is allowed (ReadOnlyBash)" {
+    given {
+        agent.role: "investigator"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "ls -la /home/user/project"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ReadOnlyBash matched
+}
+
+test "investigator running rg search is allowed (ReadOnlyBash)" {
+    given {
+        agent.role: "investigator"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "rg 'func main' --type go ."
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ReadOnlyBash matched
+}
+
+test "reviewer running git log is allowed (ReadOnlyBash)" {
+    given {
+        agent.role: "reviewer"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "git log --oneline -20"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ReadOnlyBash matched
+}
+
+test "chief-architect running git diff is allowed (ReadOnlyBash)" {
+    given {
+        agent.role: "chief-architect"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "git diff HEAD~1"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ReadOnlyBash matched
+}
+
+test "deep-report running git show is allowed (ReadOnlyBash)" {
+    given {
+        agent.role: "deep-report"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "git show HEAD:main.go"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ReadOnlyBash matched
+}
+
+test "investigator running gts callgraph is allowed (ReadOnlyBash)" {
+    given {
+        agent.role: "investigator"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "gts callgraph main.Main"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ReadOnlyBash matched
+}
+
+test "investigator running go doc is allowed (ReadOnlyBash)" {
+    given {
+        agent.role: "investigator"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "go doc net/http.Handler"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ReadOnlyBash matched
+}
+
+test "investigator running fablebound poll is allowed (ReadOnlyBash)" {
+    given {
+        agent.role: "investigator"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "fablebound poll d03"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ReadOnlyBash matched
+}
+
+test "investigator running hypha recall is allowed (ReadOnlyBash)" {
+    given {
+        agent.role: "investigator"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "hypha recall fablebound patterns"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ReadOnlyBash matched
+}
+
+# ── ReadTools (universal Read/Glob/Grep) ──────────────────────────────────────
+
+test "worker Read is allowed (ReadTools)" {
+    given {
+        agent.role: "worker"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Read"
+        tool.command: ""
+        tool.file_path: "/home/user/project/main.go"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ReadTools matched
+}
+
+test "debugger Glob is allowed (ReadTools)" {
+    given {
+        agent.role: "debugger"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Glob"
+        tool.command: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ReadTools matched
+}
+
+test "investigator Grep is allowed (ReadTools)" {
+    given {
+        agent.role: "investigator"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Grep"
+        tool.command: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ReadTools matched
+}
+
+test "reviewer Glob is allowed (ReadTools)" {
+    given {
+        agent.role: "reviewer"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Glob"
+        tool.command: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ReadTools matched
+}
+
+# ── ExecutionAllow ────────────────────────────────────────────────────────────
+
+test "worker running any bash command is allowed (ExecutionAllow)" {
+    given {
+        agent.role: "worker"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "go build ./..."
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ExecutionAllow matched
+}
+
+test "debugger running arbitrary bash is allowed (ExecutionAllow)" {
+    given {
+        agent.role: "debugger"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "go test ./... -v -run TestFoo"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ExecutionAllow matched
+}
+
+test "worker using Write tool is allowed (ExecutionAllow)" {
+    given {
+        agent.role: "worker"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Write"
+        tool.command: ""
+        tool.file_path: "/home/user/project/new_file.go"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ExecutionAllow matched
+}
+
+test "debugger using Edit tool is allowed (ExecutionAllow)" {
+    given {
+        agent.role: "debugger"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Edit"
+        tool.command: ""
+        tool.file_path: "/home/user/project/bug.go"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ExecutionAllow matched
+}
+
+# ── Cross-cutting / spec-quoted scenarios ─────────────────────────────────────
+
+test "depth-2 worker running fablebound dispatch is denied (DenyTerminalDispatch over ExecutionAllow)" {
+    given {
+        agent.role: "worker"
+        agent.depth: 2
+        agent.dispatch_id: "d02"
+        tool.name: "Bash"
+        tool.command: "fablebound dispatch --role investigator --brief -"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    # DenyTerminalDispatch (priority 2) beats ExecutionAllow (priority 50)
+    expect rule DenyTerminalDispatch matched
+}
+
+test "worker running hypha mcp serve is denied (DenyHyphaDaemons beats ExecutionAllow)" {
+    given {
+        agent.role: "worker"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "hypha mcp serve"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    # DenyHyphaDaemons (priority 1) beats ExecutionAllow (priority 50)
+    expect rule DenyHyphaDaemons matched
+}
+
+test "worker running rm -rf ~ is denied (DenyDestructive beats ExecutionAllow)" {
+    given {
+        agent.role: "worker"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "Bash"
+        tool.command: "rm -rf ~/important"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyDestructive matched
+}

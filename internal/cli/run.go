@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"m31labs.dev/fablebound/internal/hyphae"
 	"m31labs.dev/fablebound/internal/policy"
 	"m31labs.dev/fablebound/internal/run"
 	"m31labs.dev/fablebound/internal/spawn"
@@ -81,12 +82,12 @@ func runRun(args []string) error {
 	// Write manifest (status: running).
 	now := time.Now()
 	manifest := &run.Manifest{
-		RunID:     runID,
-		Task:      task,
-		Workspace: workspace,
-		Status:    "running",
+		RunID:       runID,
+		Task:        task,
+		Workspace:   workspace,
+		Status:      "running",
 		FableBudget: *fableBudget,
-		CreatedAt: now,
+		CreatedAt:   now,
 		PolicySHAs: map[string]string{
 			"dispatch": dispatchLoaded.SHA256,
 			"toolgate": toolLoaded.SHA256,
@@ -94,6 +95,20 @@ func runRun(args []string) error {
 	}
 	if err := run.WriteManifest(runDir, manifest); err != nil {
 		return fmt.Errorf("run: write manifest: %w", err)
+	}
+
+	// Open a hypha trace (soft-fail: missing hypha must never fail the run).
+	{
+		hyp := hyphae.New(func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, "fablebound run [hypha]: "+format+"\n", args...)
+		})
+		phase := run.FirstLine(task)
+		traceID := hyp.TraceStart(runID, phase, "")
+		if traceID != "" {
+			manifest.HyphaTraceID = traceID
+			// Best-effort manifest update to persist trace id.
+			_ = run.WriteManifest(runDir, manifest)
+		}
 	}
 
 	// Create the root dispatch directory.
@@ -245,7 +260,19 @@ func finalizeManifest(runDir, runID string, fableBudget int) error {
 	manifest.EndedAt = &now
 	manifest.RootSessionID = rootMeta.SessionID
 
-	return run.WriteManifest(runDir, manifest)
+	if err := run.WriteManifest(runDir, manifest); err != nil {
+		return err
+	}
+
+	// Close the hypha trace (soft-fail).
+	if manifest.HyphaTraceID != "" {
+		hyp := hyphae.New(func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, "fablebound run [hypha]: "+format+"\n", args...)
+		})
+		hyp.TraceDone(manifest.HyphaTraceID, finalStatus)
+	}
+
+	return nil
 }
 
 // graceFail marks a running dispatch as failed (best-effort).

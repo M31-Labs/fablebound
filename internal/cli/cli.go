@@ -1,8 +1,9 @@
 // Package cli implements the fablebound command-line interface.
 // Exit-code contract (§9):
-//   0 — ok (including wait-timeout with status running)
-//   2 — internal error (hook fail-closed, unrecognised subcommand, flag parse error)
-//   3 — policy denial (stderr = "RULE: reason")
+//
+//	0 — ok (including wait-timeout with status running)
+//	2 — internal error (hook fail-closed, unrecognised subcommand, flag parse error)
+//	3 — policy denial (stderr = "RULE: reason")
 package cli
 
 import (
@@ -90,12 +91,6 @@ Subcommands:
 
 Exit codes: 0 ok; 2 internal error; 3 policy denial
 `)
-}
-
-// Stub handler — returns "not implemented" until the real implementation lands.
-
-func runPromote(_ []string) error {
-	return fmt.Errorf("not implemented")
 }
 
 func runVersion(_ []string) error {

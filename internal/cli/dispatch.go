@@ -162,18 +162,11 @@ func runDispatch(args []string) error {
 		return fmt.Errorf("dispatch: policy returned empty model for role %q (Reject route)", *role)
 	}
 
-	// Allocate dispatch id (skip non-numeric ids like "root").
-	metas, err := run.ScanMetas(runDir)
+	// Allocate dispatch id and create its directory atomically (Fix 2: race-free
+	// alloc via .dispatch-alloc.lock flock held across scan+mkdir).
+	dispatchID, dispatchDir, err := run.NewStore(filepath.Dir(runDir)).AllocDispatch(runID)
 	if err != nil {
-		return fmt.Errorf("dispatch: scan metas: %w", err)
-	}
-	dispatchID := run.NextDispatchID(metas)
-
-	// Create dispatch directory.
-	// runDir = <workspace>/.fablebound/runs/<run-id>; store base = parent of runDir.
-	dispatchDir, err := run.NewStore(filepath.Dir(runDir)).CreateDispatch(runID, dispatchID)
-	if err != nil {
-		return fmt.Errorf("dispatch: create dispatch dir: %w", err)
+		return fmt.Errorf("dispatch: alloc dispatch: %w", err)
 	}
 
 	// Write brief.md.

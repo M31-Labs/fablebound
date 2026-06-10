@@ -4,6 +4,8 @@ package run
 import (
 	"fmt"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -48,6 +50,28 @@ func isNumericDispatchID(id string) bool {
 		}
 	}
 	return true
+}
+
+// nextDispatchIDFromDirs counts dNN subdirectories under <runDir>/dispatches/
+// and returns the next available dNN id.  It counts directory entries rather
+// than parseable metas so that a directory created by AllocDispatch but not
+// yet containing a meta.json still reserves its slot.
+func nextDispatchIDFromDirs(runDir string) (string, error) {
+	dispDir := filepath.Join(runDir, "dispatches")
+	entries, err := os.ReadDir(dispDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Sprintf("d%02d", 1), nil
+		}
+		return "", fmt.Errorf("read dispatch dirs: %w", err)
+	}
+	count := 0
+	for _, e := range entries {
+		if e.IsDir() && isNumericDispatchID(e.Name()) {
+			count++
+		}
+	}
+	return fmt.Sprintf("d%02d", count+1), nil
 }
 
 // randomBase36 returns a random lowercase base-36 string of length n.

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"syscall"
 )
 
 // Store represents a fablebound run store rooted at a base directory
@@ -65,6 +67,61 @@ func (s *Store) CreateDispatch(runID, dispatchID string) (string, error) {
 		return "", fmt.Errorf("create dispatch dir %s: %w", dir, err)
 	}
 	return dir, nil
+}
+
+// dispatchAllocMu is an in-process mutex that guards AllocDispatch across
+// goroutines.  Linux flock(2) is per-open-file-description and grants a lock
+// to any fd in the same process immediately, so the flock alone does not
+// serialise concurrent goroutines within one process.  The two locks together
+// cover both in-process (mutex) and cross-process (flock) concurrent callers.
+var dispatchAllocMu sync.Mutex
+
+// AllocDispatch atomically allocates the next dNN dispatch ID, creates its
+// directory, and returns the ID and directory path.  It holds an in-process
+// mutex AND an exclusive flock on <runDir>/.dispatch-alloc.lock across the
+// scan+mkdir sequence so that concurrent callers (goroutines within the same
+// process, or separate fablebound processes) cannot compute the same ID.
+//
+// The dispatch directory is created with os.Mkdir (not MkdirAll) so that a
+// collision between separate processes not sharing the lock file — an
+// unexpected condition — surfaces as an error rather than a silent clobber.
+func (s *Store) AllocDispatch(runID string) (dispatchID, dispatchDir string, err error) {
+	// In-process serialisation (goroutines share the same process and cannot
+	// use flock to block each other).
+	dispatchAllocMu.Lock()
+	defer dispatchAllocMu.Unlock()
+
+	lockPath := filepath.Join(s.RunDir(runID), ".dispatch-alloc.lock")
+	lf, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		return "", "", fmt.Errorf("open dispatch-alloc lock %s: %w", lockPath, err)
+	}
+	defer lf.Close()
+
+	// Cross-process serialisation via advisory flock.
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX); err != nil {
+		return "", "", fmt.Errorf("flock dispatch-alloc lock: %w", err)
+	}
+	// Lock released on lf.Close() in deferred call above.
+
+	// Compute the next dispatch ID by counting existing dispatch subdirectories
+	// (not just those with parseable metas).  Using directory presence rather
+	// than meta content is correct here: a directory created by a concurrent
+	// AllocDispatch that hasn't written its meta yet still reserves the slot.
+	id, err := nextDispatchIDFromDirs(s.RunDir(runID))
+	if err != nil {
+		return "", "", fmt.Errorf("scan dispatch dirs for alloc: %w", err)
+	}
+
+	dir := s.DispatchDir(runID, id)
+	// Use os.Mkdir (not MkdirAll) — atomic at the kernel level: if another
+	// process somehow produced the same id, Mkdir returns an error rather than
+	// silently clobbering.
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		return "", "", fmt.Errorf("mkdir dispatch dir %s: %w", dir, err)
+	}
+
+	return id, dir, nil
 }
 
 // CurrentRunDir resolves the active run directory from the FABLEBOUND_RUN_DIR

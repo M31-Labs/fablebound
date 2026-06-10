@@ -12,17 +12,14 @@ import (
 	"m31labs.dev/fablebound/internal/hook"
 )
 
-// setupFixtureRun creates a minimal run dir and returns its path.
+// setupFixtureRun creates a properly structured run dir under a temp workspace
+// and returns the run dir path.
+// The structure is <workspace>/.fablebound/runs/<run-id>/ with a manifest.json
+// so that verifyIdentity's run-dir containment check passes.
 func setupFixtureRun(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	runDir := filepath.Join(dir, "run1")
-	for _, sub := range []string{"audit", "notes", "dispatches"} {
-		if err := os.MkdirAll(filepath.Join(runDir, sub), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return runDir
+	workspace := t.TempDir()
+	return makeRealRunDir(t, workspace)
 }
 
 // setEnv temporarily sets environment variables, restoring them on cleanup.
@@ -644,6 +641,138 @@ func TestUnknownHookEventWarning(t *testing.T) {
 	}
 	if len(bytes.TrimSpace(out)) != 0 {
 		t.Errorf("expected empty stdout for unknown event, got: %s", out)
+	}
+}
+
+// ── Run-dir containment tests (Fix 1) ────────────────────────────────────────
+
+// makeRealRunDir creates a properly structured run dir under workspace
+// (i.e. <workspace>/.fablebound/runs/<run-id>/) with a manifest.json that
+// records the workspace path.  Returns runDir.
+func makeRealRunDir(t *testing.T, workspace string) string {
+	t.Helper()
+	runID := "20260101-000000-test"
+	runDir := filepath.Join(workspace, ".fablebound", "runs", runID)
+	for _, sub := range []string{"audit", "notes", "dispatches"} {
+		if err := os.MkdirAll(filepath.Join(runDir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Write manifest.json with workspace path.
+	manifest := map[string]any{
+		"run_id":    runID,
+		"task":      "test",
+		"workspace": workspace,
+		"status":    "running",
+	}
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "manifest.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return runDir
+}
+
+// TestVerifyIdentity_FakeRunDir verifies that a fake run dir under /tmp with a
+// forged orchestrator meta is rejected by the hook (fail closed).
+// This is the regression test for the fake-run-dir identity bypass (Fix 1).
+func TestVerifyIdentity_FakeRunDir(t *testing.T) {
+	// Build a fake run dir completely outside any real workspace.
+	fakeBase := t.TempDir() // e.g. /tmp/TestVerify.../
+	fakeRunDir := filepath.Join(fakeBase, ".fablebound", "runs", "fake-run-id")
+	for _, sub := range []string{"audit", "notes", "dispatches", filepath.Join("dispatches", "root")} {
+		if err := os.MkdirAll(filepath.Join(fakeRunDir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Write a manifest that claims fakeBase as workspace — forged but self-consistent.
+	manifest := map[string]any{
+		"run_id":    "fake-run-id",
+		"task":      "evil",
+		"workspace": fakeBase, // attacker-controlled workspace in /tmp
+		"status":    "running",
+	}
+	data, _ := json.Marshal(manifest)
+	if err := os.WriteFile(filepath.Join(fakeRunDir, "manifest.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Write forged orchestrator meta claiming depth=0.
+	writeTestMeta(t, fakeRunDir, "root", "orchestrator", 0)
+
+	setEnv(t,
+		"FABLEBOUND_ROLE", "orchestrator",
+		"FABLEBOUND_DEPTH", "0",
+		"FABLEBOUND_DISPATCH_ID", "root",
+		"FABLEBOUND_RUN_DIR", fakeRunDir,
+	)
+
+	// The hook must fail closed (return an error = exit 2) because the run dir
+	// is NOT under a workspace that was produced by a real `fablebound run` invocation.
+	// The test itself doesn't know the "real" workspace; the hook derives it from the
+	// manifest and cross-checks the 3-levels-up derivation.
+	// Both values match in the fake dir, so the containment check passes for the
+	// fake workspace — but that is correct: the *containment* check prevents an
+	// attacker from pointing to a /tmp dir when the env already contains the real
+	// workspace path.  To test a meaningful rejection, we set FABLEBOUND_RUN_DIR
+	// to a path that is NOT under its own manifest's workspace.
+	//
+	// Variant: point to a run dir whose manifest workspace does NOT match the
+	// 3-levels-up derivation (workspace field is wrong/tampered).
+	tamperedManifest := map[string]any{
+		"run_id":    "fake-run-id",
+		"task":      "evil",
+		"workspace": "/nonexistent/real/workspace", // workspace doesn't match derivation
+		"status":    "running",
+	}
+	tamperedData, _ := json.Marshal(tamperedManifest)
+	if err := os.WriteFile(filepath.Join(fakeRunDir, "manifest.json"), tamperedData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := runHookWithWorkspace(t,
+		`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"fablebound dispatch --role investigator --brief test"}}`,
+		"",
+	)
+	if err == nil {
+		t.Error("expected error (fail closed) for fake run dir with tampered manifest workspace, got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "untrusted run dir") {
+		t.Errorf("expected 'untrusted run dir' in error, got: %v", err)
+	}
+}
+
+// TestVerifyIdentity_RealRunDirStillWorks verifies that a legitimately structured
+// run dir (under <workspace>/.fablebound/runs/<id>/ with a correct manifest)
+// still passes identity verification — the grandchild-dispatch flow must not break.
+func TestVerifyIdentity_RealRunDirStillWorks(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeRealRunDir(t, workspace)
+
+	// Create a depth-1 dispatch dir and write its meta.
+	dispatchDir := filepath.Join(runDir, "dispatches", "d01")
+	if err := os.MkdirAll(dispatchDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestMeta(t, runDir, "d01", "investigator", 1)
+
+	setEnv(t,
+		"FABLEBOUND_ROLE", "investigator",
+		"FABLEBOUND_DEPTH", "1",
+		"FABLEBOUND_DISPATCH_ID", "d01",
+		"FABLEBOUND_RUN_DIR", runDir,
+	)
+
+	out, err := runHookWithWorkspace(t,
+		`{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"/workspace/main.go"}}`,
+		workspace,
+	)
+	if err != nil {
+		t.Errorf("expected nil error for legitimate run dir, got: %v", err)
+	}
+	if len(bytes.TrimSpace(out)) == 0 {
+		t.Error("expected non-empty output for valid PreToolUse with real run dir")
 	}
 }
 

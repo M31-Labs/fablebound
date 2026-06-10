@@ -37,12 +37,12 @@ user: fablebound run "<task>"
      │                └─ execs claude -p --model <route.model> --output-format json
      │                    captures report.md, finalizes meta.json
      │
-     └─ depth-1 agents can dispatch further; depth-2 agents are TERMINAL
+     └─ depth-1 agents can dispatch further; depth-2 agents are terminal
         (dispatch.arb DenyTerminalDepth, toolgate DenyTerminalDispatch,
          generated settings replace Bash(fablebound *) with Bash(fablebound note *))
 ```
 
-Depth is fablebound state (`FABLEBOUND_DEPTH`), not model-reported. An agent cannot lie about its depth to gain dispatch capability.
+Depth is fablebound state (`FABLEBOUND_DEPTH`), set by fablebound at spawn and cross-checked against the run's dispatch meta at every hook invocation.
 
 ## Quickstart
 
@@ -79,7 +79,7 @@ fablebound promote <run-id>
 | `debugger` | execution | sonnet | yes (workspace) | yes, minus deny rules | investigator | 0–1 |
 | `reviewer` | readonly | sonnet | hook-gated: scratch only | read-only prefixes | none | 0–1 |
 
-Depth-2 agents are terminal in all three layers: `dispatch.arb` `DenyTerminalDepth` rule, `toolgate.arb` `DenyTerminalDispatch` rule, and generated settings that remove `Bash(fablebound dispatch*)` from the allow list. Fable is routed only to `chief-architect` and `deep-report`, only when called by the orchestrator, and only within the per-run `fable_budget` (default 2). Execution roles cannot dispatch fable roles.
+Depth-2 agents are blocked at three independent points: `dispatch.arb` `DenyTerminalDepth` rule, `toolgate.arb` `DenyTerminalDispatch` rule, and generated settings that remove `Bash(fablebound dispatch*)` from the allow list. Fable is routed only to `chief-architect` and `deep-report`, only when called by the orchestrator, and only within the per-run `fable_budget` (default 2). Execution roles cannot dispatch fable roles.
 
 Read-only Bash prefixes (investigator/reviewer/insight profiles): `ls`, `rg`, `grep`, `find`, `git log`, `git show`, `git diff`, `go doc`, `go vet`, `gts`, `wc`, `head`, `tail`, `fablebound`, `hypha`.
 
@@ -95,7 +95,9 @@ role .md (cooperative)
         < [future] Horizon LSM exec-deny profile (kernel-level, see §Appendix)
 ```
 
-The settings `deny` list removes `Write`, `Edit`, `Agent`, `NotebookEdit`, `WebFetch`, `WebSearch` from the orchestrator's tool context entirely — under `dontAsk`, anything not allow-listed is auto-denied before the hook is even invoked. The hook handles what settings cannot express: path containment, command regex, kill switches, and audit. Hook identity (`agent.role`, `agent.depth`, `agent.dispatch_id`) is read from env set by fablebound at spawn, not from model-controlled input.
+The settings `deny` list removes `Write`, `Edit`, `Agent`, `NotebookEdit`, `WebFetch`, `WebSearch` from the orchestrator's tool context entirely — under `dontAsk`, anything not allow-listed is auto-denied before the hook is even invoked. The hook handles what settings cannot express: path containment, command regex, kill switches, and audit. Hook identity (`agent.role`, `agent.depth`, `agent.dispatch_id`) is read from env set by fablebound at spawn and verified against the on-disk dispatch meta; the run dir itself is bound to the real workspace via canonical-path containment.
+
+**Layering caveats.** The settings deny list and toolgate command-prefix rules are best-effort: a sufficiently creative command construction (`cd x && fablebound dispatch`) can evade prefix matching. The robust backstop is `dispatch.arb` keyed on env-derived `caller.depth`/`caller.role` combined with the hook's meta identity cross-check. Neither layer is effective if a worker can escape the filesystem sandbox entirely (e.g. by exploiting an unpatched kernel), which is why the Horizon LSM backstop remains on the roadmap.
 
 **Fail closed.** Any internal error in `fablebound hook` (missing env, policy compile failure, unparseable input) exits 2, which Claude Code treats as a deny.
 

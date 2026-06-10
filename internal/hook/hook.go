@@ -114,6 +114,25 @@ func ReadIdentity() (Identity, bool) {
 // meta.json to detect spoofed FABLEBOUND_ROLE or FABLEBOUND_DEPTH values.
 // Returns an error (fail closed) if meta is missing, unreadable, or mismatches.
 // The root dispatch has ID "root"; it must also exist in meta.json.
+//
+// Run-dir containment (Fix 1): before reading any meta, this function verifies
+// that FABLEBOUND_RUN_DIR is lexically contained in
+// <workspace>/.fablebound/runs/ where <workspace> is read from the run's own
+// manifest.json — a file the sandboxed worker cannot forge because toolgate
+// confines writes to the worker's own scratch (dispatches/<id>/) and the
+// manifest lives one level above (in the run root).  The canonical path of
+// FABLEBOUND_RUN_DIR must also resolve back to the same workspace recorded in
+// the manifest, preventing symlink-based bypasses.
+//
+// Residual trust assumption: a worker with an *execution* profile (worker/
+// debugger) has broad Bash access including the ability to write files inside
+// <workspace>/.fablebound/runs/<run-id>/dispatches/<id>/ (its own scratch).
+// It cannot write manifest.json or other dispatches' meta.json — those paths
+// are outside its scratch and denied by toolgate.  A worker that can escape
+// toolgate entirely (e.g. via an unpatched Bash escape) could forge a second
+// run dir; but at that point the entire sandbox has failed, not just this
+// check.  The containment check here raises the bar to require a genuine
+// filesystem escape rather than a simple env-var substitution.
 func verifyIdentity(id Identity) error {
 	if id.RunDir == "" {
 		// No run dir — can't verify; allow (non-run hook invocation).
@@ -124,7 +143,62 @@ func verifyIdentity(id Identity) error {
 		return nil
 	}
 
-	meta, err := run.ReadMeta(id.RunDir, id.DispatchID)
+	// ── Step 1: canonical-path containment ───────────────────────────────────
+	// Resolve the claimed run dir to a canonical path (no symlinks).
+	canonRunDir, err := filepath.EvalSymlinks(id.RunDir)
+	if err != nil {
+		// If EvalSymlinks fails (dir doesn't exist or a component is missing)
+		// treat it as untrusted — fail closed.
+		return fmt.Errorf("untrusted run dir: cannot resolve %q: %w", id.RunDir, err)
+	}
+
+	// Read the manifest from the canonical path to get the authoritative workspace.
+	manifest, manifestErr := run.ReadManifest(canonRunDir)
+	if manifestErr != nil {
+		return fmt.Errorf("untrusted run dir: cannot read manifest from %q: %w", canonRunDir, manifestErr)
+	}
+	if manifest.Workspace == "" {
+		return fmt.Errorf("untrusted run dir: manifest.workspace is empty in %q", canonRunDir)
+	}
+
+	// Resolve the workspace from the manifest to a canonical path.
+	canonWorkspace, err := filepath.EvalSymlinks(manifest.Workspace)
+	if err != nil {
+		// Fall back to Clean if the workspace doesn't exist yet (edge case during
+		// early run setup), but be strict: accept only absolute paths.
+		if !filepath.IsAbs(manifest.Workspace) {
+			return fmt.Errorf("untrusted run dir: manifest workspace %q is not absolute", manifest.Workspace)
+		}
+		canonWorkspace = filepath.Clean(manifest.Workspace)
+	}
+
+	// The expected runs/ prefix is <workspace>/.fablebound/runs/.
+	expectedRunsDir := filepath.Join(canonWorkspace, ".fablebound", "runs")
+
+	// The canonical run dir must be a direct child of expectedRunsDir (one
+	// path component below) — i.e. it must start with expectedRunsDir + "/" and
+	// contain no further slashes beyond the run-id segment.
+	if !strings.HasPrefix(canonRunDir, expectedRunsDir+string(filepath.Separator)) {
+		return fmt.Errorf("untrusted run dir: %q is not under expected runs dir %q",
+			canonRunDir, expectedRunsDir)
+	}
+	// Ensure it's exactly one segment below (no crafted subdirectory traversal).
+	suffix := canonRunDir[len(expectedRunsDir)+1:]
+	if strings.ContainsRune(suffix, filepath.Separator) {
+		return fmt.Errorf("untrusted run dir: %q has unexpected depth inside runs dir %q",
+			canonRunDir, expectedRunsDir)
+	}
+
+	// Cross-check: the manifest's workspace, when re-derived from the canonical
+	// run dir, must agree (3 levels up: runs/<id> → runs → .fablebound → workspace).
+	derivedWorkspace := filepath.Dir(filepath.Dir(filepath.Dir(canonRunDir)))
+	if derivedWorkspace != canonWorkspace {
+		return fmt.Errorf("untrusted run dir: derived workspace %q != manifest workspace %q",
+			derivedWorkspace, canonWorkspace)
+	}
+
+	// ── Step 2: role/depth cross-check against dispatch meta ─────────────────
+	meta, err := run.ReadMeta(canonRunDir, id.DispatchID)
 	if err != nil {
 		return fmt.Errorf("identity mismatch: cannot read meta for dispatch %q: %w", id.DispatchID, err)
 	}

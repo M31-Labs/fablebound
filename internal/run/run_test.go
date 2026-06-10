@@ -440,6 +440,72 @@ func TestEffectiveStatus_Normal(t *testing.T) {
 	}
 }
 
+// ── Dispatch-alloc atomicity test (Fix 2) ────────────────────────────────────
+
+// TestAllocDispatch_NoDuplicateIDs verifies that N concurrent AllocDispatch
+// calls on the same run produce N distinct dispatch IDs and directories with
+// no clobber.  This is the regression test for the dispatch-ID allocation race.
+func TestAllocDispatch_NoDuplicateIDs(t *testing.T) {
+	base := t.TempDir()
+	s := run.NewStore(base)
+
+	id, err := s.CreateRun()
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	const n = 8
+	type result struct {
+		dispatchID  string
+		dispatchDir string
+		err         error
+	}
+	results := make([]result, n)
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			did, ddir, err := s.AllocDispatch(id)
+			results[i] = result{did, ddir, err}
+		}()
+	}
+	wg.Wait()
+
+	// All must succeed.
+	for i, r := range results {
+		if r.err != nil {
+			t.Errorf("goroutine %d: AllocDispatch error: %v", i, r.err)
+		}
+	}
+
+	// All dispatch IDs must be unique.
+	seen := make(map[string]int, n)
+	for i, r := range results {
+		if r.dispatchID == "" {
+			continue
+		}
+		if prev, dup := seen[r.dispatchID]; dup {
+			t.Errorf("duplicate dispatch ID %q from goroutines %d and %d", r.dispatchID, prev, i)
+		}
+		seen[r.dispatchID] = i
+	}
+	if len(seen) != n {
+		t.Errorf("expected %d unique dispatch IDs, got %d", n, len(seen))
+	}
+
+	// All dispatch directories must exist on disk.
+	for _, r := range results {
+		if r.dispatchDir == "" {
+			continue
+		}
+		if _, statErr := os.Stat(r.dispatchDir); statErr != nil {
+			t.Errorf("dispatch dir %q missing after AllocDispatch: %v", r.dispatchDir, statErr)
+		}
+	}
+}
+
 // ── Flock concurrency test ────────────────────────────────────────────────────
 
 // TestConcurrentMetaWrite spawns 10 goroutines all writing to the same

@@ -77,6 +77,7 @@ func runToManifest(r *scratch.Run) *run.Manifest {
 		RootSessionID: r.RootSessionID,
 		PolicySHAs:    r.PolicySHAs,
 		HyphaTraceID:  r.HyphaTraceID,
+		Store:         r.StoreMode,
 	}
 }
 
@@ -93,6 +94,7 @@ func manifestToRun(m *run.Manifest) *scratch.Run {
 		RootSessionID: m.RootSessionID,
 		PolicySHAs:    m.PolicySHAs,
 		HyphaTraceID:  m.HyphaTraceID,
+		StoreMode:     m.Store,
 	}
 }
 

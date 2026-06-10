@@ -10,6 +10,7 @@ package storetest
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -30,6 +31,7 @@ func Run(t *testing.T, open func(t *testing.T) scratch.Store) {
 
 	t.Run("RunCRUD", func(t *testing.T) { testRunCRUD(t, open(t)) })
 	t.Run("DispatchAllocMonotonic", func(t *testing.T) { testDispatchAllocMonotonic(t, open(t)) })
+	t.Run("DispatchAllocConcurrent", func(t *testing.T) { testDispatchAllocConcurrent(t, open(t)) })
 	t.Run("DispatchFacts", func(t *testing.T) { testDispatchFacts(t, open(t)) })
 	t.Run("BriefReportRoundtrip", func(t *testing.T) { testBriefReportRoundtrip(t, open(t)) })
 	t.Run("NoteOrdering", func(t *testing.T) { testNoteOrdering(t, open(t)) })
@@ -155,13 +157,6 @@ func testDispatchAllocMonotonic(t *testing.T, s scratch.Store) {
 
 	// Expect d01, d02, d03, d04, d05 in order.
 	for i, id := range ids {
-		want := t.Name() // unused but captures i nicely
-		_ = want
-		expected := t.Name()
-		_ = expected
-		wantID := strings.ToLower(strings.Replace(t.Name(), t.Name(), "", 1))
-		_ = wantID
-		// Direct check.
 		if id == "" {
 			t.Errorf("dispatch %d: empty ID", i)
 			continue
@@ -177,6 +172,67 @@ func testDispatchAllocMonotonic(t *testing.T, s scratch.Store) {
 	// Last must be d05.
 	if ids[n-1] != "d05" {
 		t.Errorf("last dispatch ID = %q, want d05", ids[n-1])
+	}
+}
+
+// testDispatchAllocConcurrent verifies that AllocDispatch is safe under
+// concurrent contention: 8 goroutines each allocate N IDs; the full set must
+// be unique and form a monotonically-ordered sequence with no gaps.
+func testDispatchAllocConcurrent(t *testing.T, s scratch.Store) {
+	t.Helper()
+	runID := mustCreateRun(t, s)
+
+	const goroutines = 8
+	const allocsPerGoroutine = 5
+	const total = goroutines * allocsPerGoroutine
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	allIDs := make([]string, 0, total)
+
+	wg.Add(goroutines)
+	for g := 0; g < goroutines; g++ {
+		go func() {
+			defer wg.Done()
+			local := make([]string, allocsPerGoroutine)
+			for i := 0; i < allocsPerGoroutine; i++ {
+				id, err := s.AllocDispatch(runID)
+				if err != nil {
+					t.Errorf("concurrent AllocDispatch: %v", err)
+					return
+				}
+				local[i] = id
+			}
+			mu.Lock()
+			allIDs = append(allIDs, local...)
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	if len(allIDs) != total {
+		t.Fatalf("expected %d IDs, got %d", total, len(allIDs))
+	}
+
+	// All IDs must be unique.
+	seen := make(map[string]bool, total)
+	for _, id := range allIDs {
+		if id == "" {
+			t.Error("concurrent AllocDispatch returned empty ID")
+			continue
+		}
+		if seen[id] {
+			t.Errorf("duplicate dispatch ID: %q", id)
+		}
+		seen[id] = true
+	}
+
+	// The set must span d01..d{total} with no gaps (all present).
+	for i := 1; i <= total; i++ {
+		want := fmt.Sprintf("d%02d", i)
+		if !seen[want] {
+			t.Errorf("missing dispatch ID %q in concurrent alloc set", want)
+		}
 	}
 }
 

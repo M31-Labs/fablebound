@@ -118,6 +118,16 @@ func runRun(args []string) error {
 		defer storeCloser()
 	}
 
+	// Determine the effective store kind so it can be recorded in the manifest.
+	// Children read this field to open the same store even when TILLER_RUN_DIR is set.
+	effectiveStore := *storeFlag
+	if effectiveStore == "" {
+		effectiveStore = os.Getenv("TILLER_STORE")
+	}
+	if effectiveStore == "" {
+		effectiveStore = "fs"
+	}
+
 	// Create the run record.
 	now := time.Now()
 	r := &scratch.Run{
@@ -126,6 +136,7 @@ func runRun(args []string) error {
 		Status:      "running",
 		FableBudget: *fableBudget,
 		CreatedAt:   now,
+		StoreMode:   effectiveStore,
 		PolicySHAs: map[string]string{
 			"dispatch": dispatchLoaded.SHA256,
 			"toolgate": toolLoaded.SHA256,

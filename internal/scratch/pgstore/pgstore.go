@@ -178,8 +178,9 @@ func (s *Store) ListRuns() ([]scratch.RunSummary, error) {
 //	RETURNING next_n - 1
 //
 // This returns the *previous* value (the ordinal for the new dispatch) in one
-// round-trip, with no advisory locks or in-process mutexes required. The BIGSERIAL
-// PK on dispatch_seq provides row-level locking for the upsert.
+// round-trip, with no advisory locks or in-process mutexes required. The
+// run_id TEXT PRIMARY KEY on dispatch_seq provides row-level locking for the
+// upsert via Postgres's standard row-lock-on-conflict semantics.
 func (s *Store) AllocDispatch(runID string) (string, error) {
 	ctx := context.Background()
 

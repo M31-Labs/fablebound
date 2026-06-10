@@ -13,6 +13,7 @@ import (
 	"m31labs.dev/tiller/internal/policy"
 	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/scratch/fsstore"
+	"m31labs.dev/tiller/internal/storeutil"
 )
 
 // ClaudeResult is the parsed --output-format json output from claude.
@@ -44,10 +45,34 @@ type SuperviseArgs struct {
 //  4. Append kind:"report" to the dispatch's context_trace.jsonl.
 //  5. Finalize dispatch record (status/cost/turns/session/ended_at/exit).
 func Supervise(a SuperviseArgs) error {
+	// Ensure TILLER_RUN_DIR is set so that storeutil.Resolve can read the manifest
+	// and open the correct store (tee/pg if the parent run used one).
+	// This is a no-op when the env var is already set by the spawn parent.
+	if os.Getenv("TILLER_RUN_DIR") == "" {
+		_ = os.Setenv("TILLER_RUN_DIR", a.RunDir)
+	}
+
 	// Resolve the store from the run directory.
-	runsBase := filepath.Dir(a.RunDir)
+	// storeutil.Resolve reads the manifest store field and opens a tee/pg store
+	// when the parent `tiller run` used one — so supervise finalizations mirror to pg.
+	// Soft-fail: on any dial error, falls back to fsstore (fs is authoritative).
 	runID := filepath.Base(a.RunDir)
-	st := fsstore.Open(runsBase)
+	var st scratch.Store
+	var storeCloser func() error
+	{
+		resolvedSt, _, resolvedCloser, resolveErr := storeutil.Resolve(nil)
+		if resolveErr != nil {
+			// Fallback: use fsstore directly.
+			runsBase := filepath.Dir(a.RunDir)
+			resolvedSt = fsstore.Open(runsBase)
+			resolvedCloser = nil
+		}
+		st = resolvedSt
+		storeCloser = resolvedCloser
+	}
+	if storeCloser != nil {
+		defer storeCloser() //nolint:errcheck
+	}
 
 	dispatchDir := filepath.Join(a.RunDir, "dispatches", a.DispatchID)
 	logPath := filepath.Join(dispatchDir, "supervise.log")

@@ -19,6 +19,10 @@ type Manifest struct {
 	RootSessionID string            `json:"root_session_id,omitempty"`
 	PolicySHAs    map[string]string `json:"policy_shas,omitempty"`    // kind→sha256
 	HyphaTraceID  string            `json:"hypha_trace_id,omitempty"` // set if hypha trace was opened
+	// Store is the store mode used by the parent `tiller run` invocation.
+	// Valid values: "fs" | "pg" | "tee". Omitted (empty) means "fs" (default).
+	// NEVER store the DSN here — DSN flows via TILLER_STORE_DSN env only.
+	Store string `json:"store,omitempty"`
 }
 
 // manifestPath returns the path to manifest.json inside a run directory.

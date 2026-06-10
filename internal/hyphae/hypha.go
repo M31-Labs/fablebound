@@ -111,14 +111,37 @@ func (h *Hypha) TraceTick(id, message string) {
 	h.run("trace", "tick", id, message, "--space", HyphaSpace) //nolint:errcheck
 }
 
-// TraceDone finalises a trace with the given status (e.g. "completed", "failed").
+// TraceDone finalises a trace with the given status.
+// status is in tiller vocabulary (completed|failed|halted|stale|…) and is
+// mapped to the hypha v0.1.9 vocabulary (succeeded|failed|killed) at this
+// boundary. Callers stay in tiller terms; the mapping lives here.
+//
+// Mapping:
+//   - completed → succeeded
+//   - failed    → failed
+//   - anything else (halted, stale, …) → killed
+//
 // --space is required on multi-space installs (observed in v0.1.9 live probe).
 // No-op if id is empty.
 func (h *Hypha) TraceDone(id, status string) {
 	if !h.Available() || id == "" {
 		return
 	}
-	h.run("trace", "done", id, "--status", status, "--space", HyphaSpace) //nolint:errcheck
+	h.run("trace", "done", id, "--status", tillerStatusToHypha(status), "--space", HyphaSpace) //nolint:errcheck
+}
+
+// tillerStatusToHypha maps tiller run-terminal status vocabulary to the hypha
+// v0.1.9 trace-done vocabulary (succeeded|failed|killed).
+func tillerStatusToHypha(tillerStatus string) string {
+	switch tillerStatus {
+	case "completed":
+		return "succeeded"
+	case "failed":
+		return "failed"
+	default:
+		// halted, stale, and any future terminal states map to killed.
+		return "killed"
+	}
 }
 
 // SporeSubmit runs `hypha spore submit <path> --sign [--as a]`.

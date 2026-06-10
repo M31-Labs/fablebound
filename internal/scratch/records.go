@@ -25,6 +25,10 @@ type Run struct {
 	RootSessionID string            `json:"root_session_id,omitempty"`
 	PolicySHAs    map[string]string `json:"policy_shas,omitempty"` // kind→sha256
 	HyphaTraceID  string            `json:"hypha_trace_id,omitempty"`
+	// StoreMode is the store kind used for this run (fs|pg|tee).
+	// Written by the parent `tiller run` so children can inherit the store.
+	// Empty means "fs" (default). NEVER store the DSN here.
+	StoreMode string `json:"store_mode,omitempty"`
 }
 
 // Dispatch is the per-dispatch record (spec §3.1 "dispatch" row).

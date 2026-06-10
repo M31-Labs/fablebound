@@ -212,6 +212,70 @@ exit 0
 	}
 }
 
+// TestTillerStatusToHypha verifies that tiller run-terminal statuses are
+// correctly mapped to hypha v0.1.9 trace-done vocabulary.
+func TestTillerStatusToHypha(t *testing.T) {
+	cases := []struct {
+		tiller string
+		hypha  string
+	}{
+		{"completed", "succeeded"},
+		{"failed", "failed"},
+		{"halted", "killed"},
+		{"stale", "killed"},
+		{"", "killed"},
+		{"unknown-future-status", "killed"},
+	}
+	for _, tc := range cases {
+		got := tillerStatusToHypha(tc.tiller)
+		if got != tc.hypha {
+			t.Errorf("tillerStatusToHypha(%q) = %q, want %q", tc.tiller, got, tc.hypha)
+		}
+	}
+}
+
+// TestTraceDoneSendsSucceeded verifies that TraceDone maps "completed"→"succeeded"
+// in the hypha argv, not passing tiller vocabulary directly.
+func TestTraceDoneSendsSucceeded(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "hypha.log")
+	stubPath := filepath.Join(tmpDir, "hypha")
+	stubScript := "#!/bin/sh\necho \"$@\" >> " + logFile + "\nexit 0\n"
+	if err := os.WriteFile(stubPath, []byte(stubScript), 0o755); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+	orig := os.Getenv("PATH")
+	t.Setenv("PATH", tmpDir+":"+orig)
+	defer os.Setenv("PATH", orig)
+
+	h := New(func(string, ...any) {})
+	if !h.Available() {
+		t.Skip("hypha stub not found on PATH")
+	}
+
+	// Mapping: completed→succeeded, failed→failed, halted→killed.
+	for _, tc := range []struct{ in, want string }{
+		{"completed", "succeeded"},
+		{"failed", "failed"},
+		{"halted", "killed"},
+	} {
+		// Clear log file between calls.
+		_ = os.Remove(logFile)
+		h.TraceDone("trace-test-id", tc.in)
+		data, err := os.ReadFile(logFile)
+		if err != nil {
+			t.Fatalf("read hypha log for status %q: %v", tc.in, err)
+		}
+		line := strings.TrimSpace(string(data))
+		if !strings.Contains(line, "--status "+tc.want) {
+			t.Errorf("TraceDone(%q): want --status %q in argv, got: %q", tc.in, tc.want, line)
+		}
+		if strings.Contains(line, "--status "+tc.in) && tc.in != tc.want {
+			t.Errorf("TraceDone(%q): tiller vocabulary leaked into hypha argv: %q", tc.in, line)
+		}
+	}
+}
+
 // TestHyphaStubLegacyPlainText verifies TraceStart falls back to firstWord
 // when the stub emits legacy plain-text (pre-v0.1.9 behaviour).
 func TestHyphaStubLegacyPlainText(t *testing.T) {

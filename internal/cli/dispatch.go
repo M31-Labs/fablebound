@@ -18,8 +18,8 @@ import (
 	"m31labs.dev/tiller/internal/hyphae"
 	"m31labs.dev/tiller/internal/policy"
 	"m31labs.dev/tiller/internal/scratch"
-	"m31labs.dev/tiller/internal/scratch/fsstore"
 	"m31labs.dev/tiller/internal/spawn"
+	"m31labs.dev/tiller/internal/storeutil"
 	"m31labs.dev/tiller/internal/tier"
 )
 
@@ -74,9 +74,15 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 	}
 
 	// Resolve run directory and open store.
-	st, runID, err := fsstore.Resolve()
+	// storeutil.Resolve reads the manifest store field when TILLER_RUN_DIR is set,
+	// opening a tee/pg store so that dispatch writes mirror to pg in tee mode.
+	// The hook (internal/hook) never calls storeutil; it uses fsstore directly.
+	st, runID, storeCloser, err := storeutil.Resolve(nil)
 	if err != nil {
 		return fmt.Errorf("dispatch: %w", err)
+	}
+	if storeCloser != nil {
+		defer storeCloser()
 	}
 	if runID == "" {
 		return fmt.Errorf("dispatch: TILLER_RUN_DIR is not set")

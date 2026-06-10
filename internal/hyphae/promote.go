@@ -7,7 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"m31labs.dev/tiller/internal/run"
+	"m31labs.dev/tiller/internal/scratch"
+	"m31labs.dev/tiller/internal/scratch/fsstore"
 )
 
 // SporeOptions controls spore composition and submission.
@@ -24,12 +25,16 @@ func Promote(runDir string, opts SporeOptions, log Logger) (string, error) {
 		log = func(string, ...any) {}
 	}
 
-	manifest, err := run.ReadManifest(runDir)
+	runsBase := filepath.Dir(runDir)
+	runID := filepath.Base(runDir)
+	st := fsstore.Open(runsBase)
+
+	runRec, err := st.ReadRun(runID)
 	if err != nil {
-		return "", fmt.Errorf("promote: read manifest: %w", err)
+		return "", fmt.Errorf("promote: read run: %w", err)
 	}
 
-	tree, err := run.BuildTree(runDir)
+	tree, err := st.BuildDispatchTree(runID)
 	if err != nil {
 		return "", fmt.Errorf("promote: build tree: %w", err)
 	}
@@ -39,14 +44,14 @@ func Promote(runDir string, opts SporeOptions, log Logger) (string, error) {
 
 	// --- Task ---
 	sb.WriteString("## Task\n\n")
-	sb.WriteString(strings.TrimSpace(manifest.Task))
+	sb.WriteString(strings.TrimSpace(runRec.Task))
 	sb.WriteString("\n\n")
 
 	// --- Outcome ---
 	sb.WriteString("## Outcome\n\n")
-	sb.WriteString(fmt.Sprintf("Run `%s` — status: **%s**", manifest.RunID, manifest.Status))
-	if manifest.EndedAt != nil && !manifest.CreatedAt.IsZero() {
-		dur := manifest.EndedAt.Sub(manifest.CreatedAt).Round(time.Second)
+	sb.WriteString(fmt.Sprintf("Run `%s` — status: **%s**", runRec.ID, runRec.Status))
+	if runRec.EndedAt != nil && !runRec.CreatedAt.IsZero() {
+		dur := runRec.EndedAt.Sub(runRec.CreatedAt).Round(time.Second)
 		sb.WriteString(fmt.Sprintf(", duration: %s", dur))
 	}
 	sb.WriteString("\n\n")
@@ -101,36 +106,36 @@ func Promote(runDir string, opts SporeOptions, log Logger) (string, error) {
 }
 
 // buildTreeOneLiners renders the dispatch tree as one-liner bullet points.
-func buildTreeOneLiners(root *run.Node, runDir string) string {
+func buildTreeOneLiners(root *scratch.DispatchNode, runDir string) string {
 	var sb strings.Builder
 	writeTreeNode(&sb, root, 0, runDir)
 	return sb.String()
 }
 
-func writeTreeNode(sb *strings.Builder, n *run.Node, depth int, runDir string) {
-	if n.Meta != nil {
+func writeTreeNode(sb *strings.Builder, n *scratch.DispatchNode, depth int, runDir string) {
+	if n.Dispatch != nil {
 		indent := strings.Repeat("  ", depth)
-		model := n.Meta.Model
+		model := n.Dispatch.Model
 		if model == "" {
 			model = "?"
 		}
 		cost := ""
-		if n.Meta.CostUSD > 0 {
-			cost = fmt.Sprintf(" $%.4f", n.Meta.CostUSD)
+		if n.Dispatch.CostUSD > 0 {
+			cost = fmt.Sprintf(" $%.4f", n.Dispatch.CostUSD)
 		}
 		report := ""
-		if n.Meta.Status == "completed" {
-			reportPath := filepath.Join(runDir, "dispatches", n.Meta.ID, "report.md")
+		if n.Dispatch.Status == "completed" {
+			reportPath := filepath.Join(runDir, "dispatches", n.Dispatch.ID, "report.md")
 			if _, err := os.Stat(reportPath); err == nil {
-				report = fmt.Sprintf(" → dispatches/%s/report.md", n.Meta.ID)
+				report = fmt.Sprintf(" → dispatches/%s/report.md", n.Dispatch.ID)
 			}
 		}
 		sb.WriteString(fmt.Sprintf("%s- `%s` %s(%s) [%s%s]%s\n",
-			indent, n.Meta.ID, n.Meta.Role, model, n.Meta.Status, cost, report))
+			indent, n.Dispatch.ID, n.Dispatch.Role, model, n.Dispatch.Status, cost, report))
 	}
 	for _, child := range n.Children {
 		d := depth
-		if n.Meta != nil {
+		if n.Dispatch != nil {
 			d = depth + 1
 		}
 		writeTreeNode(sb, child, d, runDir)
@@ -139,7 +144,7 @@ func writeTreeNode(sb *strings.Builder, n *run.Node, depth int, runDir string) {
 
 // buildReportExcerpts reads report.md for each dispatch and returns a
 // truncated excerpt section.
-func buildReportExcerpts(root *run.Node, runDir string) string {
+func buildReportExcerpts(root *scratch.DispatchNode, runDir string) string {
 	const maxExcerptBytes = 512
 
 	var sb strings.Builder
@@ -147,16 +152,16 @@ func buildReportExcerpts(root *run.Node, runDir string) string {
 	return sb.String()
 }
 
-func collectExcerpts(n *run.Node, runDir string, maxBytes int, sb *strings.Builder) {
-	if n.Meta != nil {
-		reportPath := filepath.Join(runDir, "dispatches", n.Meta.ID, "report.md")
+func collectExcerpts(n *scratch.DispatchNode, runDir string, maxBytes int, sb *strings.Builder) {
+	if n.Dispatch != nil {
+		reportPath := filepath.Join(runDir, "dispatches", n.Dispatch.ID, "report.md")
 		data, err := os.ReadFile(reportPath)
 		if err == nil && len(data) > 0 {
 			excerpt := strings.TrimSpace(string(data))
 			if len(excerpt) > maxBytes {
 				excerpt = excerpt[:maxBytes] + "…"
 			}
-			sb.WriteString(fmt.Sprintf("### %s (%s)\n\n", n.Meta.ID, n.Meta.Role))
+			sb.WriteString(fmt.Sprintf("### %s (%s)\n\n", n.Dispatch.ID, n.Dispatch.Role))
 			sb.WriteString(excerpt)
 			sb.WriteString("\n\n")
 		}

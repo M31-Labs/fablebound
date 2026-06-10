@@ -11,7 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"m31labs.dev/tiller/internal/run"
+	"m31labs.dev/tiller/internal/scratch"
+	"m31labs.dev/tiller/internal/scratch/fsstore"
 )
 
 // findTiller builds the tiller binary and returns its path.
@@ -63,26 +64,20 @@ func setupFixtureRun(t *testing.T) (runDir string, binary string, stub string) {
 		t.Fatal(err)
 	}
 
-	// Create a run.
-	store := run.NewStore(runBase)
-	runID, err := store.CreateRun()
-	if err != nil {
-		t.Fatal(err)
-	}
-	runDir = store.RunDir(runID)
-
-	// Write a manifest.
-	manifest := &run.Manifest{
-		RunID:       runID,
+	// Create a run via the scratch.Store.
+	st := fsstore.Open(runBase)
+	r := &scratch.Run{
 		Task:        "test task",
 		Workspace:   workspace,
 		Status:      "running",
 		FableBudget: 2,
 		CreatedAt:   time.Now(),
 	}
-	if err := run.WriteManifest(runDir, manifest); err != nil {
+	runID, err := st.CreateRun(r)
+	if err != nil {
 		t.Fatal(err)
 	}
+	runDir = filepath.Join(runBase, runID)
 
 	// Copy embedded default policies to .tiller/policy/ so dispatch can load them.
 	policyDir := filepath.Join(workspace, ".tiller", "policy")
@@ -115,6 +110,64 @@ func copyEmbeddedPolicies(t *testing.T, root, target string) {
 	}
 }
 
+// writeTestDispatch writes a test dispatch record for a given dispatch ID using the Store.
+func writeTestDispatch(t *testing.T, runDir, dispatchID, role, model, status string, depth int) {
+	t.Helper()
+	runsBase := filepath.Dir(runDir)
+	runID := filepath.Base(runDir)
+	st := fsstore.Open(runsBase)
+
+	// Ensure dispatch dir exists.
+	dispDir := filepath.Join(runDir, "dispatches", dispatchID)
+	if err := os.MkdirAll(dispDir, 0o755); err != nil {
+		t.Fatalf("mkdir dispatch dir: %v", err)
+	}
+
+	d := &scratch.Dispatch{
+		ID:        dispatchID,
+		Role:      role,
+		Model:     model,
+		Profile:   "orchestrator",
+		Status:    status,
+		Depth:     depth,
+		StartedAt: time.Now(),
+	}
+	if err := st.WriteDispatch(runID, d); err != nil {
+		t.Fatalf("write dispatch %s: %v", dispatchID, err)
+	}
+}
+
+// readTestDispatch reads a dispatch record via the Store.
+func readTestDispatch(t *testing.T, runDir, dispatchID string) *scratch.Dispatch {
+	t.Helper()
+	runsBase := filepath.Dir(runDir)
+	runID := filepath.Base(runDir)
+	st := fsstore.Open(runsBase)
+	d, err := st.ReadDispatch(runID, dispatchID)
+	if err != nil {
+		t.Fatalf("read dispatch %s: %v", dispatchID, err)
+	}
+	return d
+}
+
+// waitForDispatchTerminal polls until a dispatch is terminal or deadline is exceeded.
+func waitForDispatchTerminal(t *testing.T, runDir, dispatchID string, deadline time.Time) {
+	t.Helper()
+	runsBase := filepath.Dir(runDir)
+	runID := filepath.Base(runDir)
+	st := fsstore.Open(runsBase)
+	for {
+		d, err := st.ReadDispatch(runID, dispatchID)
+		if err == nil && d.IsTerminal() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("supervisor for %s did not complete within deadline", dispatchID)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 // TestDispatchAllowPath exercises the full allow path:
 //   - claude-stub emits a valid JSON result
 //   - dispatches/d01/{brief.md,report.md,meta.json,settings.json} exist
@@ -127,24 +180,8 @@ func TestDispatchAllowPath(t *testing.T) {
 	runID := filepath.Base(runDir)
 	_ = runID
 
-	// Simulate being the "root" caller (orchestrator) by creating a root dispatch dir.
-	rootDispatchDir := filepath.Join(runDir, "dispatches", "root")
-	if err := os.MkdirAll(rootDispatchDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Write a root meta so context trace has somewhere to write.
-	rootMeta := &run.Meta{
-		ID:        "root",
-		Role:      "orchestrator",
-		Model:     "fable",
-		Profile:   "orchestrator",
-		Status:    "running",
-		Depth:     0,
-		StartedAt: time.Now(),
-	}
-	if err := run.WriteMeta(runDir, rootMeta); err != nil {
-		t.Fatal(err)
-	}
+	// Simulate being the "root" caller (orchestrator) by writing a root dispatch record.
+	writeTestDispatch(t, runDir, "root", "orchestrator", "fable", "running", 0)
 
 	env := append(os.Environ(),
 		"TILLER_RUN_DIR="+runDir,
@@ -170,19 +207,8 @@ func TestDispatchAllowPath(t *testing.T) {
 	dispatchID := parts[0]
 	t.Logf("dispatch ID: %s, output: %s", dispatchID, dispatchLine)
 
-	// Wait for the dispatch to reach terminal status (it may already be completed
-	// since --wait is default, but verify robustly).
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		m, err := run.ReadMeta(runDir, dispatchID)
-		if err == nil && m.IsTerminal() {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("supervisor for %s did not complete within 10s", dispatchID)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	// Wait for the dispatch to reach terminal status.
+	waitForDispatchTerminal(t, runDir, dispatchID, time.Now().Add(10*time.Second))
 
 	dispatchDir := filepath.Join(runDir, "dispatches", dispatchID)
 
@@ -194,13 +220,10 @@ func TestDispatchAllowPath(t *testing.T) {
 		}
 	}
 
-	// Check meta status = "completed".
-	meta, err := run.ReadMeta(runDir, dispatchID)
-	if err != nil {
-		t.Fatalf("read meta: %v", err)
-	}
-	if meta.Status != "completed" {
-		t.Errorf("meta.Status = %q, want completed", meta.Status)
+	// Check dispatch status = "completed".
+	d := readTestDispatch(t, runDir, dispatchID)
+	if d.Status != "completed" {
+		t.Errorf("dispatch.Status = %q, want completed", d.Status)
 	}
 
 	// Check audit/dispatch.jsonl has an event.
@@ -257,22 +280,7 @@ func TestDispatchDenyWorkerFable(t *testing.T) {
 	runDir, binary, stub := setupFixtureRun(t)
 
 	// Create a root dispatch so context trace has somewhere to write.
-	rootDispatchDir := filepath.Join(runDir, "dispatches", "root")
-	if err := os.MkdirAll(rootDispatchDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	rootMeta := &run.Meta{
-		ID:        "root",
-		Role:      "orchestrator",
-		Model:     "fable",
-		Profile:   "orchestrator",
-		Status:    "running",
-		Depth:     0,
-		StartedAt: time.Now(),
-	}
-	if err := run.WriteMeta(runDir, rootMeta); err != nil {
-		t.Fatal(err)
-	}
+	writeTestDispatch(t, runDir, "root", "orchestrator", "fable", "running", 0)
 
 	env := append(os.Environ(),
 		"TILLER_RUN_DIR="+runDir,
@@ -308,22 +316,7 @@ func TestDispatchDenyTerminalDepth(t *testing.T) {
 	runDir, binary, stub := setupFixtureRun(t)
 
 	// Create a d01 dispatch dir to serve as the "caller" at depth 2.
-	d01Dir := filepath.Join(runDir, "dispatches", "d01")
-	if err := os.MkdirAll(d01Dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	d01Meta := &run.Meta{
-		ID:        "d01",
-		Role:      "worker",
-		Model:     "sonnet",
-		Profile:   "execution",
-		Status:    "running",
-		Depth:     2,
-		StartedAt: time.Now(),
-	}
-	if err := run.WriteMeta(runDir, d01Meta); err != nil {
-		t.Fatal(err)
-	}
+	writeTestDispatch(t, runDir, "d01", "worker", "sonnet", "running", 2)
 
 	env := append(os.Environ(),
 		"TILLER_RUN_DIR="+runDir,
@@ -375,22 +368,7 @@ printf '{"type":"result","result":"slow report","cost_usd":0.001,"num_turns":1,"
 	}
 
 	// Create a root dispatch.
-	rootDispatchDir := filepath.Join(runDir, "dispatches", "root")
-	if err := os.MkdirAll(rootDispatchDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	rootMeta := &run.Meta{
-		ID:        "root",
-		Role:      "orchestrator",
-		Model:     "fable",
-		Profile:   "orchestrator",
-		Status:    "running",
-		Depth:     0,
-		StartedAt: time.Now(),
-	}
-	if err := run.WriteMeta(runDir, rootMeta); err != nil {
-		t.Fatal(err)
-	}
+	writeTestDispatch(t, runDir, "root", "orchestrator", "fable", "running", 0)
 
 	env := append(os.Environ(),
 		"TILLER_RUN_DIR="+runDir,
@@ -422,19 +400,10 @@ printf '{"type":"result","result":"slow report","cost_usd":0.001,"num_turns":1,"
 	t.Logf("dispatch ID: %s", dispatchID)
 
 	// Wait for supervisor to eventually complete (the stub sleeps 3s total).
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		m, err := run.ReadMeta(runDir, dispatchID)
-		if err == nil && m.IsTerminal() {
-			if m.Status != "completed" {
-				t.Errorf("expected completed, got %s", m.Status)
-			}
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("supervisor did not complete within 15s after timeout dispatch")
-		}
-		time.Sleep(200 * time.Millisecond)
+	waitForDispatchTerminal(t, runDir, dispatchID, time.Now().Add(15*time.Second))
+	d := readTestDispatch(t, runDir, dispatchID)
+	if d.Status != "completed" {
+		t.Errorf("expected completed, got %s", d.Status)
 	}
 }
 
@@ -477,6 +446,9 @@ func TestNoteAdd(t *testing.T) {
 // TestPollAndAwait verifies that poll and await work for a terminal dispatch.
 func TestPollAndAwait(t *testing.T) {
 	runDir, binary, stub := setupFixtureRun(t)
+	runsBase := filepath.Dir(runDir)
+	runID := filepath.Base(runDir)
+	st := fsstore.Open(runsBase)
 
 	// Create a completed dispatch.
 	dispatchID := "d01"
@@ -486,7 +458,7 @@ func TestPollAndAwait(t *testing.T) {
 	}
 	now := time.Now()
 	ended := now.Add(time.Second)
-	meta := &run.Meta{
+	d := &scratch.Dispatch{
 		ID:        dispatchID,
 		Role:      "investigator",
 		Model:     "sonnet",
@@ -495,7 +467,7 @@ func TestPollAndAwait(t *testing.T) {
 		StartedAt: now,
 		EndedAt:   &ended,
 	}
-	if err := run.WriteMeta(runDir, meta); err != nil {
+	if err := st.WriteDispatch(runID, d); err != nil {
 		t.Fatal(err)
 	}
 
@@ -533,7 +505,7 @@ func TestPollAndAwait(t *testing.T) {
 	if err := os.MkdirAll(runningDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runningMeta := &run.Meta{
+	dRunning := &scratch.Dispatch{
 		ID:        runningDispatchID,
 		Role:      "worker",
 		Model:     "sonnet",
@@ -541,7 +513,7 @@ func TestPollAndAwait(t *testing.T) {
 		Depth:     1,
 		StartedAt: time.Now(),
 	}
-	if err := run.WriteMeta(runDir, runningMeta); err != nil {
+	if err := st.WriteDispatch(runID, dRunning); err != nil {
 		t.Fatal(err)
 	}
 
@@ -587,21 +559,7 @@ func TestAuditEventFormat(t *testing.T) {
 	runID := filepath.Base(runDir)
 	_ = runID
 
-	rootDir := filepath.Join(runDir, "dispatches", "root")
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	rootMeta := &run.Meta{
-		ID:        "root",
-		Role:      "orchestrator",
-		Model:     "fable",
-		Status:    "running",
-		Depth:     0,
-		StartedAt: time.Now(),
-	}
-	if err := run.WriteMeta(runDir, rootMeta); err != nil {
-		t.Fatal(err)
-	}
+	writeTestDispatch(t, runDir, "root", "orchestrator", "fable", "running", 0)
 
 	env := append(os.Environ(),
 		"TILLER_RUN_DIR="+runDir,
@@ -628,17 +586,7 @@ func TestAuditEventFormat(t *testing.T) {
 	t.Logf("dispatch ID: %s", auditDispID)
 
 	// Wait for completion.
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		m, err := run.ReadMeta(runDir, auditDispID)
-		if err == nil && m.IsTerminal() {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("timed out waiting for completion")
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	waitForDispatchTerminal(t, runDir, auditDispID, time.Now().Add(10*time.Second))
 
 	auditPath := filepath.Join(runDir, "audit", "dispatch.jsonl")
 	data, err := os.ReadFile(auditPath)

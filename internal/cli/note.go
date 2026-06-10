@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
-	"m31labs.dev/tiller/internal/run"
+	"m31labs.dev/tiller/internal/scratch/fsstore"
 )
 
 // runNote is the handler for `tiller note add [-|"text"]`.
@@ -49,28 +47,24 @@ func runNote(args []string) error {
 		role = "user"
 	}
 
-	// Resolve run directory.
-	runDir, err := run.CurrentRunDir()
+	// Resolve run directory and open store.
+	st, runID, err := fsstore.Resolve()
+	if err != nil {
+		return fmt.Errorf("note add: %w", err)
+	}
+	if runID == "" {
+		return fmt.Errorf("note add: TILLER_RUN_DIR is not set")
+	}
+
+	// Append note via the Store.
+	ref, err := st.AppendNote(runID, role, []byte(text))
 	if err != nil {
 		return fmt.Errorf("note add: %w", err)
 	}
 
-	notesDir := filepath.Join(runDir, "notes")
-	if err := os.MkdirAll(notesDir, 0o755); err != nil {
-		return fmt.Errorf("note add: mkdir notes: %w", err)
-	}
-
-	// Filename: <utc-stamp>-<role>.md
-	// Stamp format: 20060102-150405.000000000 (UTC, nanoseconds for uniqueness)
-	stamp := time.Now().UTC().Format("20060102-150405.000000000")
-	// Replace dots with dashes for filename safety.
-	stamp = strings.ReplaceAll(stamp, ".", "-")
-	filename := stamp + "-" + role + ".md"
-	notePath := filepath.Join(notesDir, filename)
-
-	if err := os.WriteFile(notePath, []byte(text), 0o644); err != nil {
-		return fmt.Errorf("note add: write %s: %w", notePath, err)
-	}
+	// Compute the full path for output.
+	runDir := os.Getenv("TILLER_RUN_DIR")
+	notePath := runDir + "/notes/" + ref.Filename
 
 	fmt.Fprintf(os.Stderr, "note written: %s\n", notePath)
 	fmt.Println(notePath)

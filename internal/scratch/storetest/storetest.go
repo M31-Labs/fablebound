@@ -9,6 +9,7 @@ package storetest
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +18,10 @@ import (
 	"m31labs.dev/arbiter/audit"
 	"m31labs.dev/tiller/internal/scratch"
 )
+
+// jsonUnmarshal is a local alias so the storetest package can remain
+// self-contained and the main test code can use it without direct import.
+func jsonUnmarshal(data []byte, v any) error { return json.Unmarshal(data, v) }
 
 // Run executes the full Store conformance suite against the implementation
 // produced by open. Each sub-test receives its own Store instance.
@@ -33,6 +38,10 @@ func Run(t *testing.T, open func(t *testing.T) scratch.Store) {
 	t.Run("AuditSinkWrites", func(t *testing.T) { testAuditSinkWrites(t, open(t)) })
 	t.Run("MaterializeIdempotent", func(t *testing.T) { testMaterializeIdempotent(t, open(t)) })
 	t.Run("ListRuns", func(t *testing.T) { testListRuns(t, open(t)) })
+	t.Run("ReadAdapterConfig", func(t *testing.T) { testReadAdapterConfig(t, open(t)) })
+	t.Run("RenderTree", func(t *testing.T) { testRenderTree(t, open(t)) })
+	t.Run("BuildRunSummaryJSON", func(t *testing.T) { testBuildRunSummaryJSON(t, open(t)) })
+	t.Run("BuildDispatchTree", func(t *testing.T) { testBuildDispatchTree(t, open(t)) })
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -464,4 +473,112 @@ func testListRuns(t *testing.T, s scratch.Store) {
 			t.Errorf("ListRuns missing run %q", id)
 		}
 	}
+}
+
+func testReadAdapterConfig(t *testing.T, s scratch.Store) {
+	t.Helper()
+	runID := mustCreateRun(t, s)
+	did := mustAllocDispatch(t, s, runID)
+
+	cfg := []byte(`{"hooks":{"PreToolUse":[{"type":"command","command":"tiller hook"}]}}`)
+	if err := s.WriteAdapterConfig(runID, did, cfg); err != nil {
+		t.Fatalf("WriteAdapterConfig: %v", err)
+	}
+	got, err := s.ReadAdapterConfig(runID, did)
+	if err != nil {
+		t.Fatalf("ReadAdapterConfig: %v", err)
+	}
+	if string(got) != string(cfg) {
+		t.Errorf("ReadAdapterConfig mismatch:\ngot:  %q\nwant: %q", got, cfg)
+	}
+}
+
+func testRenderTree(t *testing.T, s scratch.Store) {
+	t.Helper()
+	runID := mustCreateRun(t, s)
+	did := mustAllocDispatch(t, s, runID)
+
+	d := &scratch.Dispatch{
+		ID:        did,
+		Role:      "worker",
+		Model:     "sonnet",
+		Status:    "completed",
+		StartedAt: time.Now().UTC(),
+	}
+	if err := s.WriteDispatch(runID, d); err != nil {
+		t.Fatalf("WriteDispatch: %v", err)
+	}
+
+	tree, err := s.RenderTree(runID)
+	if err != nil {
+		t.Fatalf("RenderTree: %v", err)
+	}
+	// Must contain the dispatch id and role.
+	if !strings.Contains(tree, did) {
+		t.Errorf("RenderTree output missing dispatch id %q:\n%s", did, tree)
+	}
+}
+
+func testBuildRunSummaryJSON(t *testing.T, s scratch.Store) {
+	t.Helper()
+	runID := mustCreateRun(t, s)
+
+	data, err := s.BuildRunSummaryJSON(runID)
+	if err != nil {
+		t.Fatalf("BuildRunSummaryJSON: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("BuildRunSummaryJSON returned empty data")
+	}
+	// Must be valid JSON.
+	var obj map[string]any
+	if err := jsonUnmarshal(data, &obj); err != nil {
+		t.Errorf("BuildRunSummaryJSON returned invalid JSON: %v", err)
+	}
+}
+
+func testBuildDispatchTree(t *testing.T, s scratch.Store) {
+	t.Helper()
+	runID := mustCreateRun(t, s)
+	did := mustAllocDispatch(t, s, runID)
+
+	d := &scratch.Dispatch{
+		ID:        did,
+		Role:      "investigator",
+		Model:     "sonnet",
+		Status:    "running",
+		StartedAt: time.Now().UTC(),
+	}
+	if err := s.WriteDispatch(runID, d); err != nil {
+		t.Fatalf("WriteDispatch: %v", err)
+	}
+
+	root, err := s.BuildDispatchTree(runID)
+	if err != nil {
+		t.Fatalf("BuildDispatchTree: %v", err)
+	}
+	if root == nil {
+		t.Fatal("BuildDispatchTree returned nil root")
+	}
+	// The tree must contain at least one node for did.
+	found := findDispatchNode(root, did)
+	if !found {
+		t.Errorf("BuildDispatchTree: dispatch %q not found in tree", did)
+	}
+}
+
+// findDispatchNode recursively searches for a node with the given dispatch ID.
+func findDispatchNode(n *scratch.DispatchNode, id string) bool {
+	if n == nil {
+		return false
+	}
+	if n.Dispatch != nil && n.Dispatch.ID == id {
+		return true
+	}
+	for _, child := range n.Children {
+		if findDispatchNode(child, id) {
+			return true
+		}
+	}
+	return false
 }

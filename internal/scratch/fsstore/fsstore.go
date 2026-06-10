@@ -380,9 +380,11 @@ func (fs *FS) AppendTraceEvent(runID, dispatchID string, ev scratch.TraceEvent) 
 
 	var path string
 	switch ev.Kind {
-	case "read":
+	case "read", "dispatch", "report":
+		// Context-trace events: context reads, child dispatches, and reports.
 		path = filepath.Join(dispDir, "context_trace.jsonl")
 	default:
+		// Tool-trace events: tool invocations.
 		path = filepath.Join(dispDir, "tool_trace.jsonl")
 	}
 
@@ -421,6 +423,64 @@ func (fs *FS) AuditSink(runID, kind string) (*auditlog.Sink, io.Closer, error) {
 // materialized form already. The dir argument is ignored.
 func (fs *FS) Materialize(runID, dispatchID, dir string) error {
 	return nil
+}
+
+// ReadAdapterConfig reads dispatches/<dispatchID>/settings.json.
+func (fs *FS) ReadAdapterConfig(runID, dispatchID string) ([]byte, error) {
+	path := filepath.Join(fs.dispatchDir(runID, dispatchID), "settings.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("fsstore.ReadAdapterConfig %s/%s: %w", runID, dispatchID, err)
+	}
+	return data, nil
+}
+
+// RenderTree renders the dispatch tree for runID as a human-readable string.
+func (fs *FS) RenderTree(runID string) (string, error) {
+	tree, err := run.RenderTree(fs.runDir(runID))
+	if err != nil {
+		return "", fmt.Errorf("fsstore.RenderTree %s: %w", runID, err)
+	}
+	return tree, nil
+}
+
+// BuildRunSummaryJSON builds the derived run summary and returns it as
+// indented JSON bytes. Delegates to run.BuildRunSummary.
+func (fs *FS) BuildRunSummaryJSON(runID string) ([]byte, error) {
+	summary, err := run.BuildRunSummary(fs.runDir(runID))
+	if err != nil {
+		return nil, fmt.Errorf("fsstore.BuildRunSummaryJSON %s: %w", runID, err)
+	}
+	data, err := json.MarshalIndent(summary, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("fsstore.BuildRunSummaryJSON %s: marshal: %w", runID, err)
+	}
+	return data, nil
+}
+
+// BuildDispatchTree returns the full dispatch tree for runID as a *scratch.DispatchNode.
+// It converts the run.Node tree to scratch.DispatchNode so callers need not import internal/run.
+func (fs *FS) BuildDispatchTree(runID string) (*scratch.DispatchNode, error) {
+	root, err := run.BuildTree(fs.runDir(runID))
+	if err != nil {
+		return nil, fmt.Errorf("fsstore.BuildDispatchTree %s: %w", runID, err)
+	}
+	return runNodeToDispatchNode(root), nil
+}
+
+// runNodeToDispatchNode recursively converts a run.Node to a scratch.DispatchNode.
+func runNodeToDispatchNode(n *run.Node) *scratch.DispatchNode {
+	if n == nil {
+		return &scratch.DispatchNode{}
+	}
+	dn := &scratch.DispatchNode{}
+	if n.Meta != nil {
+		dn.Dispatch = metaToDispatch(n.Meta)
+	}
+	for _, child := range n.Children {
+		dn.Children = append(dn.Children, runNodeToDispatchNode(child))
+	}
+	return dn
 }
 
 // ── internal helpers ──────────────────────────────────────────────────────────

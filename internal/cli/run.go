@@ -11,7 +11,8 @@ import (
 
 	"m31labs.dev/tiller/internal/hyphae"
 	"m31labs.dev/tiller/internal/policy"
-	"m31labs.dev/tiller/internal/run"
+	"m31labs.dev/tiller/internal/scratch"
+	"m31labs.dev/tiller/internal/scratch/fsstore"
 	"m31labs.dev/tiller/internal/spawn"
 )
 
@@ -65,24 +66,12 @@ func runRun(args []string) error {
 		return fmt.Errorf("run: load toolgate policy: %w", err)
 	}
 
-	// Create the run directory.
-	store := run.NewStore(runsBase)
-	runID, err := store.CreateRun()
-	if err != nil {
-		return fmt.Errorf("run: create run: %w", err)
-	}
-	runDir := store.RunDir(runID)
+	// Open the store.
+	st := fsstore.Open(runsBase)
 
-	// Write task.md.
-	taskMDPath := filepath.Join(runDir, "task.md")
-	if err := os.WriteFile(taskMDPath, []byte(task), 0o644); err != nil {
-		return fmt.Errorf("run: write task.md: %w", err)
-	}
-
-	// Write manifest (status: running).
+	// Create the run record.
 	now := time.Now()
-	manifest := &run.Manifest{
-		RunID:       runID,
+	r := &scratch.Run{
 		Task:        task,
 		Workspace:   workspace,
 		Status:      "running",
@@ -93,8 +82,18 @@ func runRun(args []string) error {
 			"toolgate": toolLoaded.SHA256,
 		},
 	}
-	if err := run.WriteManifest(runDir, manifest); err != nil {
-		return fmt.Errorf("run: write manifest: %w", err)
+	runID, err := st.CreateRun(r)
+	if err != nil {
+		return fmt.Errorf("run: create run: %w", err)
+	}
+
+	// runDir is <runsBase>/<runID>; used for spawn helpers that take a path string.
+	runDir := filepath.Join(runsBase, runID)
+
+	// Write task.md (input data, not a store record).
+	taskMDPath := filepath.Join(runDir, "task.md")
+	if err := os.WriteFile(taskMDPath, []byte(task), 0o644); err != nil {
+		return fmt.Errorf("run: write task.md: %w", err)
 	}
 
 	// Open a hypha trace (soft-fail: missing hypha must never fail the run).
@@ -102,24 +101,18 @@ func runRun(args []string) error {
 		hyp := hyphae.New(func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, "tiller run [hypha]: "+format+"\n", args...)
 		})
-		phase := run.FirstLine(task)
+		phase := firstLine(task)
 		traceID := hyp.TraceStart(runID, phase, "")
 		if traceID != "" {
-			manifest.HyphaTraceID = traceID
+			r.HyphaTraceID = traceID
 			// Best-effort manifest update to persist trace id.
-			_ = run.WriteManifest(runDir, manifest)
+			_ = st.WriteRun(r)
 		}
 	}
 
-	// Create the root dispatch directory.
-	rootDir, err := store.CreateDispatch(runID, "root")
-	if err != nil {
-		return fmt.Errorf("run: create root dispatch dir: %w", err)
-	}
-
-	// Write brief.md for root (same as task.md).
-	briefPath := filepath.Join(rootDir, "brief.md")
-	if err := os.WriteFile(briefPath, []byte(task), 0o644); err != nil {
+	// Write brief.md for root dispatch (same as task.md).
+	// WriteBrief creates the dispatch directory implicitly.
+	if err := st.WriteBrief(runID, "root", []byte(task)); err != nil {
 		return fmt.Errorf("run: write root brief.md: %w", err)
 	}
 
@@ -128,16 +121,15 @@ func runRun(args []string) error {
 	if err != nil {
 		return fmt.Errorf("run: generate settings: %w", err)
 	}
-	settingsPath := filepath.Join(rootDir, "settings.json")
-	if err := os.WriteFile(settingsPath, settingsJSON, 0o644); err != nil {
+	if err := st.WriteAdapterConfig(runID, "root", settingsJSON); err != nil {
 		return fmt.Errorf("run: write settings.json: %w", err)
 	}
 
 	// Resolve role prompt path for orchestrator.
 	rolePromptPath := spawn.RolePromptPath(runDir, "orchestrator")
 
-	// Write root meta.json (status: running, parent: "").
-	rootMeta := &run.Meta{
+	// Write root dispatch record (status: running, parent: "").
+	rootDispatch := &scratch.Dispatch{
 		ID:             "root",
 		Parent:         "",
 		Role:           "orchestrator",
@@ -148,8 +140,8 @@ func runRun(args []string) error {
 		StartedAt:      now,
 		TimeoutMinutes: 0, // no timeout for run-initiated orchestrator
 	}
-	if err := run.WriteMeta(runDir, rootMeta); err != nil {
-		return fmt.Errorf("run: write root meta: %w", err)
+	if err := st.WriteDispatch(runID, rootDispatch); err != nil {
+		return fmt.Errorf("run: write root dispatch: %w", err)
 	}
 
 	// Find tiller binary.
@@ -158,9 +150,11 @@ func runRun(args []string) error {
 		return fmt.Errorf("run: find executable: %w", err)
 	}
 
+	// briefPath and settingsPath are computed from runDir for the supervisor.
+	briefPath := filepath.Join(runDir, "dispatches", "root", "brief.md")
+	settingsPath := filepath.Join(runDir, "dispatches", "root", "settings.json")
+
 	// Spawn the root dispatch via _supervise with the orchestrator args.
-	// We use SpawnDetachedRoot which carries the orchestrator-specific args
-	// (model=fable, settings, role prompt) while also setting the root env.
 	if err := spawnRootSupervisor(binary, runDir, briefPath, settingsPath, rolePromptPath); err != nil {
 		return fmt.Errorf("run: spawn root supervisor: %w", err)
 	}
@@ -168,19 +162,18 @@ func runRun(args []string) error {
 	fmt.Fprintf(os.Stderr, "run %s started (orchestrator dispatched as root)\n", runID)
 
 	// Wait for root dispatch to reach terminal status (no cap — user-invoked).
-	if err := waitForRoot(runDir); err != nil {
+	if err := waitForRoot(st, runID); err != nil {
 		return fmt.Errorf("run: wait for root: %w", err)
 	}
 
 	// Finalize manifest.
-	if err := finalizeManifest(runDir, runID, *fableBudget); err != nil {
+	if err := finalizeManifest(st, runID, runDir, *fableBudget); err != nil {
 		return fmt.Errorf("run: finalize manifest: %w", err)
 	}
 
 	// Print run id and final status.
-	manifest, err = run.ReadManifest(runDir)
-	if err == nil {
-		fmt.Printf("run %s: %s\n", runID, manifest.Status)
+	if runRec, err := st.ReadRun(runID); err == nil {
+		fmt.Printf("run %s: %s\n", runID, runRec.Status)
 	}
 
 	return nil
@@ -204,78 +197,78 @@ func spawnRootSupervisor(binary, runDir, briefPath, settingsPath, rolePromptPath
 	return spawn.SpawnDetached(binary, runDir, "root")
 }
 
-// waitForRoot polls root meta.json until terminal, with no timeout cap.
-func waitForRoot(runDir string) error {
+// waitForRoot polls root dispatch record until terminal, with no timeout cap.
+func waitForRoot(st scratch.Store, runID string) error {
 	const pollInterval = 500 * time.Millisecond
 	for {
-		m, err := run.ReadMeta(runDir, "root")
-		if err == nil && m.IsTerminal() {
+		d, err := st.ReadDispatch(runID, "root")
+		if err == nil && d.IsTerminal() {
 			return nil
 		}
 		time.Sleep(pollInterval)
 	}
 }
 
-// finalizeManifest reads all dispatch metas, kills any still-running dispatches
-// (grace kill), and writes the final manifest status.
-func finalizeManifest(runDir, runID string, fableBudget int) error {
-	metas, err := run.ScanMetas(runDir)
+// finalizeManifest reads all dispatch records, kills any still-running dispatches
+// (grace kill), and writes the final run status.
+func finalizeManifest(st scratch.Store, runID, runDir string, fableBudget int) error {
+	dispatches, err := st.ListDispatches(runID)
 	if err != nil {
-		return fmt.Errorf("scan metas: %w", err)
+		return fmt.Errorf("list dispatches: %w", err)
 	}
 
 	// Check for any still-running dispatches (other than root which should be terminal).
 	anyRunning := false
-	for _, m := range metas {
-		if m.Status == "running" {
+	for _, d := range dispatches {
+		if d.Status == "running" {
 			anyRunning = true
-			if m.IsOrphan() {
-				// Supervisor is dead (orphan): mark as stale → then failed at finalize.
+			if d.IsOrphan() {
+				// Supervisor is dead (orphan): mark as stale.
 				now := time.Now()
-				m.Status = "stale"
-				m.EndedAt = &now
-				_ = run.WriteMeta(runDir, m)
+				d.Status = "stale"
+				d.EndedAt = &now
+				_ = st.WriteDispatch(runID, d)
 			} else {
 				// Grace kill: send SIGTERM to any tiller processes watching this run.
-				graceFail(runDir, m)
+				graceFail(st, runDir, runID, d)
 			}
 		}
 	}
 
-	// Re-read root meta for session_id.
-	rootMeta, err := run.ReadMeta(runDir, "root")
+	// Re-read root dispatch for session_id.
+	rootDispatch, err := st.ReadDispatch(runID, "root")
 	if err != nil {
-		return fmt.Errorf("read root meta: %w", err)
+		return fmt.Errorf("read root dispatch: %w", err)
 	}
 
 	finalStatus := "completed"
-	if anyRunning || rootMeta.Status == "failed" || rootMeta.Status == "halted" {
+	if anyRunning || rootDispatch.Status == "failed" || rootDispatch.Status == "halted" {
 		finalStatus = "failed"
 	}
 
 	now := time.Now()
-	manifest, err := run.ReadManifest(runDir)
+	runRec, err := st.ReadRun(runID)
 	if err != nil {
-		// Reconstruct a minimal manifest.
-		manifest = &run.Manifest{
-			RunID:       runID,
+		// Reconstruct a minimal run record.
+		runRec = &scratch.Run{
+			ID:          runID,
 			FableBudget: fableBudget,
 		}
 	}
-	manifest.Status = finalStatus
-	manifest.EndedAt = &now
-	manifest.RootSessionID = rootMeta.SessionID
+	runRec.Status = finalStatus
+	runRec.EndedAt = &now
+	runRec.RootSessionID = rootDispatch.SessionID
 
-	if err := run.WriteManifest(runDir, manifest); err != nil {
+	if err := st.WriteRun(runRec); err != nil {
 		return err
 	}
 
 	// Close the hypha trace (soft-fail).
-	if manifest.HyphaTraceID != "" {
+	if runRec.HyphaTraceID != "" {
 		hyp := hyphae.New(func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, "tiller run [hypha]: "+format+"\n", args...)
 		})
-		hyp.TraceDone(manifest.HyphaTraceID, finalStatus)
+		hyp.TraceDone(runRec.HyphaTraceID, finalStatus)
 	}
 
 	return nil
@@ -283,18 +276,17 @@ func finalizeManifest(runDir, runID string, fableBudget int) error {
 
 // graceFail marks a running dispatch as failed (best-effort).
 // This is called when the orchestrator finishes while children are still running.
-func graceFail(runDir string, m *run.Meta) {
+func graceFail(st scratch.Store, runDir, runID string, d *scratch.Dispatch) {
 	// Attempt to send SIGTERM to related processes (best effort).
-	// Since we don't track supervisor PIDs, just update meta status.
 	now := time.Now()
-	m.Status = "failed"
-	m.EndedAt = &now
+	d.Status = "failed"
+	d.EndedAt = &now
 
 	// Attempt a kill signal to any _supervise process for this dispatch
 	// by searching /proc (Linux-specific, best effort).
-	killSupervisorProcess(runDir, m.ID)
+	killSupervisorProcess(runDir, d.ID)
 
-	_ = run.WriteMeta(runDir, m)
+	_ = st.WriteDispatch(runID, d)
 }
 
 // killSupervisorProcess attempts to find and kill a tiller _supervise
@@ -324,4 +316,15 @@ func killSupervisorProcess(runDir, dispatchID string) {
 			}
 		}
 	}
+}
+
+// firstLine returns the first non-empty line of s.
+func firstLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return s
 }

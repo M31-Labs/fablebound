@@ -9,10 +9,10 @@ import (
 	"syscall"
 	"time"
 
-	"m31labs.dev/tiller/internal/hook"
 	"m31labs.dev/tiller/internal/hyphae"
 	"m31labs.dev/tiller/internal/policy"
-	"m31labs.dev/tiller/internal/run"
+	"m31labs.dev/tiller/internal/scratch"
+	"m31labs.dev/tiller/internal/scratch/fsstore"
 )
 
 // ClaudeResult is the parsed --output-format json output from claude.
@@ -34,16 +34,21 @@ type SuperviseArgs struct {
 }
 
 // Supervise runs claude for the given dispatch, captures output, and
-// finalizes the dispatch meta.json. It is meant to run as the _supervise
+// finalizes the dispatch record. It is meant to run as the _supervise
 // subprocess (detached, setsid).
 //
 // Flow:
-//  1. Build ClaudeArgs from the dispatch directory (reads meta.json + brief.md + settings.json).
+//  1. Build ClaudeArgs from the dispatch directory (reads dispatch record + brief.md + settings.json).
 //  2. Exec claude; pipe stdout to supervise.log; enforce timeout_minutes.
 //  3. Parse --output-format json result → write report.md + transcript.json.
 //  4. Append kind:"report" to the dispatch's context_trace.jsonl.
-//  5. Finalize meta.json (status/cost/turns/session/ended_at/exit).
+//  5. Finalize dispatch record (status/cost/turns/session/ended_at/exit).
 func Supervise(a SuperviseArgs) error {
+	// Resolve the store from the run directory.
+	runsBase := filepath.Dir(a.RunDir)
+	runID := filepath.Base(a.RunDir)
+	st := fsstore.Open(runsBase)
+
 	dispatchDir := filepath.Join(a.RunDir, "dispatches", a.DispatchID)
 	logPath := filepath.Join(dispatchDir, "supervise.log")
 
@@ -61,10 +66,10 @@ func Supervise(a SuperviseArgs) error {
 
 	logf("supervisor started for dispatch %s", a.DispatchID)
 
-	// Load meta to get role, model, depth, callerDepth.
-	meta, err := run.ReadMeta(a.RunDir, a.DispatchID)
+	// Load dispatch record to get role, model, depth.
+	d, err := st.ReadDispatch(runID, a.DispatchID)
 	if err != nil {
-		return fmt.Errorf("supervise: read meta: %w", err)
+		return fmt.Errorf("supervise: read dispatch: %w", err)
 	}
 
 	// Paths inside dispatch dir.
@@ -73,27 +78,26 @@ func Supervise(a SuperviseArgs) error {
 	reportPath := filepath.Join(dispatchDir, "report.md")
 	transcriptPath := filepath.Join(dispatchDir, "transcript.json")
 
-	rolePromptPath := RolePromptPath(a.RunDir, meta.Role)
+	rolePromptPath := RolePromptPath(a.RunDir, d.Role)
 
-	// Use TimeoutMinutes from meta (set at dispatch time), falling back to
-	// the SuperviseArgs override (for testing).
-	timeoutMins := meta.TimeoutMinutes
+	// Use TimeoutMinutes from dispatch record, falling back to SuperviseArgs override.
+	timeoutMins := d.TimeoutMinutes
 	if a.TimeoutMinutes > 0 {
 		timeoutMins = a.TimeoutMinutes
 	}
 
 	metaRoute := policy.Route{
-		Model:          meta.Model,
-		Profile:        meta.Profile,
-		MaxTurns:       meta.MaxTurns,
+		Model:          d.Model,
+		Profile:        d.Profile,
+		MaxTurns:       d.MaxTurns,
 		TimeoutMinutes: timeoutMins,
 	}
 
 	cArgs := ClaudeArgs{
 		RunDir:         a.RunDir,
 		DispatchID:     a.DispatchID,
-		Role:           meta.Role,
-		CallerDepth:    meta.Depth - 1, // meta.Depth is child depth; caller = child-1
+		Role:           d.Role,
+		CallerDepth:    d.Depth - 1, // d.Depth is child depth; caller = child-1
 		Route:          metaRoute,
 		BriefPath:      briefPath,
 		SettingsPath:   settingsPath,
@@ -184,12 +188,12 @@ func Supervise(a SuperviseArgs) error {
 			finalStatus = "failed"
 		}
 	} else {
-		// Write report.md from result field.
-		if err := os.WriteFile(reportPath, []byte(claudeRes.Result), 0o644); err != nil {
+		// Write report.md via the Store.
+		if err := st.WriteReport(runID, a.DispatchID, []byte(claudeRes.Result)); err != nil {
 			logf("warning: write report.md: %v", err)
 		}
 
-		// Write transcript.json from raw output.
+		// Write transcript.json from raw output (not a Store record; raw JSON blob).
 		if err := os.WriteFile(transcriptPath, buf, 0o644); err != nil {
 			logf("warning: write transcript.json: %v", err)
 		}
@@ -203,35 +207,34 @@ func Supervise(a SuperviseArgs) error {
 		logf("report written (%d bytes), status=%s", len(claudeRes.Result), finalStatus)
 	}
 
-	// Append kind:"report" to dispatch's context_trace.jsonl.
-	ctxTracePath := filepath.Join(dispatchDir, "context_trace.jsonl")
-	reportEvent := map[string]any{
-		"ts":          endedAt.UTC().Format(time.RFC3339Nano),
-		"kind":        "report",
-		"run_id":      filepath.Base(a.RunDir),
-		"dispatch_id": a.DispatchID,
-		"role":        meta.Role,
-		"depth":       meta.Depth,
-		"status":      finalStatus,
-		"cost_usd":    claudeRes.CostUSD,
-		"num_turns":   claudeRes.NumTurns,
+	// Append kind:"report" to dispatch's context_trace.jsonl via the Store.
+	reportEvent := scratch.TraceEvent{
+		Ts:         endedAt.UTC().Format(time.RFC3339Nano),
+		Kind:       "report",
+		RunID:      runID,
+		DispatchID: a.DispatchID,
+		Role:       d.Role,
+		Depth:      d.Depth,
+		Status:     finalStatus,
+		CostUSD:    claudeRes.CostUSD,
+		NumTurns:   claudeRes.NumTurns,
 	}
-	if appendErr := hook.AppendJSONL(ctxTracePath, reportEvent); appendErr != nil {
+	if appendErr := st.AppendTraceEvent(runID, a.DispatchID, reportEvent); appendErr != nil {
 		logf("warning: append context_trace.jsonl: %v", appendErr)
 	}
 
-	// Finalize meta.json.
-	meta.Status = finalStatus
-	meta.EndedAt = &endedAt
-	meta.Exit = exitCode
-	meta.CostUSD = claudeRes.CostUSD
-	meta.NumTurns = claudeRes.NumTurns
-	meta.SessionID = claudeRes.SessionID
-	_ = startedAt // already recorded in initial meta write
+	// Finalize dispatch record.
+	d.Status = finalStatus
+	d.EndedAt = &endedAt
+	d.Exit = exitCode
+	d.CostUSD = claudeRes.CostUSD
+	d.NumTurns = claudeRes.NumTurns
+	d.SessionID = claudeRes.SessionID
+	_ = startedAt // already recorded in initial dispatch write
 
-	if err := run.WriteMeta(a.RunDir, meta); err != nil {
-		logf("error: finalize meta: %v", err)
-		return fmt.Errorf("supervise: finalize meta: %w", err)
+	if err := st.WriteDispatch(runID, d); err != nil {
+		logf("error: finalize dispatch: %v", err)
+		return fmt.Errorf("supervise: finalize dispatch: %w", err)
 	}
 
 	logf("dispatch %s finalized as %s", a.DispatchID, finalStatus)
@@ -242,9 +245,9 @@ func Supervise(a SuperviseArgs) error {
 			logf("[hypha] "+format, args...)
 		})
 		if hyp.Available() {
-			if mf, err := run.ReadManifest(a.RunDir); err == nil && mf.HyphaTraceID != "" {
+			if runRec, err := st.ReadRun(runID); err == nil && runRec.HyphaTraceID != "" {
 				tick := fmt.Sprintf("%s %s $%.4f", a.DispatchID, finalStatus, claudeRes.CostUSD)
-				hyp.TraceTick(mf.HyphaTraceID, tick)
+				hyp.TraceTick(runRec.HyphaTraceID, tick)
 			}
 		}
 	}
@@ -257,8 +260,8 @@ func Supervise(a SuperviseArgs) error {
 // <dispatchDir>/supervise.log.
 //
 // Returns immediately after the child is spawned — the caller does NOT wait
-// for the supervisor. The supervisor PID is written into meta.json so that
-// orphan detection can verify whether the process is still alive.
+// for the supervisor. The supervisor PID is written into the dispatch record so
+// that orphan detection can verify whether the process is still alive.
 func SpawnDetached(binary, runDir, dispatchID string) error {
 	dispatchDir := filepath.Join(runDir, "dispatches", dispatchID)
 	logPath := filepath.Join(dispatchDir, "supervise.log")
@@ -284,13 +287,15 @@ func SpawnDetached(binary, runDir, dispatchID string) error {
 
 	logFile.Close()
 
-	// Write the supervisor PID into meta.json for orphan detection.
+	// Write the supervisor PID into the dispatch record for orphan detection.
 	// Best-effort: failure here does not block the dispatch.
-	if meta, readErr := run.ReadMeta(runDir, dispatchID); readErr == nil {
-		meta.SupervisorPID = cmd.Process.Pid
-		if writeErr := run.WriteMeta(runDir, meta); writeErr != nil {
-			// Non-fatal: log to dispatch dir would be nice but we don't have a logger here.
-			// Orphan detection will simply not have a PID to check.
+	runsBase := filepath.Dir(runDir)
+	runID := filepath.Base(runDir)
+	st := fsstore.Open(runsBase)
+	if d, readErr := st.ReadDispatch(runID, dispatchID); readErr == nil {
+		d.SupervisorPID = cmd.Process.Pid
+		if writeErr := st.WriteDispatch(runID, d); writeErr != nil {
+			// Non-fatal: orphan detection will simply not have a PID to check.
 			_ = writeErr
 		}
 	}

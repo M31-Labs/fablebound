@@ -24,7 +24,7 @@ import (
 	"m31labs.dev/arbiter/vm"
 	"m31labs.dev/tiller/internal/auditlog"
 	"m31labs.dev/tiller/internal/policy"
-	"m31labs.dev/tiller/internal/run"
+	"m31labs.dev/tiller/internal/scratch/fsstore"
 )
 
 // HookEvent is the JSON stdin payload from Claude Code.
@@ -153,24 +153,28 @@ func verifyIdentity(id Identity) error {
 		return fmt.Errorf("untrusted run dir: cannot resolve %q: %w", id.RunDir, err)
 	}
 
-	// Read the manifest from the canonical path to get the authoritative workspace.
-	manifest, manifestErr := run.ReadManifest(canonRunDir)
-	if manifestErr != nil {
-		return fmt.Errorf("untrusted run dir: cannot read manifest from %q: %w", canonRunDir, manifestErr)
+	// Open the store and read the run record to get the authoritative workspace.
+	runsBase := filepath.Dir(canonRunDir)
+	runID := filepath.Base(canonRunDir)
+	st := fsstore.Open(runsBase)
+
+	runRec, runErr := st.ReadRun(runID)
+	if runErr != nil {
+		return fmt.Errorf("untrusted run dir: cannot read run record from %q: %w", canonRunDir, runErr)
 	}
-	if manifest.Workspace == "" {
-		return fmt.Errorf("untrusted run dir: manifest.workspace is empty in %q", canonRunDir)
+	if runRec.Workspace == "" {
+		return fmt.Errorf("untrusted run dir: run record workspace is empty in %q", canonRunDir)
 	}
 
-	// Resolve the workspace from the manifest to a canonical path.
-	canonWorkspace, err := filepath.EvalSymlinks(manifest.Workspace)
+	// Resolve the workspace from the run record to a canonical path.
+	canonWorkspace, err := filepath.EvalSymlinks(runRec.Workspace)
 	if err != nil {
 		// Fall back to Clean if the workspace doesn't exist yet (edge case during
 		// early run setup), but be strict: accept only absolute paths.
-		if !filepath.IsAbs(manifest.Workspace) {
-			return fmt.Errorf("untrusted run dir: manifest workspace %q is not absolute", manifest.Workspace)
+		if !filepath.IsAbs(runRec.Workspace) {
+			return fmt.Errorf("untrusted run dir: run workspace %q is not absolute", runRec.Workspace)
 		}
-		canonWorkspace = filepath.Clean(manifest.Workspace)
+		canonWorkspace = filepath.Clean(runRec.Workspace)
 	}
 
 	// The expected runs/ prefix is <workspace>/.tiller/runs/.
@@ -190,27 +194,27 @@ func verifyIdentity(id Identity) error {
 			canonRunDir, expectedRunsDir)
 	}
 
-	// Cross-check: the manifest's workspace, when re-derived from the canonical
+	// Cross-check: the run record's workspace, when re-derived from the canonical
 	// run dir, must agree (3 levels up: runs/<id> → runs → .tiller → workspace).
 	derivedWorkspace := filepath.Dir(filepath.Dir(filepath.Dir(canonRunDir)))
 	if derivedWorkspace != canonWorkspace {
-		return fmt.Errorf("untrusted run dir: derived workspace %q != manifest workspace %q",
+		return fmt.Errorf("untrusted run dir: derived workspace %q != run workspace %q",
 			derivedWorkspace, canonWorkspace)
 	}
 
-	// ── Step 2: role/depth cross-check against dispatch meta ─────────────────
-	meta, err := run.ReadMeta(canonRunDir, id.DispatchID)
+	// ── Step 2: role/depth cross-check against dispatch record ───────────────
+	d, err := st.ReadDispatch(runID, id.DispatchID)
 	if err != nil {
-		return fmt.Errorf("identity mismatch: cannot read meta for dispatch %q: %w", id.DispatchID, err)
+		return fmt.Errorf("identity mismatch: cannot read dispatch for %q: %w", id.DispatchID, err)
 	}
 
-	if meta.Role != id.Role {
-		return fmt.Errorf("identity mismatch: env role %q != meta role %q for dispatch %q",
-			id.Role, meta.Role, id.DispatchID)
+	if d.Role != id.Role {
+		return fmt.Errorf("identity mismatch: env role %q != dispatch role %q for dispatch %q",
+			id.Role, d.Role, id.DispatchID)
 	}
-	if meta.Depth != id.Depth {
-		return fmt.Errorf("identity mismatch: env depth %d != meta depth %d for dispatch %q",
-			id.Depth, meta.Depth, id.DispatchID)
+	if d.Depth != id.Depth {
+		return fmt.Errorf("identity mismatch: env depth %d != dispatch depth %d for dispatch %q",
+			id.Depth, d.Depth, id.DispatchID)
 	}
 	return nil
 }
@@ -302,15 +306,15 @@ func writeAuditEvent(runDir, requestID string, loaded *policy.Loaded, req policy
 	if runDir == "" {
 		return nil
 	}
-	auditDir := filepath.Join(runDir, "audit")
-	if err := os.MkdirAll(auditDir, 0o755); err != nil {
-		return fmt.Errorf("mkdir audit: %w", err)
-	}
-	sink, err := auditlog.Open(filepath.Join(auditDir, "toolgate.jsonl"))
+	// Use the Store to open the audit sink (creates audit dir and file if needed).
+	runsBase := filepath.Dir(runDir)
+	runID := filepath.Base(runDir)
+	st := fsstore.Open(runsBase)
+	sink, closer, err := st.AuditSink(runID, "toolgate")
 	if err != nil {
 		return err
 	}
-	defer sink.Close()
+	defer closer.Close()
 	return auditlog.ToolCallEvent(sink, requestID, loaded.SHA256, req, matched, trace)
 }
 
@@ -598,7 +602,7 @@ func Run(stdin io.Reader, stdout io.Writer, workspaceDir string) error {
 
 	switch event.HookEventName {
 	case "PreToolUse":
-		// Verify identity against meta.json (fail closed on mismatch).
+		// Verify identity against dispatch record (fail closed on mismatch).
 		if err := verifyIdentity(id); err != nil {
 			return err
 		}

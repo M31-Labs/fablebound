@@ -103,4 +103,28 @@ type Store interface {
 	// on disk at dir. On fsstore this is a no-op (the run dir IS the materialized
 	// form). On pgstore it will export records to a local temp tree.
 	Materialize(runID, dispatchID, dir string) error
+
+	// ── Adapter config read ────────────────────────────────────────────────────
+
+	// ReadAdapterConfig reads the adapter config (settings.json) for a dispatch.
+	// Added for P1.4 call-site migration: spawn/supervise reads settings.json
+	// directly from the dispatch directory; routing through the Store seam
+	// ensures future non-fs implementations supply the file before the adapter runs.
+	ReadAdapterConfig(runID, dispatchID string) ([]byte, error)
+
+	// ── Display / tree helpers ─────────────────────────────────────────────────
+
+	// RenderTree renders the dispatch tree for a run as a human-readable string.
+	// Added for P1.4: cli/runs.go runs show text output no longer calls
+	// run.RenderTree(runDir) directly.
+	RenderTree(runID string) (string, error)
+
+	// BuildRunSummaryJSON builds the derived run summary and marshals it to
+	// indented JSON. Added for P1.4: cli/runs.go runs show --json output.
+	BuildRunSummaryJSON(runID string) ([]byte, error)
+
+	// BuildDispatchTree returns the full dispatch tree for a run as a
+	// *DispatchNode tree. Added for P1.4: internal/hyphae/promote.go uses the
+	// tree to compose spore.md without importing internal/run.
+	BuildDispatchTree(runID string) (*DispatchNode, error)
 }

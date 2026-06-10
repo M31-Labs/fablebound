@@ -1,4 +1,4 @@
-.PHONY: build test vet clean policy-sync policy-replay
+.PHONY: build test vet clean policy-sync policy-replay seam-check
 
 BIN := tiller
 
@@ -13,6 +13,17 @@ vet:
 
 clean:
 	rm -f $(BIN)
+
+# Verify that cli/spawn/hook/hyphae do not import internal/run directly (P1.4).
+# Exit 0 = seam is clean. Exit 1 = a direct run import was found.
+seam-check:
+	@result=$$(grep -rn '"m31labs.dev/tiller/internal/run"' internal/cli internal/spawn internal/hook internal/hyphae 2>/dev/null); \
+	if [ -n "$$result" ]; then \
+		echo "SEAM VIOLATION: direct internal/run imports found:"; \
+		echo "$$result"; \
+		exit 1; \
+	fi
+	@echo "seam-check OK: no direct internal/run imports in cli/spawn/hook/hyphae"
 
 # Keep policy/ and internal/policy/defaults/ in sync (T0.2).
 policy-sync:

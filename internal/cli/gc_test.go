@@ -7,23 +7,18 @@ import (
 	"testing"
 	"time"
 
-	"m31labs.dev/tiller/internal/run"
+	"m31labs.dev/tiller/internal/scratch"
+	"m31labs.dev/tiller/internal/scratch/fsstore"
 )
 
 // makeTestRun creates a run fixture with the given status and age offset.
 // age is applied as a negative offset to CreatedAt for sorting purposes.
 func makeTestRun(t *testing.T, runsBase string, status string, ageOffset time.Duration) string {
 	t.Helper()
-	store := run.NewStore(runsBase)
-	runID, err := store.CreateRun()
-	if err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-	runDir := store.RunDir(runID)
+	st := fsstore.Open(runsBase)
 
 	now := time.Now().Add(-ageOffset)
-	manifest := &run.Manifest{
-		RunID:       runID,
+	r := &scratch.Run{
 		Task:        fmt.Sprintf("test task (%s)", status),
 		Workspace:   runsBase,
 		Status:      status,
@@ -32,10 +27,11 @@ func makeTestRun(t *testing.T, runsBase string, status string, ageOffset time.Du
 	}
 	if status != "running" {
 		ended := now.Add(1 * time.Second)
-		manifest.EndedAt = &ended
+		r.EndedAt = &ended
 	}
-	if err := run.WriteManifest(runDir, manifest); err != nil {
-		t.Fatalf("write manifest: %v", err)
+	runID, err := st.CreateRun(r)
+	if err != nil {
+		t.Fatalf("create run: %v", err)
 	}
 	return runID
 }

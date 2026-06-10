@@ -12,10 +12,10 @@ import (
 
 	"m31labs.dev/arbiter/audit"
 	"m31labs.dev/tiller/internal/auditlog"
-	"m31labs.dev/tiller/internal/hook"
 	"m31labs.dev/tiller/internal/hyphae"
 	"m31labs.dev/tiller/internal/policy"
-	"m31labs.dev/tiller/internal/run"
+	"m31labs.dev/tiller/internal/scratch"
+	"m31labs.dev/tiller/internal/scratch/fsstore"
 	"m31labs.dev/tiller/internal/spawn"
 )
 
@@ -42,12 +42,16 @@ func runDispatch(args []string) error {
 		return fmt.Errorf("--role is required")
 	}
 
-	// Resolve run directory.
-	runDir, err := run.CurrentRunDir()
+	// Resolve run directory and open store.
+	st, runID, err := fsstore.Resolve()
 	if err != nil {
 		return fmt.Errorf("dispatch: %w", err)
 	}
-	runID := filepath.Base(runDir)
+	if runID == "" {
+		return fmt.Errorf("dispatch: TILLER_RUN_DIR is not set")
+	}
+	// runDir is needed for spawn functions that take a path string.
+	runDir := os.Getenv("TILLER_RUN_DIR")
 
 	// Read caller identity from environment.
 	callerRole := os.Getenv("TILLER_ROLE")
@@ -66,25 +70,21 @@ func runDispatch(args []string) error {
 		return fmt.Errorf("dispatch: read brief: %w", err)
 	}
 
-	// Load manifest for fable_budget.
-	manifest, err := run.ReadManifest(runDir)
+	// Load run record for fable_budget.
+	runRec, err := st.ReadRun(runID)
 	if err != nil {
-		return fmt.Errorf("dispatch: read manifest: %w", err)
+		return fmt.Errorf("dispatch: read run: %w", err)
 	}
 
-	fableBudget := manifest.FableBudget
+	fableBudget := runRec.FableBudget
 	if fableBudget == 0 {
 		fableBudget = 2
 	}
 
-	// Count active + fable dispatches.
-	activeCount, err := run.ActiveCount(runDir)
+	// Get active + fable counts via DispatchFacts (subsumes ActiveCount + FableCount).
+	facts, err := st.DispatchFacts(runID)
 	if err != nil {
-		return fmt.Errorf("dispatch: count active: %w", err)
-	}
-	fableCount, err := run.FableCount(runDir)
-	if err != nil {
-		return fmt.Errorf("dispatch: count fable: %w", err)
+		return fmt.Errorf("dispatch: dispatch facts: %w", err)
 	}
 
 	// Build dispatch request.
@@ -97,8 +97,8 @@ func runDispatch(args []string) error {
 		CallerDepth: callerDepth,
 		CallerID:    callerID,
 		RunID:       runID,
-		ActiveCount: activeCount,
-		FableCount:  fableCount,
+		ActiveCount: facts.Active,
+		FableCount:  facts.ReasonCount,
 		FableBudget: fableBudget,
 	}
 
@@ -114,16 +114,14 @@ func runDispatch(args []string) error {
 		return fmt.Errorf("dispatch: evaluate policy: %w", err)
 	}
 
-	// Open audit sink.
-	sinks, err := auditlog.OpenRunSinks(runDir)
+	// Open audit sink via the Store.
+	dispatchSink, dispatchCloser, err := st.AuditSink(runID, "dispatch")
 	if err != nil {
 		return fmt.Errorf("dispatch: open audit: %w", err)
 	}
-	defer sinks.Close()
+	defer dispatchCloser.Close()
 
 	// Build matched rules from result for the audit event.
-	// We need to re-evaluate to get the matched rules. Use the internal data.
-	// For audit, we record the result with strategy if Allow.
 	var stratRes *audit.StrategyDecision
 	if result.Verdict == policy.VerdictAllow && result.Route.Model != "" {
 		stratRes = &audit.StrategyDecision{
@@ -140,7 +138,7 @@ func runDispatch(args []string) error {
 	}
 
 	auditErr := auditlog.DispatchEvent(
-		sinks.Dispatch,
+		dispatchSink,
 		runID+"/"+*role,
 		loaded.SHA256,
 		req,
@@ -162,32 +160,29 @@ func runDispatch(args []string) error {
 		return fmt.Errorf("dispatch: policy returned empty model for role %q (Reject route)", *role)
 	}
 
-	// Allocate dispatch id and create its directory atomically (Fix 2: race-free
-	// alloc via .dispatch-alloc.lock flock held across scan+mkdir).
-	dispatchID, dispatchDir, err := run.NewStore(filepath.Dir(runDir)).AllocDispatch(runID)
+	// Allocate dispatch id atomically.
+	dispatchID, err := st.AllocDispatch(runID)
 	if err != nil {
 		return fmt.Errorf("dispatch: alloc dispatch: %w", err)
 	}
 
-	// Write brief.md.
-	briefPath := filepath.Join(dispatchDir, "brief.md")
-	if err := os.WriteFile(briefPath, []byte(briefContent), 0o644); err != nil {
+	// Write brief.md via the Store.
+	if err := st.WriteBrief(runID, dispatchID, []byte(briefContent)); err != nil {
 		return fmt.Errorf("dispatch: write brief.md: %w", err)
 	}
 
-	// Write settings.json.
+	// Write settings.json via the Store.
 	settingsJSON, err := spawn.Settings(result.Route.Profile, callerDepth+1)
 	if err != nil {
 		return fmt.Errorf("dispatch: generate settings: %w", err)
 	}
-	settingsPath := filepath.Join(dispatchDir, "settings.json")
-	if err := os.WriteFile(settingsPath, settingsJSON, 0o644); err != nil {
+	if err := st.WriteAdapterConfig(runID, dispatchID, settingsJSON); err != nil {
 		return fmt.Errorf("dispatch: write settings.json: %w", err)
 	}
 
-	// Write meta.json (status: running).
+	// Write dispatch record (status: running).
 	now := time.Now()
-	meta := &run.Meta{
+	d := &scratch.Dispatch{
 		ID:             dispatchID,
 		Parent:         callerID,
 		Role:           *role,
@@ -199,25 +194,24 @@ func runDispatch(args []string) error {
 		TimeoutMinutes: result.Route.TimeoutMinutes,
 		StartedAt:      now,
 	}
-	if err := run.WriteMeta(runDir, meta); err != nil {
-		return fmt.Errorf("dispatch: write meta.json: %w", err)
+	if err := st.WriteDispatch(runID, d); err != nil {
+		return fmt.Errorf("dispatch: write dispatch record: %w", err)
 	}
 
-	// Append kind:"dispatch" to the CALLER's context_trace.jsonl.
+	// Append kind:"dispatch" to the CALLER's context_trace.jsonl via the Store.
 	if callerID != "" {
-		callerTracePath := filepath.Join(runDir, "dispatches", callerID, "context_trace.jsonl")
-		dispatchEvent := map[string]any{
-			"ts":          now.UTC().Format(time.RFC3339Nano),
-			"kind":        "dispatch",
-			"run_id":      runID,
-			"dispatch_id": callerID,
-			"depth":       callerDepth,
-			"child_id":    dispatchID,
-			"role":        *role,
-			"model":       result.Route.Model,
-			"profile":     result.Route.Profile,
+		ev := scratch.TraceEvent{
+			Ts:         now.UTC().Format(time.RFC3339Nano),
+			Kind:       "dispatch",
+			RunID:      runID,
+			DispatchID: callerID,
+			Depth:      callerDepth,
+			ChildID:    dispatchID,
+			Role:       *role,
+			Model:      result.Route.Model,
+			Profile:    result.Route.Profile,
 		}
-		if appendErr := hook.AppendJSONL(callerTracePath, dispatchEvent); appendErr != nil {
+		if appendErr := st.AppendTraceEvent(runID, callerID, ev); appendErr != nil {
 			fmt.Fprintf(os.Stderr, "tiller dispatch: context_trace append error: %v\n", appendErr)
 		}
 	}
@@ -239,13 +233,13 @@ func runDispatch(args []string) error {
 			fmt.Fprintf(os.Stderr, "tiller dispatch [hypha]: "+format+"\n", args...)
 		})
 		if hyp.Available() {
-			if mf, err := run.ReadManifest(runDir); err == nil && mf.HyphaTraceID != "" {
+			if runRec.HyphaTraceID != "" {
 				parent := callerID
 				if parent == "" {
 					parent = "user"
 				}
 				tick := fmt.Sprintf("%s %s(%s) dispatched by %s", dispatchID, *role, result.Route.Model, parent)
-				hyp.TraceTick(mf.HyphaTraceID, tick)
+				hyp.TraceTick(runRec.HyphaTraceID, tick)
 			}
 		}
 	}
@@ -265,12 +259,12 @@ func runDispatch(args []string) error {
 		return nil
 	}
 
-	return waitForDispatch(runDir, dispatchID, *timeout)
+	return waitForDispatch(st, runID, runDir, dispatchID, *timeout)
 }
 
-// waitForDispatch polls meta.json until terminal status or timeout.
+// waitForDispatch polls dispatch record until terminal status or timeout.
 // On timeout, exits 0 printing status "running" per spec §2.3.
-func waitForDispatch(runDir, dispatchID, timeoutStr string) error {
+func waitForDispatch(st scratch.Store, runID, runDir, dispatchID, timeoutStr string) error {
 	dur, err := parseDuration(timeoutStr)
 	if err != nil {
 		dur = 8 * time.Minute
@@ -280,11 +274,11 @@ func waitForDispatch(runDir, dispatchID, timeoutStr string) error {
 	pollInterval := 200 * time.Millisecond
 
 	for {
-		m, err := run.ReadMeta(runDir, dispatchID)
+		d, err := st.ReadDispatch(runID, dispatchID)
 		if err == nil {
-			if m.IsTerminal() {
+			if d.IsTerminal() {
 				reportPath := filepath.Join(runDir, "dispatches", dispatchID, "report.md")
-				fmt.Printf("%s %s %s\n", dispatchID, m.Status, reportPath)
+				fmt.Printf("%s %s %s\n", dispatchID, d.Status, reportPath)
 				return nil
 			}
 		}

@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"m31labs.dev/tiller/internal/run"
+	"m31labs.dev/tiller/internal/scratch"
+	"m31labs.dev/tiller/internal/scratch/fsstore"
 )
 
 // runPoll is the handler for `tiller poll <dispatch-id>`.
@@ -26,18 +27,23 @@ func runPoll(args []string) error {
 
 	dispatchID := fs.Arg(0)
 
-	runDir, err := run.CurrentRunDir()
+	st, runID, err := fsstore.Resolve()
 	if err != nil {
 		return fmt.Errorf("poll: %w", err)
 	}
+	if runID == "" {
+		return fmt.Errorf("poll: TILLER_RUN_DIR is not set")
+	}
 
-	m, err := run.ReadMeta(runDir, dispatchID)
+	runDir := os.Getenv("TILLER_RUN_DIR")
+
+	d, err := st.ReadDispatch(runID, dispatchID)
 	if err != nil {
-		return fmt.Errorf("poll: read meta for %s: %w", dispatchID, err)
+		return fmt.Errorf("poll: read dispatch for %s: %w", dispatchID, err)
 	}
 
 	reportPath := filepath.Join(runDir, "dispatches", dispatchID, "report.md")
-	printMetaOneLiner(m, reportPath)
+	printDispatchOneLiner(d, reportPath)
 	return nil
 }
 
@@ -78,10 +84,15 @@ func runAwait(args []string) error {
 
 	dispatchID := positional[0]
 
-	runDir, err := run.CurrentRunDir()
+	st, runID, err := fsstore.Resolve()
 	if err != nil {
 		return fmt.Errorf("await: %w", err)
 	}
+	if runID == "" {
+		return fmt.Errorf("await: TILLER_RUN_DIR is not set")
+	}
+
+	runDir := os.Getenv("TILLER_RUN_DIR")
 
 	dur, err := parseDuration(*timeoutFlag)
 	if err != nil {
@@ -92,27 +103,27 @@ func runAwait(args []string) error {
 	pollInterval := 200 * time.Millisecond
 
 	for {
-		m, err := run.ReadMeta(runDir, dispatchID)
+		d, err := st.ReadDispatch(runID, dispatchID)
 		if err == nil {
 			// Check for orphan (supervisor dead) — treat as stale, exit 3.
-			if m.IsOrphan() {
+			if d.IsOrphan() {
 				reportPath := filepath.Join(runDir, "dispatches", dispatchID, "report.md")
 				fmt.Printf("%s stale %s\n", dispatchID, reportPath)
 				return &StaledError{DispatchID: dispatchID}
 			}
-			if m.IsTerminal() {
+			if d.IsTerminal() {
 				reportPath := filepath.Join(runDir, "dispatches", dispatchID, "report.md")
-				printMetaOneLiner(m, reportPath)
+				printDispatchOneLiner(d, reportPath)
 				return nil
 			}
 			if time.Now().After(deadline) {
 				reportPath := filepath.Join(runDir, "dispatches", dispatchID, "report.md")
-				printMetaOneLiner(m, reportPath)
+				printDispatchOneLiner(d, reportPath)
 				return nil
 			}
 		} else {
 			if time.Now().After(deadline) {
-				fmt.Printf("%s unknown (meta unreadable)\n", dispatchID)
+				fmt.Printf("%s unknown (dispatch unreadable)\n", dispatchID)
 				return nil
 			}
 		}
@@ -131,7 +142,7 @@ func (e *StaledError) Error() string {
 	return fmt.Sprintf("dispatch %s is stale: supervisor process is no longer running", e.DispatchID)
 }
 
-// printMetaOneLiner prints "<id> <status> <report-path>" to stdout.
-func printMetaOneLiner(m *run.Meta, reportPath string) {
-	fmt.Printf("%s %s %s\n", m.ID, m.Status, reportPath)
+// printDispatchOneLiner prints "<id> <status> <report-path>" to stdout.
+func printDispatchOneLiner(d *scratch.Dispatch, reportPath string) {
+	fmt.Printf("%s %s %s\n", d.ID, d.Status, reportPath)
 }

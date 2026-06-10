@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -9,7 +8,8 @@ import (
 	"sort"
 	"text/tabwriter"
 
-	"m31labs.dev/tiller/internal/run"
+	"m31labs.dev/tiller/internal/scratch"
+	"m31labs.dev/tiller/internal/scratch/fsstore"
 )
 
 // runRuns is the handler for `tiller runs list|show|gc`.
@@ -44,7 +44,9 @@ func runRunsList(args []string) error {
 	}
 
 	runsBase := filepath.Join(workspace, ".tiller", "runs")
-	items, err := run.ListRuns(runsBase)
+	st := fsstore.Open(runsBase)
+
+	items, err := st.ListRuns()
 	if err != nil {
 		return fmt.Errorf("runs list: %w", err)
 	}
@@ -110,44 +112,46 @@ func runRunsShow(args []string) error {
 		return fmt.Errorf("runs show: run %q not found: %w", id, err)
 	}
 
+	st := fsstore.Open(runsBase)
+
 	if *jsonOut {
-		return runRunsShowJSON(runDir)
+		return runRunsShowJSON(st, id)
 	}
 
-	return runRunsShowText(runDir)
+	return runRunsShowText(st, id)
 }
 
 // runRunsShowText renders a human-readable runs show.
-func runRunsShowText(runDir string) error {
-	manifest, err := run.ReadManifest(runDir)
+func runRunsShowText(st scratch.Store, id string) error {
+	runRec, err := st.ReadRun(id)
 	if err != nil {
-		return fmt.Errorf("read manifest: %w", err)
+		return fmt.Errorf("read run: %w", err)
 	}
 
 	// Manifest summary.
-	fmt.Printf("run:         %s\n", manifest.RunID)
-	fmt.Printf("status:      %s\n", manifest.Status)
-	fmt.Printf("task:        %s\n", run.FirstLine(manifest.Task))
-	fmt.Printf("workspace:   %s\n", manifest.Workspace)
-	fmt.Printf("fable_budget:%d\n", manifest.FableBudget)
-	if !manifest.CreatedAt.IsZero() {
-		fmt.Printf("created:     %s\n", manifest.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"))
+	fmt.Printf("run:         %s\n", runRec.ID)
+	fmt.Printf("status:      %s\n", runRec.Status)
+	fmt.Printf("task:        %s\n", firstLine(runRec.Task))
+	fmt.Printf("workspace:   %s\n", runRec.Workspace)
+	fmt.Printf("fable_budget:%d\n", runRec.FableBudget)
+	if !runRec.CreatedAt.IsZero() {
+		fmt.Printf("created:     %s\n", runRec.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"))
 	}
-	if manifest.EndedAt != nil {
-		fmt.Printf("ended:       %s\n", manifest.EndedAt.UTC().Format("2006-01-02T15:04:05Z"))
+	if runRec.EndedAt != nil {
+		fmt.Printf("ended:       %s\n", runRec.EndedAt.UTC().Format("2006-01-02T15:04:05Z"))
 	}
 
 	// Policy hashes.
-	if len(manifest.PolicySHAs) > 0 {
+	if len(runRec.PolicySHAs) > 0 {
 		fmt.Println("\npolicies:")
-		for kind, sha := range manifest.PolicySHAs {
+		for kind, sha := range runRec.PolicySHAs {
 			fmt.Printf("  %s: %s\n", kind, sha)
 		}
 	}
 
-	// Dispatch tree.
+	// Dispatch tree via the Store.
 	fmt.Println("\ndispatches:")
-	tree, err := run.RenderTree(runDir)
+	tree, err := st.RenderTree(id)
 	if err != nil {
 		return fmt.Errorf("render tree: %w", err)
 	}
@@ -157,17 +161,11 @@ func runRunsShowText(runDir string) error {
 }
 
 // runRunsShowJSON emits the derived structure as JSON.
-func runRunsShowJSON(runDir string) error {
-	summary, err := run.BuildRunSummary(runDir)
+func runRunsShowJSON(st scratch.Store, id string) error {
+	data, err := st.BuildRunSummaryJSON(id)
 	if err != nil {
 		return fmt.Errorf("build summary: %w", err)
 	}
-
-	data, err := json.MarshalIndent(summary, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal json: %w", err)
-	}
-
 	fmt.Println(string(data))
 	return nil
 }
@@ -198,13 +196,7 @@ func runRunsGC(args []string) error {
 	}
 
 	runsBase := filepath.Join(workspace, ".tiller", "runs")
-	entries, err := os.ReadDir(runsBase)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // nothing to gc
-		}
-		return fmt.Errorf("runs gc: read runs dir: %w", err)
-	}
+	st := fsstore.Open(runsBase)
 
 	type gcItem struct {
 		runID     string
@@ -213,21 +205,27 @@ func runRunsGC(args []string) error {
 		createdAt string // sortable ISO string
 	}
 
-	var items []gcItem
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+	// List all runs then fetch each for full record (createdAt for sort, status for filter).
+	listItems, err := st.ListRuns()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // nothing to gc
 		}
-		rd := filepath.Join(runsBase, e.Name())
-		manifest, err := run.ReadManifest(rd)
+		return fmt.Errorf("runs gc: list runs: %w", err)
+	}
+
+	var items []gcItem
+	for _, li := range listItems {
+		rd := filepath.Join(runsBase, li.RunID)
+		runRec, err := st.ReadRun(li.RunID)
 		if err != nil {
 			continue // skip unreadable runs
 		}
 		items = append(items, gcItem{
-			runID:     manifest.RunID,
+			runID:     li.RunID,
 			runDir:    rd,
-			status:    manifest.Status,
-			createdAt: manifest.CreatedAt.UTC().Format("20060102-150405"),
+			status:    runRec.Status,
+			createdAt: runRec.CreatedAt.UTC().Format("20060102-150405"),
 		})
 	}
 

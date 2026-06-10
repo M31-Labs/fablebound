@@ -7,7 +7,10 @@
 // that v1 and v2 code produce identical artifacts during the migration.
 package scratch
 
-import "time"
+import (
+	"syscall"
+	"time"
+)
 
 // Run is the run-level record (spec §3.1 "manifest" row).
 // Maps to manifest.json in the fsstore.
@@ -63,18 +66,48 @@ func (d *Dispatch) IsTerminal() bool {
 	return false
 }
 
+// IsOrphan returns true if this is a "running" dispatch whose supervisor
+// process no longer exists. SupervisorPID == 0 means the PID was never
+// recorded (older dispatches); those are not treated as orphans.
+func (d *Dispatch) IsOrphan() bool {
+	if d.Status != "running" {
+		return false
+	}
+	if d.SupervisorPID <= 0 {
+		return false
+	}
+	// kill -0 checks whether the process exists without sending a signal.
+	err := syscall.Kill(d.SupervisorPID, 0)
+	// ESRCH = no such process → orphan.
+	return err == syscall.ESRCH
+}
+
+// DispatchNode is a node in the dispatch tree returned by BuildDispatchTree.
+// It mirrors run.Node but uses scratch.Dispatch instead of run.Meta.
+type DispatchNode struct {
+	Dispatch *Dispatch
+	Children []*DispatchNode
+}
+
 // TraceEvent is one entry appended to dispatches/<id>/tool_trace.jsonl or
 // dispatches/<id>/context_trace.jsonl (spec §3.1 "trace-event" record).
 type TraceEvent struct {
 	Ts           string `json:"ts"`
-	Kind         string `json:"kind"` // "tool" | "read"
+	Kind         string `json:"kind"` // "tool" | "read" | "dispatch" | "report"
 	RunID        string `json:"run_id"`
 	DispatchID   string `json:"dispatch_id"`
-	Role         string `json:"role"`
-	Depth        int    `json:"depth"`
-	Tool         string `json:"tool"`
-	InputSummary string `json:"input_summary"`
+	Role         string `json:"role,omitempty"`
+	Depth        int    `json:"depth,omitempty"`
+	Tool         string `json:"tool,omitempty"`
+	InputSummary string `json:"input_summary,omitempty"`
 	Status       string `json:"status,omitempty"` // "ok" | "error" (tool events)
+	// Dispatch-event only fields (kind:"dispatch").
+	ChildID string `json:"child_id,omitempty"`
+	Model   string `json:"model,omitempty"`
+	Profile string `json:"profile,omitempty"`
+	// Cost / turns for report events (kind:"report").
+	CostUSD  float64 `json:"cost_usd,omitempty"`
+	NumTurns int     `json:"num_turns,omitempty"`
 }
 
 // NoteRef is a reference to a note document in notes/<filename>.

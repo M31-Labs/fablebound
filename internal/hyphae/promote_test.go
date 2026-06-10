@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"m31labs.dev/tiller/internal/run"
+	"m31labs.dev/tiller/internal/scratch"
+	"m31labs.dev/tiller/internal/scratch/fsstore"
 )
 
 // makeFixtureRun creates a minimal run fixture under tmpDir and returns the
@@ -16,17 +17,14 @@ func makeFixtureRun(t *testing.T, tmpDir string) string {
 	t.Helper()
 
 	runsBase := filepath.Join(tmpDir, ".tiller", "runs")
-	store := run.NewStore(runsBase)
-	runID, err := store.CreateRun()
-	if err != nil {
-		t.Fatalf("create run: %v", err)
+	if err := os.MkdirAll(runsBase, 0o755); err != nil {
+		t.Fatalf("mkdir runsBase: %v", err)
 	}
-	runDir := store.RunDir(runID)
+	st := fsstore.Open(runsBase)
 
 	now := time.Now()
 	ended := now.Add(5 * time.Second)
-	manifest := &run.Manifest{
-		RunID:       runID,
+	r := &scratch.Run{
 		Task:        "Summarize the codebase architecture.\n\nAdditional context here.",
 		Workspace:   tmpDir,
 		Status:      "completed",
@@ -34,51 +32,54 @@ func makeFixtureRun(t *testing.T, tmpDir string) string {
 		CreatedAt:   now,
 		EndedAt:     &ended,
 	}
-	if err := run.WriteManifest(runDir, manifest); err != nil {
-		t.Fatalf("write manifest: %v", err)
+	runID, err := st.CreateRun(r)
+	if err != nil {
+		t.Fatalf("create run: %v", err)
 	}
+	runDir := filepath.Join(runsBase, runID)
 
 	// Create root dispatch.
-	if _, err := store.CreateDispatch(runID, "root"); err != nil {
-		t.Fatalf("create root dispatch: %v", err)
+	rootD := &scratch.Dispatch{
+		ID:        "root",
+		Role:      "orchestrator",
+		Model:     "fable",
+		Profile:   "orchestrator",
+		Status:    "completed",
+		Depth:     0,
+		CostUSD:   0.05,
+		StartedAt: now,
 	}
-	rootMeta := &run.Meta{
-		ID:      "root",
-		Role:    "orchestrator",
-		Model:   "fable",
-		Profile: "orchestrator",
-		Status:  "completed",
-		Depth:   0,
-		CostUSD: 0.05,
+	if err := st.WriteBrief(runID, "root", []byte(r.Task)); err != nil {
+		t.Fatalf("write root brief: %v", err)
 	}
-	if err := run.WriteMeta(runDir, rootMeta); err != nil {
-		t.Fatalf("write root meta: %v", err)
+	if err := st.WriteDispatch(runID, rootD); err != nil {
+		t.Fatalf("write root dispatch: %v", err)
 	}
-	// Write root report.
-	reportPath := filepath.Join(runDir, "dispatches", "root", "report.md")
-	if err := os.WriteFile(reportPath, []byte("The codebase uses a layered architecture with policy-governed dispatch.\n"), 0o644); err != nil {
+	// Write root report via the Store.
+	if err := st.WriteReport(runID, "root", []byte("The codebase uses a layered architecture with policy-governed dispatch.\n")); err != nil {
 		t.Fatalf("write root report: %v", err)
 	}
 
-	// Create d01 dispatch.
-	if _, err := store.CreateDispatch(runID, "d01"); err != nil {
-		t.Fatalf("create d01 dispatch: %v", err)
+	// Create d01 dispatch via AllocDispatch (produces "d01" as the first allocation).
+	d01ID, err := st.AllocDispatch(runID)
+	if err != nil {
+		t.Fatalf("alloc d01 dispatch: %v", err)
 	}
-	d01Meta := &run.Meta{
-		ID:      "d01",
-		Parent:  "root",
-		Role:    "investigator",
-		Model:   "sonnet",
-		Profile: "readonly",
-		Status:  "completed",
-		Depth:   1,
-		CostUSD: 0.02,
+	d01 := &scratch.Dispatch{
+		ID:        d01ID,
+		Parent:    "root",
+		Role:      "investigator",
+		Model:     "sonnet",
+		Profile:   "readonly",
+		Status:    "completed",
+		Depth:     1,
+		CostUSD:   0.02,
+		StartedAt: now,
 	}
-	if err := run.WriteMeta(runDir, d01Meta); err != nil {
-		t.Fatalf("write d01 meta: %v", err)
+	if err := st.WriteDispatch(runID, d01); err != nil {
+		t.Fatalf("write d01 dispatch: %v", err)
 	}
-	d01Report := filepath.Join(runDir, "dispatches", "d01", "report.md")
-	if err := os.WriteFile(d01Report, []byte("Investigation complete: the main entry point is cmd/tiller/main.go.\n"), 0o644); err != nil {
+	if err := st.WriteReport(runID, d01ID, []byte("Investigation complete: the main entry point is cmd/tiller/main.go.\n")); err != nil {
 		t.Fatalf("write d01 report: %v", err)
 	}
 

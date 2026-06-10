@@ -17,13 +17,100 @@ import (
 )
 
 // ClaudeResult is the parsed --output-format json output from claude.
+// It normalises two historical shapes into one struct:
+//
+//   - Legacy / stub shape (pre-2.1.172): single JSON object with "cost_usd".
+//     {"type":"result","result":"...","cost_usd":0.001,"num_turns":1,"session_id":"...","is_error":false}
+//
+//   - Real claude 2.1.172 shape: JSON array of event objects; the result
+//     record is the element with "type":"result" and uses "total_cost_usd".
+//     [{"type":"system",...},{"type":"assistant",...},...,
+//      {"type":"result","subtype":"success","total_cost_usd":1.16,"num_turns":3,...}]
+//
+// Use parseClaudeResult to decode either shape.
 type ClaudeResult struct {
 	Type      string  `json:"type"`
 	Result    string  `json:"result"`
-	CostUSD   float64 `json:"cost_usd"`
+	CostUSD   float64 // normalised from cost_usd (legacy) or total_cost_usd (real)
 	NumTurns  int     `json:"num_turns"`
 	SessionID string  `json:"session_id"`
 	IsError   bool    `json:"is_error"`
+}
+
+// parseClaudeResult decodes the raw bytes captured from claude's stdout and
+// returns a normalised ClaudeResult.  It handles two known output shapes:
+//
+//  1. Legacy / stub — single JSON object (pre-2.1.172 or test stubs):
+//     {"type":"result","cost_usd":0.001,...}
+//
+//  2. Real claude ≥2.1.172 — JSON array of streaming events; the last element
+//     with "type":"result" carries "total_cost_usd":
+//     [{"type":"system",...},...,{"type":"result","total_cost_usd":1.16,...}]
+//
+// Shape detection is explicit: if the first non-whitespace byte is '[' the
+// array path is taken; otherwise the legacy single-object path is used.
+func parseClaudeResult(data []byte) (ClaudeResult, error) {
+	// Detect array shape.
+	trimmed := data
+	for len(trimmed) > 0 && (trimmed[0] == ' ' || trimmed[0] == '\t' || trimmed[0] == '\n' || trimmed[0] == '\r') {
+		trimmed = trimmed[1:]
+	}
+
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		// Real claude ≥2.1.172: JSON array of event objects.
+		// rawArrayEvent is a minimal struct for one event in the array.
+		type rawArrayEvent struct {
+			Type         string  `json:"type"`
+			Result       string  `json:"result"`
+			TotalCostUSD float64 `json:"total_cost_usd"`
+			NumTurns     int     `json:"num_turns"`
+			SessionID    string  `json:"session_id"`
+			IsError      bool    `json:"is_error"`
+			Subtype      string  `json:"subtype"`
+		}
+		var events []rawArrayEvent
+		if err := json.Unmarshal(trimmed, &events); err != nil {
+			return ClaudeResult{}, fmt.Errorf("parse claude array output: %w", err)
+		}
+		// Find the result event (last element with type:"result").
+		for i := len(events) - 1; i >= 0; i-- {
+			e := events[i]
+			if e.Type == "result" {
+				return ClaudeResult{
+					Type:      e.Type,
+					Result:    e.Result,
+					CostUSD:   e.TotalCostUSD,
+					NumTurns:  e.NumTurns,
+					SessionID: e.SessionID,
+					IsError:   e.IsError,
+				}, nil
+			}
+		}
+		return ClaudeResult{}, fmt.Errorf("parse claude array output: no result event found in %d events", len(events))
+	}
+
+	// Legacy / stub shape: single JSON object, possibly preceded by log noise.
+	// trimOutput finds the first line whose first non-whitespace byte is '{'.
+	type rawLegacyResult struct {
+		Type      string  `json:"type"`
+		Result    string  `json:"result"`
+		CostUSD   float64 `json:"cost_usd"`
+		NumTurns  int     `json:"num_turns"`
+		SessionID string  `json:"session_id"`
+		IsError   bool    `json:"is_error"`
+	}
+	var raw rawLegacyResult
+	if err := json.Unmarshal(trimOutput(data), &raw); err != nil {
+		return ClaudeResult{}, fmt.Errorf("parse claude single-object output: %w", err)
+	}
+	return ClaudeResult{
+		Type:      raw.Type,
+		Result:    raw.Result,
+		CostUSD:   raw.CostUSD,
+		NumTurns:  raw.NumTurns,
+		SessionID: raw.SessionID,
+		IsError:   raw.IsError,
+	}, nil
 }
 
 // SuperviseArgs holds everything needed to run the supervisor.
@@ -207,11 +294,11 @@ func Supervise(a SuperviseArgs) error {
 
 	logf("claude exited code=%d", exitCode)
 
-	// Parse JSON result.
+	// Parse JSON result — handles both legacy single-object and real array shapes.
 	var claudeRes ClaudeResult
 	finalStatus := "completed"
-	if err := json.Unmarshal(trimOutput(buf), &claudeRes); err != nil {
-		logf("warning: failed to parse claude output as JSON: %v", err)
+	if parsedRes, parseErr := parseClaudeResult(buf); parseErr != nil {
+		logf("warning: failed to parse claude output as JSON: %v", parseErr)
 		// Write raw stdout as report.
 		_ = os.WriteFile(reportPath, buf, 0o644)
 		if timeoutKilled {
@@ -220,6 +307,7 @@ func Supervise(a SuperviseArgs) error {
 			finalStatus = "failed"
 		}
 	} else {
+		claudeRes = parsedRes
 		// Write report.md via the Store.
 		if err := st.WriteReport(runID, a.DispatchID, []byte(claudeRes.Result)); err != nil {
 			logf("warning: write report.md: %v", err)

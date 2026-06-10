@@ -100,7 +100,11 @@ func Main(args []string) {
 		{"version", runVersion},
 	}
 
+	// Allow --version and -v as aliases for the "version" subcommand.
 	sub := args[1]
+	if sub == "--version" || sub == "-v" {
+		sub = "version"
+	}
 	for _, sc := range subcommands {
 		if sc.name == sub {
 			if err := sc.handler(args[2:]); err != nil {

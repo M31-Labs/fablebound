@@ -7,6 +7,39 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.2.0] — 2026-06-10
+
+### Added
+
+- **Self-uninstall escape hatch** — `tiller uninstall` (and `--print`/`--project` variants) is now
+  explicitly allowed through the ambient gate for a gated fable orchestrator. The Go-side
+  `IsSelfUninstall` predicate (quote-aware tokenizer, single-segment check, argv validation) sets
+  command class `"self-uninstall"`. Chained forms (`tiller uninstall && rm x`) remain denied.
+
+- **Hardened uninstall**:
+  - Foreign hook preservation — `removeHookEntries` strips only entries whose command base-name is
+    `tiller`; all other hooks survive intact.
+  - Owned-persona-only removal — `ownedTillerAgentFiles` compares against the embedded `tiller-*.md`
+    names (not a glob); user-created `tiller-custom.md` files are never touched.
+  - Empty-container cleanup — `pruneEmptyHookContainers` removes empty `[]` arrays and the `"hooks"`
+    map itself after tiller entries are removed, leaving no empty husks in `settings.json`.
+  - Idempotency — second `tiller uninstall` on a clean system prints `"tiller: nothing to uninstall"`.
+  - `--print` no-write — `tiller uninstall --print` prints the removal plan without modifying any file.
+  - Trial-exit report — after real uninstall, prints what was removed (hook count, agent count,
+    settings path), what remains on disk (binary, `.tiller/` run dirs), and how to finish cleanup.
+
+- **"Trying tiller" README guidance** — Quickstart section notes that `tiller uninstall` reverts
+  everything, works from inside a gated session, and `--print` previews before committing.
+
+### Fixed / Changed
+
+- **`AllowPermittedBash` rule consolidation** — the two separate inline-condition rules
+  (`AllowReadOnlyBash` for `"readonly"` and a separate self-uninstall rule) were merged into a
+  single OR condition. Root cause: arbiter v1.8.0 VM bug — two consecutive inline-condition rules
+  before a segment-based rule cause the segment rule to not evaluate. Documented upstream.
+
+---
+
 ## [0.1.1] — 2026-06-10
 
 ### Fixed
@@ -65,5 +98,6 @@ Initial release.
 - **Hyphae integration** — traces, recall, `tiller promote`.
 - **Canonical subagent personas** — six `tiller-*` agents embedded and installed by `tiller install`.
 
+[0.2.0]: https://github.com/odvcencio/tiller/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/odvcencio/tiller/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/odvcencio/tiller/releases/tag/v0.1.0

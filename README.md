@@ -1,14 +1,14 @@
 # tiller
 
-A harness that gates Claude Code sessions with compiled [Arbiter](https://github.com/odvcencio/arbiter) policies, enforces model-cost discipline, and makes the fable model's orchestrator-only role the default ambient experience.
+A harness that gates Claude Code sessions with compiled [Arbiter](https://github.com/odvcencio/arbiter) policies, enforces tier-cost discipline, and makes the reason-tier model's orchestrator-only role the default ambient experience.
 
 ## Why
 
-Fable tokens are expensive. When you have fable access, the natural waste pattern is using it for mechanical execution — writing files, running commands, editing boilerplate. tiller prevents this structurally: the fable model orchestrates and reasons; cheaper models (sonnet, opus) do the work. In ambient mode this happens automatically inside your normal `claude` session without any project setup.
+Reason-tier tokens are expensive. When you have reason-tier access, the natural waste pattern is using it for mechanical execution — writing files, running commands, editing boilerplate. tiller prevents this structurally: the reason-tier model orchestrates and reasons; cheaper tiers (scrutiny, execute) do the work. In ambient mode this happens automatically inside your normal `claude` session without any project setup.
 
 ## Quickstart: Ambient Mode (recommended)
 
-Ambient mode is the primary way to use tiller. It self-activates whenever your Claude Code session is running the fable model and is completely invisible for every other model.
+Ambient mode is the primary way to use tiller. It self-activates whenever your Claude Code session is running a reason-tier model and is completely invisible for every other model.
 
 ```sh
 # Install (requires Go 1.25+)
@@ -39,26 +39,53 @@ Then, in any `claude` session:
 
 Ambient mode engages immediately. The fable root is restricted to orchestration-only tools (Read, Glob, Grep, Agent/Task, TodoWrite, WebFetch). Execution is automatically delegated to tiller-* subagents on cheaper models.
 
-**How it works.** The installed `PreToolUse` hook reads the session transcript to find the model of the most recent assistant turn. If that model is `claude-fable-5` or `fable`, the hook evaluates `ambient.arb` — an orchestrator-only policy that denies Edit, Write, NotebookEdit, and Bash, while allowing Read, Glob, Grep, Agent/Task dispatch, TodoWrite, and WebFetch. For any other model the hook exits 0 immediately. Subagent calls (where `agent_id` is present) pass through unconditionally.
+**How it works.** The installed `PreToolUse` hook reads the session transcript to find the model of the most recent assistant turn. If that model maps to the reason tier (`claude-fable-5` or `fable`), the hook evaluates `ambient.arb` — an orchestrator-only policy that denies Edit, Write, NotebookEdit, and Bash, while allowing Read, Glob, Grep, Agent/Task dispatch, TodoWrite, and WebFetch. For any other model the hook exits 0 immediately. Subagent calls (where `agent_id` is present) pass through unconditionally.
 
-**Fail-open.** Any error reading the transcript (missing path, no assistant line, unreadable file) causes the hook to exit 0. It never blocks a non-fable session. Model switches (e.g. `/model sonnet` → `/model fable`) are tracked live via the transcript.
+**Fail-open.** Any error reading the transcript (missing path, no assistant line, unreadable file) causes the hook to exit 0. It never blocks a non-reason-tier session. Model switches (e.g. `/model sonnet` → `/model fable`) are tracked live via the transcript.
 
 ## Canonical Subagent Personas
 
-When the fable root delegates via the Agent/Task tool, these personas route work to cheaper models:
+When the reason-tier root delegates via the Agent/Task tool, these personas route work to cheaper models:
 
-| Persona | Model | Use for |
+| Persona | Model | Tier | Use for |
+|---|---|---|---|
+| `tiller-worker` | sonnet | execute | Writing/editing code, running builds and tests, all file-mutating work |
+| `tiller-debugger` | sonnet | execute | Systematic debugging — root-cause, fix, verify |
+| `tiller-investigator` | opus | scrutiny | Deep read-only investigation, code tracing, adversarial verification |
+| `tiller-reviewer` | opus | scrutiny | Code review — correctness, security, quality |
+| `tiller-architect` | fable | reason | Architectural specs, deep design, complex trade-off analysis |
+| `tiller-deep-report` | fable | reason | Exhaustive multi-source research reports |
+
+The deny reason when a reason-tier model tries to execute directly: `"tiller: ambient orchestrator runs in read/dispatch mode — delegate with the Task tool: code changes → tiller-worker, debugging → tiller-debugger, investigation → tiller-investigator, review → tiller-reviewer; reserve tiller-architect/tiller-deep-report for deep design and research. {tool.name} is not permitted for the root orchestrator agent."` — this steers the orchestrator toward the right persona without a second prompt.
+
+**Enforcement layering.** Ambient mode governs the root reason-tier session only. Subagents spawned via Task are unaffected by ambient policy — they pass through. Their model is baked into the persona frontmatter (`model: sonnet`/`opus`/`fable`), which is the primary cost lever in ambient mode.
+
+## Tiers & Model Routing
+
+tiller speaks three tiers throughout — policies route on them, audit logs record them, and the persona table maps to them:
+
+| Tier | Role in the system | Default candidate |
 |---|---|---|
-| `tiller-worker` | sonnet | Writing/editing code, running builds and tests, all file-mutating work |
-| `tiller-debugger` | sonnet | Systematic debugging — root-cause, fix, verify |
-| `tiller-investigator` | opus | Deep read-only investigation, code tracing, adversarial verification |
-| `tiller-reviewer` | opus | Code review — correctness, security, quality |
-| `tiller-architect` | fable | Architectural specs, deep design, complex trade-off analysis |
-| `tiller-deep-report` | fable | Exhaustive multi-source research reports |
+| `reason` | Orchestration, planning, deep analysis | `claude-headless:anthropic/fable` |
+| `scrutiny` | Read-only investigation, review | `claude-headless:anthropic/opus` |
+| `execute` | Implementation, file mutation, command execution | `claude-headless:anthropic/sonnet` (fallback: haiku) |
 
-The deny reason when fable tries to execute directly names these personas: `"tiller: fable is orchestrator-only — delegate this with the Task tool: code changes → tiller-worker (sonnet), debugging → tiller-debugger (sonnet), investigation → tiller-investigator (opus), review → tiller-reviewer (opus); reserve fable for tiller-architect/tiller-deep-report. (<tool> blocked for the root fable agent.)"` — this steers the orchestrator toward the right persona without a second prompt.
+These defaults live in `internal/tier/defaults/models.toml`. Override them for a project by creating `.tiller/models.toml`:
 
-**Enforcement layering.** Ambient mode governs the root fable session only. Subagents spawned via Task are unaffected by ambient policy — they pass through. Their model is baked into the persona frontmatter (`model: sonnet`/`opus`/`fable`), which is the primary cost lever. The hook cannot inspect the target model of an Agent/Task invocation (the `tool_input` payload does not expose it), so persona frontmatter is the enforcement point for subagent model routing.
+```toml
+[tiers.reason]
+candidates = ["claude-headless:anthropic/fable"]
+
+[tiers.scrutiny]
+candidates = ["claude-headless:anthropic/opus"]
+
+[tiers.execute]
+candidates = ["claude-headless:anthropic/sonnet", "claude-headless:anthropic/haiku"]
+```
+
+Each candidate is `adapter:provider/model`. The first candidate that resolves wins; haiku serves as a canary or fallback for the execute tier.
+
+Command (non-Claude) backends use the `command` adapter — see [Non-Claude Backends](#non-claude-backends) below.
 
 ## Managed Mode: `tiller run` (optional)
 
@@ -71,6 +98,10 @@ tiller init
 
 # Run a task
 tiller run "investigate why the payment retry queue is backing up and write a findings report"
+
+# Flags
+tiller run --reason-budget 3 --max-depth 3 "my task"
+tiller run --store tee --store-dsn postgres://user:pass@host/db "my task"
 
 # Inspect the run
 tiller runs list
@@ -103,7 +134,7 @@ user: tiller run "<task>"
      │        ├─ DENIED → exit 3, policy reason on stderr (orchestrator re-plans)
      │        └─ ALLOWED → writes dispatches/<id>/{brief.md,settings.json,meta.json}
      │            └─ spawns detached tiller _supervise <run> <id>
-     │                └─ execs claude -p --model <route.model> --output-format json
+     │                └─ execs claude -p --model <tier-resolved model> --output-format json
      │                    captures report.md, finalizes meta.json
      │
      └─ depth-1 agents can dispatch further; depth-2 agents are terminal
@@ -117,24 +148,72 @@ user: tiller run "<task>"
 |---|---|---|
 | Setup | `tiller install` once | `tiller init` per project |
 | Session | Normal interactive `claude` | Spawned `claude -p` processes |
-| Enforcement | Root fable session only | Full process tree, every agent |
+| Enforcement | Root reason-tier session only | Full process tree, every agent |
 | Artifacts | None | Full run dir, JSONL audit trails |
-| Depth | Flat (subagents cannot spawn subagents) | Up to depth-2 dispatch trees |
-| Model routing | Persona frontmatter | `dispatch.arb` strategy rules |
+| Depth | Flat (subagents cannot spawn subagents) | Up to configurable depth (`--max-depth`) |
+| Model routing | Persona frontmatter | `dispatch.arb` strategy rules + `models.toml` |
 
-## Managed Mode: Role × Model Matrix
+## Managed Mode: Role × Tier Matrix
 
-| Role | Model | Profile | Edit/Write | Bash | May dispatch |
+| Role | Tier | Profile | Edit/Write | Bash | May dispatch |
 |---|---|---|---|---|---|
-| `orchestrator` | fable | orchestrator | denied | `tiller *`, `hypha *` only | all roles |
-| `chief-architect` | fable | insight | scratch only | read-only prefixes | investigator |
-| `deep-report` | fable | insight | scratch only | read-only prefixes | investigator |
-| `investigator` | opus | readonly | denied | read-only prefixes | investigator |
-| `worker` | sonnet | execution | yes (workspace) | yes | investigator, debugger |
-| `debugger` | sonnet | execution | yes (workspace) | yes | investigator |
-| `reviewer` | opus | readonly | scratch only | read-only prefixes | none |
+| `orchestrator` | reason | orchestrator | denied | `tiller *`, `hypha *` only | all roles |
+| `chief-architect` | reason | insight | scratch only | read-only prefixes | investigator |
+| `deep-report` | reason | insight | scratch only | read-only prefixes | investigator |
+| `investigator` | scrutiny | readonly | denied | read-only prefixes | investigator |
+| `worker` | execute | execution | yes (workspace) | yes | investigator, debugger |
+| `debugger` | execute | execution | yes (workspace) | yes | investigator |
+| `reviewer` | scrutiny | readonly | scratch only | read-only prefixes | none |
 
-Fable-model dispatches (`chief-architect`, `deep-report`) are limited per run (default 2). The fable budget is a hard policy rule in `dispatch.arb`.
+Reason-tier dispatches (`chief-architect`, `deep-report`) are limited per run (default 2, controlled by `--reason-budget`). The reason budget is a hard policy rule in `dispatch.arb`.
+
+## Queued Dispatch & the Executor Pool
+
+For workloads where dispatches should not block the caller, tiller supports a queue + pool execution model:
+
+```sh
+# Queue a dispatch (returns dispatch id immediately, no spawn)
+tiller dispatch --queue --role worker --tier execute --brief "do the thing"
+# → prints dispatch id (e.g. d01) and exits 0
+
+# Run the executor pool (host-managed singleton)
+tiller pool
+
+# Pool flags
+tiller pool --poll 5s --max-concurrent 4 --lease 2m --renew 1m
+tiller pool --store pg --store-dsn postgres://... --journal /var/lib/tiller/pool.jsonl
+
+# Watch a specific dispatch
+tiller poll <dispatch-id>
+tiller await <dispatch-id>
+```
+
+**How the pool works.** `tiller pool` is a host-managed singleton process that continuously sweeps the store for `pending` dispatches, claims them with a time-bounded lease, spawns the appropriate adapter, and marks them `completed` or `failed`. Key properties:
+
+- **Claim/lease semantics.** A dispatch is claimed atomically; the pool renews the lease on a fixed interval. If the pool crashes mid-execution the lease expires and another pool process (or a restarted pool) can reclaim it.
+- **Journal exactly-once.** A JSONL delivery journal (`--journal`, default `.tiller/pool-journal.jsonl`) records every completed dispatch ID. On restart the pool skips already-journaled IDs, preventing double-execution.
+- **Denied status.** A dispatch that fails policy evaluation is written as `status: denied` with the policy reason; the pool does not retry denied dispatches.
+- **Concurrency.** `--max-concurrent` limits simultaneous adapter runs. Default is 4.
+
+## Non-Claude Backends
+
+tiller's adapter seam is provider-agnostic. Any process can serve as an execute-tier backend via the `command` adapter. Configure it in `.tiller/models.toml`:
+
+```toml
+[tiers.execute]
+candidates = ["command:my-agent/-"]
+
+[adapter.my-agent]
+argv    = ["/path/to/my-agent", "{brief}"]
+report  = "stdout"
+timeout = "30s"
+```
+
+The `{brief}` placeholder is replaced with the path to the dispatch's `brief.md`. The adapter captures stdout as `report.md`.
+
+**Enforcement note.** When the execute tier resolves to the `command` adapter, enforcement is `degraded`: only execute-tier dispatches are permitted (the `DenyDegradedInsight` policy rule blocks reason/scrutiny roles through a command backend). Policy is still evaluated and audit events are still written; the backend just cannot enforce toolgate rules that depend on Claude Code's hook mechanism.
+
+A full end-to-end demo with an echo-agent backend is in [demo/DEMO-v2.md](demo/DEMO-v2.md).
 
 ## Enforcement Layering
 
@@ -148,7 +227,7 @@ role .md (cooperative)
         < [future] Horizon LSM exec-deny profile (kernel-level, see §Appendix)
 ```
 
-**Ambient mode** adds one enforcement point at the top of the root fable session. It governs only the root; subagents pass through. **Managed mode** applies toolgate at every level.
+**Ambient mode** adds one enforcement point at the top of the root reason-tier session. It governs only the root; subagents pass through. **Managed mode** applies toolgate at every level.
 
 **Fail closed.** Any internal error in `tiller hook` (missing env, policy compile failure, unparseable input) exits 2, which Claude Code treats as a deny. Ambient mode fails open (exit 0) on transcript read errors.
 
@@ -173,7 +252,7 @@ arbiter replay .tiller/policy/toolgate.arb \
 
 ```
 .tiller/runs/<run-id>/           # run-id = YYYYMMDD-HHMMSS-<4 base36>
-  manifest.json                      # task, workspace, policy sha256s, status, fable_budget
+  manifest.json                      # task, workspace, policy sha256s, status, reason_budget
   task.md                            # root task brief
   audit/
     dispatch.jsonl                   # DecisionEvents for all dispatch requests (replayable)

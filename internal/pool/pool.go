@@ -500,10 +500,19 @@ func (p *Pool) evalGate(_ context.Context, runID, dispatchID string) (bool, gate
 		return false, gateResult{}, fmt.Errorf("count running dispatches: %w", err)
 	}
 
-	// Derive enforcement from the dispatch record (written by cli/dispatch.go at
-	// queue time). Default to "full" when absent (pre-v2 or claude-headless records).
+	// Resolve the adapter NOW — before the gate — so that the gate uses the
+	// adapter's authoritative Enforcement() value rather than the persisted
+	// record field (defense-in-depth against record spoofing).
+	// Fall back to the record value only when the adapter name is unknown;
+	// that path will fail later in executeDispatch with a clear error, so the
+	// gate behaviour is otherwise identical to today.
+	adapterNameForGate := d.Adapter
 	enforcement := d.Enforcement
-	if enforcement == "" {
+	if adpt, adptErr := p.adapterRegistry.Get(adapterNameForGate); adptErr == nil {
+		enforcement = adpt.Enforcement()
+	} else if enforcement == "" {
+		// Unknown adapter AND no record value: default to "full" so pre-v2
+		// records continue to work; executeDispatch will surface the real error.
 		enforcement = "full"
 	}
 

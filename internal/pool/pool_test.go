@@ -26,6 +26,20 @@ func newStubAdapter() *stubAdapter { return &stubAdapter{} }
 func (a *stubAdapter) Name() string        { return "stub" }
 func (a *stubAdapter) Enforcement() string { return "full" }
 
+// degradedStubAdapter is a stub adapter that reports enforcement="degraded".
+// Used to verify that evalGate re-derives enforcement from the adapter rather
+// than trusting the persisted record field.
+type degradedStubAdapter struct{}
+
+func (a *degradedStubAdapter) Name() string        { return "degraded-stub" }
+func (a *degradedStubAdapter) Enforcement() string { return "degraded" }
+func (a *degradedStubAdapter) Prepare(_ context.Context, _ *adapter.DispatchSpec) error {
+	return nil
+}
+func (a *degradedStubAdapter) Run(_ context.Context, _ *adapter.DispatchSpec) (*adapter.Result, error) {
+	return &adapter.Result{Status: "completed"}, nil
+}
+
 func (a *stubAdapter) Prepare(_ context.Context, _ *adapter.DispatchSpec) error {
 	return nil
 }
@@ -301,4 +315,92 @@ func TestPoolRestartNoDoubleExec(t *testing.T) {
 			t.Errorf("delivery %s appears %d times in journal (want 1)", id, count)
 		}
 	}
+}
+
+// TestEvalGateEnforcementRederivation proves that evalGate re-derives
+// enforcement from the adapter registry rather than trusting the persisted
+// record field. A dispatch record that claims enforcement="full" but routes to
+// the "degraded-stub" adapter (Enforcement()="degraded") must be denied with
+// DenyDegradedInsight when it requests a scrutiny-tier role.
+func TestEvalGateEnforcementRederivation(t *testing.T) {
+	st, runsBase := openStore(t)
+
+	// Create a run with generous budgets.
+	runID, err := st.CreateRun(&scratch.Run{
+		Task:        "spoofed enforcement test",
+		Workspace:   t.TempDir(),
+		Status:      "running",
+		FableBudget: 10,
+		MaxDepth:    8,
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	// Allocate and write a dispatch that claims enforcement="full" but routes to
+	// the degraded adapter. Tier is "scrutiny" so DenyDegradedInsight must fire
+	// once enforcement is correctly re-derived to "degraded".
+	dispatchID, err := st.AllocDispatch(runID)
+	if err != nil {
+		t.Fatalf("AllocDispatch: %v", err)
+	}
+	d := &scratch.Dispatch{
+		ID:          dispatchID,
+		Role:        "investigator",
+		Model:       "stub-model",
+		Profile:     "readonly",
+		Status:      "pending",
+		Depth:       1,
+		Tier:        "scrutiny",
+		Adapter:     "degraded-stub", // real adapter has Enforcement()="degraded"
+		Enforcement: "full",          // spoofed record value — gate must ignore this
+	}
+	if err := st.WriteDispatch(runID, d); err != nil {
+		t.Fatalf("WriteDispatch: %v", err)
+	}
+	if err := st.WriteBrief(runID, dispatchID, []byte("scrutiny brief")); err != nil {
+		t.Fatalf("WriteBrief: %v", err)
+	}
+
+	// Register only the degraded-stub adapter.
+	reg := adapter.NewRegistry()
+	reg.Register(&degradedStubAdapter{})
+
+	journalPath := runsBase + "/enforce-journal.jsonl"
+	p, err := New(Options{
+		Store:           st,
+		RunsBase:        runsBase,
+		AdapterRegistry: reg,
+		PollInterval:    20 * time.Millisecond,
+		MaxConcurrent:   1,
+		JournalPath:     journalPath,
+		LeaseDuration:   5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("pool.New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- p.Run(ctx) }()
+
+	// Wait for the dispatch to reach a terminal state (expect "denied").
+	waitAllTerminal(t, st, runID, []string{dispatchID}, 8*time.Second)
+	cancel()
+	<-done
+
+	// The dispatch must be denied, not completed.
+	finalD, readErr := st.ReadDispatch(runID, dispatchID)
+	if readErr != nil {
+		t.Fatalf("ReadDispatch: %v", readErr)
+	}
+	if finalD.Status != "denied" {
+		t.Errorf("dispatch status=%q, want denied (DenyDegradedInsight should have fired)", finalD.Status)
+	}
+	if finalD.DenyReason == "" {
+		t.Error("dispatch DenyReason is empty; expected DenyDegradedInsight reason")
+	}
+	t.Logf("dispatch %s: status=%s deny_reason=%q", dispatchID, finalD.Status, finalD.DenyReason)
 }

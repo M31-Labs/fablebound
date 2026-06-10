@@ -1192,6 +1192,26 @@ test "full adapter with scrutiny tier does NOT fire DenyDegradedInsight" {
     expect rule AllowDispatch matched
 }
 
+test "degraded adapter with empty tier is denied (DenyDegradedInsight)" {
+    given {
+        dispatch.role: "investigator"
+        dispatch.tier: ""
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        dispatch.queued: false
+        dispatch.enforcement: "degraded"
+        caller.role: "orchestrator"
+        caller.depth: 0
+        caller.dispatch_id: "root"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.reason_dispatches: 0
+        run.reason_budget: 2
+        run.max_depth: 4
+    }
+    expect rule DenyDegradedInsight matched
+}
+
 # ── DenyBriefTooLarge ─────────────────────────────────────────────────────────
 
 test "brief exceeding 256KB is denied (DenyBriefTooLarge)" {

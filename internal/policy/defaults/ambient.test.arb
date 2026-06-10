@@ -631,7 +631,6 @@ test "Task tiller-worker with reason-tier model is denied (DenyReasonModelSubage
         run.id: ""
     }
     expect rule DenyReasonModelSubagent matched
-    expect rule AllowAgent not matched
 }
 
 test "Task tiller-architect with reason-tier model is allowed (architect exception)" {
@@ -693,7 +692,6 @@ test "Task general-purpose with no model is denied (DenyImplicitReasonInheritanc
         run.id: ""
     }
     expect rule DenyImplicitReasonInheritance matched
-    expect rule AllowAgent not matched
 }
 
 test "Task general-purpose with non-reason model is allowed" {

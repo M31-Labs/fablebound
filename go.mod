@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/jackc/pgx/v5 v5.10.0
-	m31labs.dev/arbiter v1.8.0
+	m31labs.dev/arbiter v1.8.1
 )
 
 require (

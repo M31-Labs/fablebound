@@ -7,6 +7,14 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **Bump arbiter to v1.8.1** — picks up the segment-only rule syntax (`when segment NAME`) and the engine-wide empty-condition consistency fix. The evaluation workaround noted in v0.2.0 is no longer needed; segment-only rules in ambient policy now fire correctly on all eval paths.
+
+---
+
 ## [0.2.0] — 2026-06-10
 
 ### Added

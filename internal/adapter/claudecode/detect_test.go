@@ -222,7 +222,7 @@ func buildLargeTranscript(tb tbHelper, dir string) string {
 		tb.Fatalf("write fable line: %v", err)
 	}
 	// A few trailing non-qualifying lines after the fable line.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		f.WriteString(filler) //nolint:errcheck
 	}
 	return p

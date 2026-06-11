@@ -201,11 +201,11 @@ func testDispatchAllocConcurrent(t *testing.T, s scratch.Store) {
 	allIDs := make([]string, 0, total)
 
 	wg.Add(goroutines)
-	for g := 0; g < goroutines; g++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
 			local := make([]string, allocsPerGoroutine)
-			for i := 0; i < allocsPerGoroutine; i++ {
+			for i := range allocsPerGoroutine {
 				id, err := s.AllocDispatch(runID)
 				if err != nil {
 					t.Errorf("concurrent AllocDispatch: %v", err)
@@ -411,8 +411,7 @@ func testConcurrentTraceAppend(t *testing.T, s scratch.Store) {
 	wg.Add(n)
 	errs := make([]error, n)
 
-	for i := 0; i < n; i++ {
-		i := i
+	for i := range n {
 		go func() {
 			defer wg.Done()
 			ev := scratch.TraceEvent{
@@ -745,8 +744,7 @@ func testClaimConcurrent(t *testing.T, s scratch.Store) {
 	results := make([]bool, goroutines)
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
-		i := i
+	for i := range goroutines {
 		go func() {
 			defer wg.Done()
 			executor := fmt.Sprintf("exec-%d", i)

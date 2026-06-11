@@ -13,12 +13,21 @@
 //	argv    = ["/usr/local/bin/echo-agent", "--brief", "{brief}", "--out", "{report}"]
 //	report  = "stdout"           # "stdout" or a file path template
 //	timeout = "5m"               # Go duration string; 0 = no timeout
+//
+// Ambient backends use [ambient.<name>] sections. They map provider-specific
+// model identifiers observed in an interactive session to tiller's tier labels:
+//
+//	[ambient.claude-code]
+//	detector = "claude-jsonl-transcript"
+//	govern_tiers = ["reason"]
+//	reason_models = ["fable", "claude-fable-5"]
 package tier
 
 import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 )
@@ -57,10 +66,77 @@ type AdapterConfig struct {
 	Timeout string // Go duration string
 }
 
+// AmbientConfig describes how an interactive backend should be classified and
+// governed. It is intentionally data-only: backend-specific transcript parsing
+// lives in the adapter package, while model identity and governed tiers live in
+// models.toml.
+type AmbientConfig struct {
+	// Detector is the backend-specific detector implementation name, e.g.
+	// "claude-jsonl-transcript". Unknown detector names are ignored by callers
+	// that cannot implement them.
+	Detector string
+
+	// GovernTiers lists model tiers that should be governed by ambient policy.
+	// The default Claude Code config governs only reason-tier root sessions.
+	GovernTiers []string
+
+	// Models maps tier names to provider-specific model aliases observed in the
+	// ambient backend's event stream.
+	Models map[string][]string
+}
+
+// ModelTier maps a provider-specific model string to a tiller tier for this
+// ambient backend. It returns "" for an empty model and "other" for a non-empty
+// model that is not listed in the backend config.
+func (a *AmbientConfig) ModelTier(model string) string {
+	if model == "" {
+		return ""
+	}
+	if a == nil {
+		return "other"
+	}
+	for tierName, models := range a.Models {
+		for _, candidate := range models {
+			if model == candidate {
+				return tierName
+			}
+		}
+	}
+	return "other"
+}
+
+// GovernsTier reports whether ambient policy should be applied to tierName for
+// this backend.
+func (a *AmbientConfig) GovernsTier(tierName string) bool {
+	if a == nil || tierName == "" || tierName == "other" {
+		return false
+	}
+	for _, governed := range a.GovernTiers {
+		if governed == tierName {
+			return true
+		}
+	}
+	return false
+}
+
+// PreferredModel returns the first configured model alias for tierName. This is
+// used when rendering Claude Code subagent frontmatter during install.
+func (a *AmbientConfig) PreferredModel(tierName string) string {
+	if a == nil {
+		return ""
+	}
+	models := a.Models[tierName]
+	if len(models) == 0 {
+		return ""
+	}
+	return models[0]
+}
+
 // Config holds the resolved tier → candidates mapping and adapter configs.
 type Config struct {
 	tiers    map[string][]Candidate
 	adapters map[string]*AdapterConfig // keyed by provider name
+	ambient  map[string]*AmbientConfig // keyed by ambient backend name
 }
 
 // AdapterConfig returns the named adapter configuration, or nil if no
@@ -70,6 +146,15 @@ func (c *Config) AdapterConfig(name string) *AdapterConfig {
 		return nil
 	}
 	return c.adapters[name]
+}
+
+// AmbientConfig returns the named ambient backend configuration, or nil if no
+// [ambient.<name>] section exists for that name.
+func (c *Config) AmbientConfig(name string) *AmbientConfig {
+	if c.ambient == nil {
+		return nil
+	}
+	return c.ambient[name]
 }
 
 // Resolve returns the Candidate for the given tier name and bucket index.
@@ -109,12 +194,9 @@ func Load(projectDir string) (*Config, error) {
 			if err != nil {
 				return nil, fmt.Errorf("parse %s: %w", overridePath, err)
 			}
-			for name, cands := range override.tiers {
-				cfg.tiers[name] = cands
-			}
-			for name, ac := range override.adapters {
-				cfg.adapters[name] = ac
-			}
+			maps.Copy(cfg.tiers, override.tiers)
+			maps.Copy(cfg.adapters, override.adapters)
+			maps.Copy(cfg.ambient, override.ambient)
 		}
 	}
 

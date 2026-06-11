@@ -9,7 +9,7 @@ import (
 )
 
 func TestMergeHookEntries_FreshSettings(t *testing.T) {
-	settings := map[string]interface{}{}
+	settings := map[string]any{}
 	entry := settingsHookEntry{
 		Matcher: ".*",
 		Hooks:   []settingsHookCommand{{Type: "command", Command: "/usr/local/bin/tiller hook"}},
@@ -18,9 +18,9 @@ func TestMergeHookEntries_FreshSettings(t *testing.T) {
 	if len(added) != 2 {
 		t.Fatalf("expected 2 additions, got %d: %v", len(added), added)
 	}
-	hooks := settings["hooks"].(map[string]interface{})
+	hooks := settings["hooks"].(map[string]any)
 	for _, ev := range []string{"PreToolUse", "PostToolUse"} {
-		list := hooks[ev].([]interface{})
+		list := hooks[ev].([]any)
 		if len(list) != 1 {
 			t.Errorf("%s: expected 1 entry, got %d", ev, len(list))
 		}
@@ -28,7 +28,7 @@ func TestMergeHookEntries_FreshSettings(t *testing.T) {
 }
 
 func TestMergeHookEntries_Idempotent(t *testing.T) {
-	settings := map[string]interface{}{}
+	settings := map[string]any{}
 	entry := settingsHookEntry{
 		Matcher: ".*",
 		Hooks:   []settingsHookCommand{{Type: "command", Command: "/usr/local/bin/tiller hook"}},
@@ -47,15 +47,15 @@ func TestMergeHookEntries_Idempotent(t *testing.T) {
 
 func TestMergeHookEntries_PreservesExistingHooks(t *testing.T) {
 	// Pre-populate with an existing hook entry.
-	existing := map[string]interface{}{
+	existing := map[string]any{
 		"command": "some-other-tool",
 	}
-	settings := map[string]interface{}{
-		"hooks": map[string]interface{}{
-			"PreToolUse": []interface{}{
-				map[string]interface{}{
+	settings := map[string]any{
+		"hooks": map[string]any{
+			"PreToolUse": []any{
+				map[string]any{
 					"matcher": ".*",
-					"hooks":   []interface{}{existing},
+					"hooks":   []any{existing},
 				},
 			},
 		},
@@ -70,8 +70,8 @@ func TestMergeHookEntries_PreservesExistingHooks(t *testing.T) {
 	if len(added) != 2 {
 		t.Fatalf("expected 2 additions, got %d: %v", len(added), added)
 	}
-	hooks := settings["hooks"].(map[string]interface{})
-	preList := hooks["PreToolUse"].([]interface{})
+	hooks := settings["hooks"].(map[string]any)
+	preList := hooks["PreToolUse"].([]any)
 	if len(preList) != 2 {
 		t.Errorf("PreToolUse: expected 2 entries (existing + tiller), got %d", len(preList))
 	}
@@ -79,21 +79,21 @@ func TestMergeHookEntries_PreservesExistingHooks(t *testing.T) {
 
 func TestRemoveHookEntries_RemovesTiller(t *testing.T) {
 	cmd := "/usr/local/bin/tiller hook"
-	settings := map[string]interface{}{
-		"hooks": map[string]interface{}{
-			"PreToolUse": []interface{}{
-				map[string]interface{}{
+	settings := map[string]any{
+		"hooks": map[string]any{
+			"PreToolUse": []any{
+				map[string]any{
 					"matcher": ".*",
-					"hooks": []interface{}{
-						map[string]interface{}{"type": "command", "command": cmd},
+					"hooks": []any{
+						map[string]any{"type": "command", "command": cmd},
 					},
 				},
 			},
-			"PostToolUse": []interface{}{
-				map[string]interface{}{
+			"PostToolUse": []any{
+				map[string]any{
 					"matcher": ".*",
-					"hooks": []interface{}{
-						map[string]interface{}{"type": "command", "command": cmd},
+					"hooks": []any{
+						map[string]any{"type": "command", "command": cmd},
 					},
 				},
 			},
@@ -103,9 +103,9 @@ func TestRemoveHookEntries_RemovesTiller(t *testing.T) {
 	if len(removed) != 2 {
 		t.Fatalf("expected 2 removals, got %d: %v", len(removed), removed)
 	}
-	hooks := settings["hooks"].(map[string]interface{})
+	hooks := settings["hooks"].(map[string]any)
 	for _, ev := range []string{"PreToolUse", "PostToolUse"} {
-		list, _ := hooks[ev].([]interface{})
+		list, _ := hooks[ev].([]any)
 		if len(list) != 0 {
 			t.Errorf("%s: expected empty list after uninstall, got %d entries", ev, len(list))
 		}
@@ -114,32 +114,32 @@ func TestRemoveHookEntries_RemovesTiller(t *testing.T) {
 
 func TestRemoveHookEntries_PreservesOtherHooks(t *testing.T) {
 	cmd := "/usr/local/bin/tiller hook"
-	other := map[string]interface{}{
+	other := map[string]any{
 		"matcher": ".*",
-		"hooks":   []interface{}{map[string]interface{}{"type": "command", "command": "other-tool"}},
+		"hooks":   []any{map[string]any{"type": "command", "command": "other-tool"}},
 	}
-	fb := map[string]interface{}{
+	fb := map[string]any{
 		"matcher": ".*",
-		"hooks":   []interface{}{map[string]interface{}{"type": "command", "command": cmd}},
+		"hooks":   []any{map[string]any{"type": "command", "command": cmd}},
 	}
-	settings := map[string]interface{}{
-		"hooks": map[string]interface{}{
-			"PreToolUse": []interface{}{other, fb},
+	settings := map[string]any{
+		"hooks": map[string]any{
+			"PreToolUse": []any{other, fb},
 		},
 	}
 	removed := removeHookEntries(settings)
 	if len(removed) != 1 {
 		t.Fatalf("expected 1 removal, got %d", len(removed))
 	}
-	hooks := settings["hooks"].(map[string]interface{})
-	preList := hooks["PreToolUse"].([]interface{})
+	hooks := settings["hooks"].(map[string]any)
+	preList := hooks["PreToolUse"].([]any)
 	if len(preList) != 1 {
 		t.Errorf("PreToolUse: expected 1 entry remaining (other-tool), got %d", len(preList))
 	}
 }
 
 func TestRemoveHookEntries_NothingToRemove(t *testing.T) {
-	settings := map[string]interface{}{}
+	settings := map[string]any{}
 	removed := removeHookEntries(settings)
 	if len(removed) != 0 {
 		t.Errorf("expected 0 removals from empty settings, got %d", len(removed))
@@ -160,7 +160,7 @@ func TestInstallUninstallRoundtrip(t *testing.T) {
 	}
 
 	// Initial install via merge + write.
-	settings1 := map[string]interface{}{}
+	settings1 := map[string]any{}
 	added := mergeHookEntries(settings1, entry)
 	if len(added) != 2 {
 		t.Fatalf("first install: expected 2 additions, got %d", len(added))
@@ -173,13 +173,13 @@ func TestInstallUninstallRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("settings.json not written: %v", err)
 	}
-	var s map[string]interface{}
+	var s map[string]any
 	if err := json.Unmarshal(data, &s); err != nil {
 		t.Fatalf("settings.json not valid JSON: %v", err)
 	}
-	hooks, _ := s["hooks"].(map[string]interface{})
+	hooks, _ := s["hooks"].(map[string]any)
 	for _, ev := range []string{"PreToolUse", "PostToolUse"} {
-		list, _ := hooks[ev].([]interface{})
+		list, _ := hooks[ev].([]any)
 		if len(list) == 0 {
 			t.Errorf("after install: %s hooks empty", ev)
 		}
@@ -202,11 +202,11 @@ func TestInstallUninstallRoundtrip(t *testing.T) {
 		t.Fatalf("writeSettings after uninstall: %v", err)
 	}
 	data3, _ := os.ReadFile(settingsPath)
-	var s3 map[string]interface{}
+	var s3 map[string]any
 	json.Unmarshal(data3, &s3)
-	hooks3, _ := s3["hooks"].(map[string]interface{})
+	hooks3, _ := s3["hooks"].(map[string]any)
 	for _, ev := range []string{"PreToolUse", "PostToolUse"} {
-		list, _ := hooks3[ev].([]interface{})
+		list, _ := hooks3[ev].([]any)
 		if len(list) != 0 {
 			t.Errorf("after uninstall: %s hooks not empty (%d entries)", ev, len(list))
 		}
@@ -221,7 +221,7 @@ func TestInstallPreservesExistingKeys(t *testing.T) {
 	os.MkdirAll(filepath.Dir(settingsPath), 0o755)
 
 	// Pre-populate with an existing key.
-	initial := map[string]interface{}{
+	initial := map[string]any{
 		"theme": "dark",
 		"model": "claude-opus",
 	}
@@ -243,7 +243,7 @@ func TestInstallPreservesExistingKeys(t *testing.T) {
 	}
 
 	after, _ := os.ReadFile(settingsPath)
-	var s map[string]interface{}
+	var s map[string]any
 	json.Unmarshal(after, &s)
 
 	if s["theme"] != "dark" {
@@ -252,7 +252,7 @@ func TestInstallPreservesExistingKeys(t *testing.T) {
 	if s["model"] != "claude-opus" {
 		t.Errorf("model key clobbered (got %v)", s["model"])
 	}
-	hooks, _ := s["hooks"].(map[string]interface{})
+	hooks, _ := s["hooks"].(map[string]any)
 	if hooks == nil {
 		t.Fatal("hooks missing after install")
 	}
@@ -385,7 +385,7 @@ func TestFullInstallUninstall_WithAgents(t *testing.T) {
 		Matcher: ".*",
 		Hooks:   []settingsHookCommand{{Type: "command", Command: cmd}},
 	}
-	settings := map[string]interface{}{}
+	settings := map[string]any{}
 	added := mergeHookEntries(settings, entry)
 	if len(added) != 2 {
 		t.Fatalf("expected 2 hook additions, got %d", len(added))
@@ -402,11 +402,11 @@ func TestFullInstallUninstall_WithAgents(t *testing.T) {
 
 	// Verify settings has hooks.
 	data, _ := os.ReadFile(settingsPath)
-	var s map[string]interface{}
+	var s map[string]any
 	json.Unmarshal(data, &s)
-	hooks, _ := s["hooks"].(map[string]interface{})
+	hooks, _ := s["hooks"].(map[string]any)
 	for _, ev := range []string{"PreToolUse", "PostToolUse"} {
-		list, _ := hooks[ev].([]interface{})
+		list, _ := hooks[ev].([]any)
 		if len(list) == 0 {
 			t.Errorf("after install: %s hooks empty", ev)
 		}
@@ -444,11 +444,11 @@ func TestFullInstallUninstall_WithAgents(t *testing.T) {
 // all hook entries, pruneEmptyHookContainers clears the empty arrays and the
 // hooks map itself, leaving no husks in settings.json.
 func TestPruneEmptyHookContainers_RemovesEmptyArrays(t *testing.T) {
-	settings := map[string]interface{}{
+	settings := map[string]any{
 		"theme": "dark",
-		"hooks": map[string]interface{}{
-			"PreToolUse":  []interface{}{},
-			"PostToolUse": []interface{}{},
+		"hooks": map[string]any{
+			"PreToolUse":  []any{},
+			"PostToolUse": []any{},
 		},
 	}
 	pruneEmptyHookContainers(settings)
@@ -463,16 +463,16 @@ func TestPruneEmptyHookContainers_RemovesEmptyArrays(t *testing.T) {
 // TestPruneEmptyHookContainers_KeepsNonEmpty verifies that non-empty arrays
 // survive pruning.
 func TestPruneEmptyHookContainers_KeepsNonEmpty(t *testing.T) {
-	settings := map[string]interface{}{
-		"hooks": map[string]interface{}{
-			"PreToolUse": []interface{}{
-				map[string]interface{}{"matcher": ".*"},
+	settings := map[string]any{
+		"hooks": map[string]any{
+			"PreToolUse": []any{
+				map[string]any{"matcher": ".*"},
 			},
-			"PostToolUse": []interface{}{},
+			"PostToolUse": []any{},
 		},
 	}
 	pruneEmptyHookContainers(settings)
-	hooks, ok := settings["hooks"].(map[string]interface{})
+	hooks, ok := settings["hooks"].(map[string]any)
 	if !ok {
 		t.Fatal("hooks map must survive when PreToolUse still has entries")
 	}
@@ -541,7 +541,7 @@ func TestRunUninstall_Idempotent(t *testing.T) {
 		Matcher: ".*",
 		Hooks:   []settingsHookCommand{{Type: "command", Command: tillerCmd}},
 	}
-	settings := map[string]interface{}{}
+	settings := map[string]any{}
 	mergeHookEntries(settings, entry)
 	if err := writeSettings(settingsPath, settings); err != nil {
 		t.Fatalf("writeSettings: %v", err)
@@ -565,7 +565,7 @@ func TestRunUninstall_Idempotent(t *testing.T) {
 	// Settings.json must not have hooks or empty husks.
 	if _, err := os.Stat(settingsPath); err == nil {
 		data, _ := os.ReadFile(settingsPath)
-		var s map[string]interface{}
+		var s map[string]any
 		if jsonErr := json.Unmarshal(data, &s); jsonErr == nil {
 			if _, ok := s["hooks"]; ok {
 				t.Error("hooks key must not remain after uninstall")
@@ -594,7 +594,7 @@ func TestRunUninstall_PrintNoWrite(t *testing.T) {
 		Matcher: ".*",
 		Hooks:   []settingsHookCommand{{Type: "command", Command: tillerCmd}},
 	}
-	settings := map[string]interface{}{}
+	settings := map[string]any{}
 	mergeHookEntries(settings, entry)
 	if err := writeSettings(settingsPath, settings); err != nil {
 		t.Fatalf("writeSettings: %v", err)
@@ -640,27 +640,27 @@ func TestRunUninstall_ForeignHookPreserved(t *testing.T) {
 	// Build settings with both a tiller hook and a foreign hook.
 	tillerCmd := "/usr/local/bin/tiller hook"
 	foreignCmd := "/usr/local/bin/block-hypha-serve.sh"
-	settings := map[string]interface{}{
-		"hooks": map[string]interface{}{
-			"PreToolUse": []interface{}{
-				map[string]interface{}{
+	settings := map[string]any{
+		"hooks": map[string]any{
+			"PreToolUse": []any{
+				map[string]any{
 					"matcher": ".*",
-					"hooks": []interface{}{
-						map[string]interface{}{"type": "command", "command": tillerCmd},
+					"hooks": []any{
+						map[string]any{"type": "command", "command": tillerCmd},
 					},
 				},
-				map[string]interface{}{
+				map[string]any{
 					"matcher": ".*",
-					"hooks": []interface{}{
-						map[string]interface{}{"type": "command", "command": foreignCmd},
+					"hooks": []any{
+						map[string]any{"type": "command", "command": foreignCmd},
 					},
 				},
 			},
-			"PostToolUse": []interface{}{
-				map[string]interface{}{
+			"PostToolUse": []any{
+				map[string]any{
 					"matcher": ".*",
-					"hooks": []interface{}{
-						map[string]interface{}{"type": "command", "command": tillerCmd},
+					"hooks": []any{
+						map[string]any{"type": "command", "command": tillerCmd},
 					},
 				},
 			},
@@ -678,18 +678,18 @@ func TestRunUninstall_ForeignHookPreserved(t *testing.T) {
 
 	// Read back settings.
 	after, _ := os.ReadFile(settingsPath)
-	var s map[string]interface{}
+	var s map[string]any
 	if err := json.Unmarshal(after, &s); err != nil {
 		t.Fatalf("parse settings: %v", err)
 	}
 
-	hooks, ok := s["hooks"].(map[string]interface{})
+	hooks, ok := s["hooks"].(map[string]any)
 	if !ok {
 		t.Fatal("hooks map must remain (foreign hook present)")
 	}
 
 	// PreToolUse must have exactly 1 entry (foreign), no tiller entry.
-	preList, _ := hooks["PreToolUse"].([]interface{})
+	preList, _ := hooks["PreToolUse"].([]any)
 	if len(preList) != 1 {
 		t.Errorf("PreToolUse: expected 1 foreign entry, got %d", len(preList))
 	}
@@ -701,10 +701,10 @@ func TestRunUninstall_ForeignHookPreserved(t *testing.T) {
 
 	// The foreign command must survive.
 	if len(preList) > 0 {
-		entry, _ := preList[0].(map[string]interface{})
-		hooksCmds, _ := entry["hooks"].([]interface{})
+		entry, _ := preList[0].(map[string]any)
+		hooksCmds, _ := entry["hooks"].([]any)
 		if len(hooksCmds) > 0 {
-			h, _ := hooksCmds[0].(map[string]interface{})
+			h, _ := hooksCmds[0].(map[string]any)
 			if h["command"] != foreignCmd {
 				t.Errorf("foreign command changed: got %v, want %s", h["command"], foreignCmd)
 			}
@@ -777,7 +777,6 @@ func TestHookCommandMatches(t *testing.T) {
 		{"tiller hookx", false},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.cmd, func(t *testing.T) {
 			got := hookCommandMatches(tc.cmd)
 			if got != tc.want {

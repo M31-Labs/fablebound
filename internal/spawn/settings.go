@@ -10,10 +10,10 @@ import (
 // hookBlock is the common PreToolUse / PostToolUse hook definition embedded in
 // every generated settings file.  "tiller hook" switches on stdin's
 // hook_event_name field (PreToolUse → toolgate gate; PostToolUse → trace capture).
-var hookBlock = map[string]interface{}{
+var hookBlock = map[string]any{
 	"matcher": ".*",
-	"hooks": []interface{}{
-		map[string]interface{}{
+	"hooks": []any{
+		map[string]any{
 			"type":    "command",
 			"command": "tiller hook",
 		},
@@ -43,11 +43,11 @@ func Settings(profile string, depth int) ([]byte, error) {
 		return nil, err
 	}
 
-	doc := map[string]interface{}{
+	doc := map[string]any{
 		"permissions": perms,
-		"hooks": map[string]interface{}{
-			"PreToolUse":  []interface{}{hookBlock},
-			"PostToolUse": []interface{}{hookBlock},
+		"hooks": map[string]any{
+			"PreToolUse":  []any{hookBlock},
+			"PostToolUse": []any{hookBlock},
 		},
 	}
 
@@ -66,7 +66,7 @@ func fableAllowEntries(depth int) []string {
 }
 
 // buildPermissions returns the permissions map for the given profile/depth.
-func buildPermissions(profile string, depth int) (map[string]interface{}, error) {
+func buildPermissions(profile string, depth int) (map[string]any, error) {
 	fableEntries := fableAllowEntries(depth)
 
 	switch profile {
@@ -86,23 +86,23 @@ func buildPermissions(profile string, depth int) (map[string]interface{}, error)
 // orchestratorPerms builds the permission set for the orchestrator profile.
 // The orchestrator reads and dispatches; it never edits, writes, or runs
 // arbitrary Bash.
-func orchestratorPerms(fableEntries []string) map[string]interface{} {
-	allow := []interface{}{"Read", "Glob", "Grep"}
+func orchestratorPerms(fableEntries []string) map[string]any {
+	allow := []any{"Read", "Glob", "Grep"}
 	for _, e := range fableEntries {
 		allow = append(allow, e)
 	}
 	allow = append(allow, "Bash(hypha *)")
-	return map[string]interface{}{
+	return map[string]any{
 		"deny":  orchestratorDeny(),
 		"allow": allow,
-		"ask":   []interface{}{},
+		"ask":   []any{},
 	}
 }
 
 // orchestratorDeny is the exact deny list for the orchestrator (and derived
 // profiles), per SPEC §4.
-func orchestratorDeny() []interface{} {
-	return []interface{}{
+func orchestratorDeny() []any {
+	return []any{
 		"Edit",
 		"Write",
 		"NotebookEdit",
@@ -114,23 +114,23 @@ func orchestratorDeny() []interface{} {
 
 // insightPerms builds the permission set for the insight profile.
 // insight = orchestrator permissions + Edit + Write (hook constrains to scratch).
-func insightPerms(fableEntries []string) map[string]interface{} {
-	allow := []interface{}{"Read", "Glob", "Grep", "Edit", "Write"}
+func insightPerms(fableEntries []string) map[string]any {
+	allow := []any{"Read", "Glob", "Grep", "Edit", "Write"}
 	for _, e := range fableEntries {
 		allow = append(allow, e)
 	}
 	allow = append(allow, "Bash(hypha *)")
-	return map[string]interface{}{
+	return map[string]any{
 		"deny":  orchestratorDeny(),
 		"allow": allow,
-		"ask":   []interface{}{},
+		"ask":   []any{},
 	}
 }
 
 // readonlyPerms builds the permission set for the readonly profile.
 // readonly = orchestrator permissions + read-only Bash prefixes.
-func readonlyPerms(fableEntries []string) map[string]interface{} {
-	allow := []interface{}{"Read", "Glob", "Grep"}
+func readonlyPerms(fableEntries []string) map[string]any {
+	allow := []any{"Read", "Glob", "Grep"}
 	for _, e := range fableEntries {
 		allow = append(allow, e)
 	}
@@ -144,10 +144,10 @@ func readonlyPerms(fableEntries []string) map[string]interface{} {
 		"Bash(go doc*)",
 		"Bash(gts *)",
 	)
-	return map[string]interface{}{
+	return map[string]any{
 		"deny":  orchestratorDeny(),
 		"allow": allow,
-		"ask":   []interface{}{},
+		"ask":   []any{},
 	}
 }
 
@@ -158,17 +158,17 @@ func readonlyPerms(fableEntries []string) map[string]interface{} {
 // queue-and-note-only allow list as a settings-layer guardrail.
 // Depth>=2 agents may queue (--queue) but not directly spawn; mirrors
 // dispatch.arb:DenyDirectSpawnAtDepth and toolgate.arb:DenyTerminalDispatch.
-func executionPerms(depth int) map[string]interface{} {
-	deny := []interface{}{
+func executionPerms(depth int) map[string]any {
+	deny := []any{
 		"Agent",
 		"NotebookEdit",
 	}
-	var allow []interface{}
+	var allow []any
 	if depth >= 2 {
 		// Terminal workers: explicit narrow allow list — queue + note only.
 		// Broad Bash(tiller dispatch*) without --queue is blocked by toolgate.
 		deny = append(deny, "Bash(tiller dispatch *)")
-		allow = []interface{}{
+		allow = []any{
 			"Read",
 			"Glob",
 			"Grep",
@@ -179,7 +179,7 @@ func executionPerms(depth int) map[string]interface{} {
 			"Bash(tiller note *)",
 		}
 	} else {
-		allow = []interface{}{
+		allow = []any{
 			"Read",
 			"Glob",
 			"Grep",
@@ -188,9 +188,9 @@ func executionPerms(depth int) map[string]interface{} {
 			"Bash",
 		}
 	}
-	return map[string]interface{}{
+	return map[string]any{
 		"deny":  deny,
 		"allow": allow,
-		"ask":   []interface{}{},
+		"ask":   []any{},
 	}
 }

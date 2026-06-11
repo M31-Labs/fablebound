@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"time"
 
@@ -87,8 +88,8 @@ func parseClaudeResult(data []byte) (ClaudeResult, error) {
 			return ClaudeResult{}, fmt.Errorf("parse claude array output: %w", err)
 		}
 		// Find the result event (last element with type:"result").
-		for i := len(events) - 1; i >= 0; i-- {
-			e := events[i]
+		for _, e := range slices.Backward(events) {
+
 			if e.Type == "result" {
 				return ClaudeResult{
 					Type:      e.Type,

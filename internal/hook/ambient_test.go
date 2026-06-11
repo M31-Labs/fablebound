@@ -723,12 +723,12 @@ func TestDenyHyphaDaemons_HubServe(t *testing.T) {
 // of prose lines and fenced code lines (inside a single code block).
 func buildMarkdownContent(proseLines, fencedLines int) string {
 	var sb strings.Builder
-	for i := 0; i < proseLines; i++ {
+	for range proseLines {
 		sb.WriteString("This is a prose line.\n")
 	}
 	if fencedLines > 0 {
 		sb.WriteString("```go\n")
-		for i := 0; i < fencedLines; i++ {
+		for range fencedLines {
 			sb.WriteString("fmt.Println(\"line\")\n")
 		}
 		sb.WriteString("```\n")

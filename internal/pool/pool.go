@@ -386,9 +386,7 @@ func (p *Pool) executeDispatch(ctx context.Context, inv workflow.WorkerInvocatio
 	// ── Lease renewer ─────────────────────────────────────────────────────────
 	renewCtx, cancelRenew := context.WithCancel(ctx)
 	var renewWg sync.WaitGroup
-	renewWg.Add(1)
-	go func() {
-		defer renewWg.Done()
+	renewWg.Go(func() {
 		t := time.NewTicker(p.renewInterval)
 		defer t.Stop()
 		for {
@@ -401,7 +399,7 @@ func (p *Pool) executeDispatch(ctx context.Context, inv workflow.WorkerInvocatio
 				}
 			}
 		}
-	}()
+	})
 
 	// ── Prepare ───────────────────────────────────────────────────────────────
 	if prepErr := adpt.Prepare(ctx, spec); prepErr != nil {
@@ -487,10 +485,7 @@ func (p *Pool) evalGate(_ context.Context, runID, dispatchID string) (bool, gate
 	if maxDepth == 0 {
 		maxDepth = 4
 	}
-	callerDepth := d.Depth - 1
-	if callerDepth < 0 {
-		callerDepth = 0
-	}
+	callerDepth := max(d.Depth-1, 0)
 
 	// Compute active count as only "running" dispatches.
 	// DispatchFacts.Active includes pending+claimed+running; for the pool gate

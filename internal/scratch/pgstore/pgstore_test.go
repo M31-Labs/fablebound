@@ -306,7 +306,7 @@ func TestAllocDispatchMonotonic(t *testing.T) {
 	ids := make([]string, n)
 	errs := make([]error, n)
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -405,7 +405,7 @@ func TestNotesOrdering(t *testing.T) {
 	}
 
 	refs := make([]scratch.NoteRef, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		ref, err := s.AppendNote(runID, "orchestrator", []byte(fmt.Sprintf("note %d", i)))
 		if err != nil {
 			t.Fatalf("AppendNote %d: %v", i, err)
@@ -650,7 +650,7 @@ func TestAuditSinkSpoolOnDownDB(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			ev := audit.DecisionEvent{
 				Timestamp: time.Now().UTC(),
 				RequestID: fmt.Sprintf("req-%03d", i),

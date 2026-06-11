@@ -156,7 +156,7 @@ func simSeedRun(
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		did, err := st.AllocDispatch(runID)
 		if err != nil {
 			t.Fatalf("AllocDispatch[%d]: %v", i, err)
@@ -255,7 +255,7 @@ func TestSimMultiPool(t *testing.T) {
 		var pools []*Pool
 		var poolCtxCancels []context.CancelFunc
 
-		for i := 0; i < numPools; i++ {
+		for i := range numPools {
 			journalPath := fmt.Sprintf("%s/sim-journal-%d.jsonl", runsBase, i)
 			executorID := fmt.Sprintf("simpool-%d", i)
 			p := simBuildPool(t, st, runsBase,

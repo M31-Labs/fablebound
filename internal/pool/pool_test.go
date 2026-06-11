@@ -98,7 +98,7 @@ func seedRun(t *testing.T, st scratch.Store, n int) (runID string, dispatchIDs [
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		did, err := st.AllocDispatch(runID)
 		if err != nil {
 			t.Fatalf("AllocDispatch[%d]: %v", i, err)

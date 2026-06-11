@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"slices"
 )
 
 // fableModels is the set of model IDs that identify the fable (reason-tier)
@@ -109,10 +110,7 @@ func tailLines(f *os.File, maxLines int) ([]string, error) {
 	linesFound := 0
 
 	for remaining > 0 && linesFound < maxLines {
-		readSize := int64(chunkSize)
-		if readSize > remaining {
-			readSize = remaining
-		}
+		readSize := min(int64(chunkSize), remaining)
 		offset := remaining - readSize
 		buf := make([]byte, readSize)
 		n, err := f.ReadAt(buf, offset)
@@ -138,8 +136,8 @@ func tailLines(f *os.File, maxLines int) ([]string, error) {
 		totalSize += len(c.data)
 	}
 	assembled := make([]byte, 0, totalSize)
-	for i := len(chunks) - 1; i >= 0; i-- {
-		assembled = append(assembled, chunks[i].data...)
+	for _, chunk := range slices.Backward(chunks) {
+		assembled = append(assembled, chunk.data...)
 	}
 
 	// Normalise CRLF → LF.
@@ -207,9 +205,9 @@ func DetectTier(transcriptPath string) (tier string, ok bool) {
 	}
 
 	// Scan backwards in the tail for the last qualifying assistant line.
-	for i := len(tail) - 1; i >= 0; i-- {
+	for _, t := range slices.Backward(tail) {
 		var tl transcriptAssistantLine
-		if err := json.Unmarshal([]byte(tail[i]), &tl); err != nil {
+		if err := json.Unmarshal([]byte(t), &tl); err != nil {
 			continue
 		}
 		if isQualifyingAssistantLine(tl) {

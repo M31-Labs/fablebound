@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -159,9 +160,7 @@ func assembleEvent(
 		}
 		if len(mr.Params) > 0 {
 			rm.Params = make(map[string]any, len(mr.Params))
-			for k, v := range mr.Params {
-				rm.Params[k] = v
-			}
+			maps.Copy(rm.Params, mr.Params)
 		}
 		rules = append(rules, rm)
 	}

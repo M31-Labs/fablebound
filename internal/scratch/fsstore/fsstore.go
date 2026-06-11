@@ -620,7 +620,6 @@ func (fs *FS) BuildDispatchTree(runID string) (*scratch.DispatchNode, error) {
 func buildFSDispatchNodeTree(dispatches []*scratch.Dispatch) *scratch.DispatchNode {
 	byID := make(map[string]*scratch.DispatchNode, len(dispatches))
 	for _, d := range dispatches {
-		d := d
 		byID[d.ID] = &scratch.DispatchNode{Dispatch: d}
 	}
 

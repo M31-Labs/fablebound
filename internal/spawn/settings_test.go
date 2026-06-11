@@ -47,7 +47,6 @@ func depthStr(depth int) string {
 
 func TestSettings_Golden(t *testing.T) {
 	for _, tc := range goldenCases {
-		tc := tc
 		t.Run(tc.profile+"-depth"+depthStr(tc.depth), func(t *testing.T) {
 			got, err := spawn.Settings(tc.profile, tc.depth)
 			if err != nil {
@@ -83,30 +82,29 @@ func TestSettings_Golden(t *testing.T) {
 // PreToolUse and PostToolUse hook blocks with the correct command.
 func TestSettings_HookBlocks(t *testing.T) {
 	for _, tc := range goldenCases {
-		tc := tc
 		t.Run(tc.profile+"-depth"+depthStr(tc.depth), func(t *testing.T) {
 			got, err := spawn.Settings(tc.profile, tc.depth)
 			if err != nil {
 				t.Fatalf("Settings: %v", err)
 			}
 
-			var doc map[string]interface{}
+			var doc map[string]any
 			if err := json.Unmarshal(got, &doc); err != nil {
 				t.Fatalf("invalid JSON: %v", err)
 			}
 
-			hooks, ok := doc["hooks"].(map[string]interface{})
+			hooks, ok := doc["hooks"].(map[string]any)
 			if !ok {
 				t.Fatal("missing hooks object")
 			}
 
 			for _, event := range []string{"PreToolUse", "PostToolUse"} {
-				list, ok := hooks[event].([]interface{})
+				list, ok := hooks[event].([]any)
 				if !ok || len(list) == 0 {
 					t.Errorf("missing %s hook block", event)
 					continue
 				}
-				block, ok := list[0].(map[string]interface{})
+				block, ok := list[0].(map[string]any)
 				if !ok {
 					t.Errorf("%s[0] is not an object", event)
 					continue
@@ -114,12 +112,12 @@ func TestSettings_HookBlocks(t *testing.T) {
 				if block["matcher"] != ".*" {
 					t.Errorf("%s matcher = %v, want .*", event, block["matcher"])
 				}
-				inner, ok := block["hooks"].([]interface{})
+				inner, ok := block["hooks"].([]any)
 				if !ok || len(inner) == 0 {
 					t.Errorf("%s missing inner hooks list", event)
 					continue
 				}
-				h, ok := inner[0].(map[string]interface{})
+				h, ok := inner[0].(map[string]any)
 				if !ok {
 					t.Errorf("%s inner hook[0] not an object", event)
 					continue
@@ -149,15 +147,15 @@ func TestSettings_Depth2NoDispatch(t *testing.T) {
 				t.Fatalf("Settings: %v", err)
 			}
 
-			var doc map[string]interface{}
+			var doc map[string]any
 			if err := json.Unmarshal(got, &doc); err != nil {
 				t.Fatalf("invalid JSON: %v", err)
 			}
-			perms, ok := doc["permissions"].(map[string]interface{})
+			perms, ok := doc["permissions"].(map[string]any)
 			if !ok {
 				t.Fatal("missing permissions object")
 			}
-			allowRaw, _ := perms["allow"].([]interface{})
+			allowRaw, _ := perms["allow"].([]any)
 			var allowStrings []string
 			for _, a := range allowRaw {
 				if s, ok := a.(string); ok {
@@ -191,16 +189,16 @@ func TestSettings_OrchestratorDenyList(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var doc map[string]interface{}
+	var doc map[string]any
 	if err := json.Unmarshal(got, &doc); err != nil {
 		t.Fatal(err)
 	}
 
-	perms, ok := doc["permissions"].(map[string]interface{})
+	perms, ok := doc["permissions"].(map[string]any)
 	if !ok {
 		t.Fatal("missing permissions")
 	}
-	denyRaw, ok := perms["deny"].([]interface{})
+	denyRaw, ok := perms["deny"].([]any)
 	if !ok {
 		t.Fatal("deny list is not an array")
 	}
@@ -229,7 +227,6 @@ func TestSettings_UnknownProfile(t *testing.T) {
 func TestSettings_Depth1HasTiller(t *testing.T) {
 	profiles := []string{"orchestrator", "insight", "readonly"}
 	for _, p := range profiles {
-		p := p
 		t.Run(p, func(t *testing.T) {
 			got, err := spawn.Settings(p, 1)
 			if err != nil {
@@ -247,7 +244,6 @@ func TestSettings_Depth1HasTiller(t *testing.T) {
 func TestSettings_Depth2HasNoteForm(t *testing.T) {
 	profiles := []string{"orchestrator", "insight", "readonly"}
 	for _, p := range profiles {
-		p := p
 		t.Run(p, func(t *testing.T) {
 			got, err := spawn.Settings(p, 2)
 			if err != nil {
@@ -271,16 +267,16 @@ func TestSettings_Depth2ExecutionDenyDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var doc map[string]interface{}
+	var doc map[string]any
 	if err := json.Unmarshal(got, &doc); err != nil {
 		t.Fatal(err)
 	}
 
-	perms, ok := doc["permissions"].(map[string]interface{})
+	perms, ok := doc["permissions"].(map[string]any)
 	if !ok {
 		t.Fatal("missing permissions")
 	}
-	denyRaw, ok := perms["deny"].([]interface{})
+	denyRaw, ok := perms["deny"].([]any)
 	if !ok {
 		t.Fatal("deny list is not an array")
 	}
@@ -325,11 +321,11 @@ func TestBuildEnv_SetsTILLER_TIER(t *testing.T) {
 
 	envMap := make(map[string]string, len(env))
 	for _, kv := range env {
-		idx := strings.IndexByte(kv, '=')
-		if idx < 0 {
+		before, after, ok := strings.Cut(kv, "=")
+		if !ok {
 			continue
 		}
-		envMap[kv[:idx]] = kv[idx+1:]
+		envMap[before] = after
 	}
 
 	if envMap["TILLER_TIER"] != "execute" {

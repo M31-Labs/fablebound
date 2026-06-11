@@ -66,7 +66,7 @@ func TestFactsourceGovernsDispatch(t *testing.T) {
 	}
 
 	// Insert 2 reason-tier dispatches (tier='reason', status='running' → active + reason).
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		id, err := s.AllocDispatch(runID)
 		if err != nil {
 			t.Fatalf("AllocDispatch %d: %v", i, err)

@@ -62,7 +62,7 @@ func TestRunIDBucket_NonNegative(t *testing.T) {
 // multiple distinct buckets (not all to the same value).
 func TestRunIDBucket_Distribution(t *testing.T) {
 	seen := make(map[int]bool)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		id := "20260101-000000-" + string(rune('a'+i))
 		seen[runIDBucket(id)] = true
 	}
@@ -110,7 +110,6 @@ func TestRoleToDefaultTier(t *testing.T) {
 		{"WORKER", "execute"}, // case-sensitive: not matched → execute
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.role, func(t *testing.T) {
 			got := roleToDefaultTier(tc.role)
 			if got != tc.want {
@@ -140,7 +139,6 @@ func TestParseDuration(t *testing.T) {
 		{"  8m  ", false, 8}, // trimmed
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.input, func(t *testing.T) {
 			d, err := parseDuration(tc.input)
 			if tc.wantErr {
@@ -424,7 +422,6 @@ func TestDispatch_ModelAliasDeprecated(t *testing.T) {
 		{"haiku", "execute"},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.model, func(t *testing.T) {
 			_, runDir, runID, st := makeDispatchTestEnv(t)
 			reg := adapter.NewRegistry()
@@ -507,7 +504,7 @@ func TestDispatch_Queue_DispatchIDMonotonic(t *testing.T) {
 	t.Setenv("TILLER_DEPTH", "0")
 	t.Setenv("TILLER_DISPATCH_ID", "")
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		err := runDispatchWithRegistry([]string{
 			"--role", "worker",
 			"--brief", "brief",

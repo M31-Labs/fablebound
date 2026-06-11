@@ -90,7 +90,7 @@ func TestConcurrentWrites(t *testing.T) {
 	const n = 20
 	var wg sync.WaitGroup
 	wg.Add(n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go func(idx int) {
 			defer wg.Done()
 			ev := audit.DecisionEvent{

@@ -169,7 +169,7 @@ func TestTeeStore_QueueFullDrops(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < 600; i++ {
+		for range 600 {
 			_ = tee.AppendTraceEvent(runID, "root", scratch.TraceEvent{
 				Kind:   "tool",
 				RunID:  runID,
@@ -205,7 +205,7 @@ func TestTeeStore_ConcurrentWrites(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

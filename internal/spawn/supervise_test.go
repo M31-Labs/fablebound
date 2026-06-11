@@ -65,7 +65,6 @@ func TestTrimOutput(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			got := string(trimOutput([]byte(tc.input)))
 			if got != tc.want {

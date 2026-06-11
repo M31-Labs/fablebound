@@ -1,7 +1,6 @@
 package run
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -250,16 +249,11 @@ func FirstLine(s string) string {
 
 // firstLine returns the first non-empty line of s.
 func firstLine(s string) string {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			return line
 		}
 	}
 	return s
-}
-
-// MarshalJSON marshals v to indented JSON bytes.
-func marshalJSON(v any) ([]byte, error) {
-	return json.MarshalIndent(v, "", "  ")
 }

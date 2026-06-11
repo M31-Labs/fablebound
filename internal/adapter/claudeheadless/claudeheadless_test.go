@@ -141,32 +141,32 @@ func TestPrepare_WritesSettingsJSON(t *testing.T) {
 		t.Fatalf("ReadAdapterConfig: %v", err)
 	}
 
-	var doc map[string]interface{}
+	var doc map[string]any
 	if err := json.Unmarshal(settingsData, &doc); err != nil {
 		t.Fatalf("parse settings.json: %v", err)
 	}
 
-	hooks, ok := doc["hooks"].(map[string]interface{})
+	hooks, ok := doc["hooks"].(map[string]any)
 	if !ok {
 		t.Fatal("settings.json missing hooks object")
 	}
 
 	for _, event := range []string{"PreToolUse", "PostToolUse"} {
-		list, ok := hooks[event].([]interface{})
+		list, ok := hooks[event].([]any)
 		if !ok || len(list) == 0 {
 			t.Errorf("missing %s hook block", event)
 			continue
 		}
-		block, ok := list[0].(map[string]interface{})
+		block, ok := list[0].(map[string]any)
 		if !ok {
 			continue
 		}
-		inner, ok := block["hooks"].([]interface{})
+		inner, ok := block["hooks"].([]any)
 		if !ok || len(inner) == 0 {
 			t.Errorf("%s missing inner hooks list", event)
 			continue
 		}
-		h, ok := inner[0].(map[string]interface{})
+		h, ok := inner[0].(map[string]any)
 		if !ok {
 			continue
 		}
@@ -199,7 +199,6 @@ func TestPrepare_SetsTier(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			st, runID, runDir := setupFixture(t)
 

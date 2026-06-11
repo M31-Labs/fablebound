@@ -103,10 +103,10 @@ func printInstallPlan(settingsPath, agentsDir string, entry settingsHookEntry, c
 	fmt.Println()
 
 	// Hook snippet.
-	snippet := map[string]interface{}{
-		"hooks": map[string]interface{}{
-			"PreToolUse":  []interface{}{entry},
-			"PostToolUse": []interface{}{entry},
+	snippet := map[string]any{
+		"hooks": map[string]any{
+			"PreToolUse":  []any{entry},
+			"PostToolUse": []any{entry},
 		},
 	}
 	data, _ := json.MarshalIndent(snippet, "", "  ")
@@ -213,7 +213,7 @@ func runUninstall(args []string) error {
 // loadSettingsForUninstall reads settings.json for uninstall.
 // Returns (settings, missing=true, nil) when the file does not exist.
 // Returns (nil, false, err) on parse errors (malformed JSON).
-func loadSettingsForUninstall(path string) (settings map[string]interface{}, missing bool, err error) {
+func loadSettingsForUninstall(path string) (settings map[string]any, missing bool, err error) {
 	data, readErr := os.ReadFile(path)
 	if os.IsNotExist(readErr) {
 		return nil, true, nil
@@ -221,7 +221,7 @@ func loadSettingsForUninstall(path string) (settings map[string]interface{}, mis
 	if readErr != nil {
 		return nil, false, fmt.Errorf("read %s: %w", path, readErr)
 	}
-	var s map[string]interface{}
+	var s map[string]any
 	if jsonErr := json.Unmarshal(data, &s); jsonErr != nil {
 		return nil, false, fmt.Errorf("parse %s: %w", path, jsonErr)
 	}
@@ -231,18 +231,18 @@ func loadSettingsForUninstall(path string) (settings map[string]interface{}, mis
 // pruneEmptyHookContainers removes empty arrays and the hooks map itself from
 // settings when they become empty after tiller hook entries are removed.
 // This prevents accumulation of empty "hooks": {} husks in settings.json.
-func pruneEmptyHookContainers(settings map[string]interface{}) {
+func pruneEmptyHookContainers(settings map[string]any) {
 	hooksRaw, ok := settings["hooks"]
 	if !ok {
 		return
 	}
-	hooks, ok := hooksRaw.(map[string]interface{})
+	hooks, ok := hooksRaw.(map[string]any)
 	if !ok {
 		return
 	}
 	// Remove keys whose arrays are now empty.
 	for k, v := range hooks {
-		list, ok := v.([]interface{})
+		list, ok := v.([]any)
 		if ok && len(list) == 0 {
 			delete(hooks, k)
 		}
@@ -385,15 +385,15 @@ func tillerAgentFilesIn(agentsDir string) []string {
 
 // loadOrInitSettings reads the settings file into a map, or returns
 // an empty map if the file does not exist.
-func loadOrInitSettings(path string) (map[string]interface{}, error) {
+func loadOrInitSettings(path string) (map[string]any, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return map[string]interface{}{}, nil
+		return map[string]any{}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	var settings map[string]interface{}
+	var settings map[string]any
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
@@ -402,7 +402,7 @@ func loadOrInitSettings(path string) (map[string]interface{}, error) {
 
 // writeSettings atomically writes the settings map to path (JSON indented).
 // Creates the parent directory if needed.
-func writeSettings(path string, settings map[string]interface{}) error {
+func writeSettings(path string, settings map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
@@ -430,7 +430,7 @@ func hookCommandMatches(cmd string) bool {
 // mergeHookEntries adds entry to settings under hooks.PreToolUse and
 // hooks.PostToolUse if an identical command is not already present.
 // Returns the list of event names actually added (for reporting).
-func mergeHookEntries(settings map[string]interface{}, entry settingsHookEntry) []string {
+func mergeHookEntries(settings map[string]any, entry settingsHookEntry) []string {
 	hooks := getOrCreateMap(settings, "hooks")
 	var added []string
 	for _, eventName := range []string{"PreToolUse", "PostToolUse"} {
@@ -444,26 +444,26 @@ func mergeHookEntries(settings map[string]interface{}, entry settingsHookEntry) 
 
 // mergeHookList ensures entry is present in the hook list for eventName.
 // Returns true if a new entry was added.
-func mergeHookList(hooks map[string]interface{}, eventName string, entry settingsHookEntry) bool {
+func mergeHookList(hooks map[string]any, eventName string, entry settingsHookEntry) bool {
 	raw, ok := hooks[eventName]
-	var list []interface{}
+	var list []any
 	if ok {
-		list, _ = raw.([]interface{})
+		list, _ = raw.([]any)
 	}
 
 	// Check if our command is already present.
 	cmd := entry.Hooks[0].Command
 	for _, item := range list {
-		m, ok := item.(map[string]interface{})
+		m, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
-		hooksRaw, ok := m["hooks"].([]interface{})
+		hooksRaw, ok := m["hooks"].([]any)
 		if !ok {
 			continue
 		}
 		for _, h := range hooksRaw {
-			hm, ok := h.(map[string]interface{})
+			hm, ok := h.(map[string]any)
 			if !ok {
 				continue
 			}
@@ -474,10 +474,10 @@ func mergeHookList(hooks map[string]interface{}, eventName string, entry setting
 	}
 
 	// Not present — append.
-	newEntry := map[string]interface{}{
+	newEntry := map[string]any{
 		"matcher": entry.Matcher,
-		"hooks": []interface{}{
-			map[string]interface{}{
+		"hooks": []any{
+			map[string]any{
 				"type":    entry.Hooks[0].Type,
 				"command": entry.Hooks[0].Command,
 			},
@@ -490,12 +490,12 @@ func mergeHookList(hooks map[string]interface{}, eventName string, entry setting
 
 // removeHookEntries removes all tiller hook entries from settings.
 // Returns the list of event names from which entries were removed.
-func removeHookEntries(settings map[string]interface{}) []string {
+func removeHookEntries(settings map[string]any) []string {
 	hooksRaw, ok := settings["hooks"]
 	if !ok {
 		return nil
 	}
-	hooks, ok := hooksRaw.(map[string]interface{})
+	hooks, ok := hooksRaw.(map[string]any)
 	if !ok {
 		return nil
 	}
@@ -506,7 +506,7 @@ func removeHookEntries(settings map[string]interface{}) []string {
 		if !ok {
 			continue
 		}
-		list, ok := raw.([]interface{})
+		list, ok := raw.([]any)
 		if !ok {
 			continue
 		}
@@ -521,22 +521,22 @@ func removeHookEntries(settings map[string]interface{}) []string {
 }
 
 // filterTillerEntries removes hook entries whose command is a tiller hook.
-func filterTillerEntries(list []interface{}) []interface{} {
-	var out []interface{}
+func filterTillerEntries(list []any) []any {
+	var out []any
 	for _, item := range list {
-		m, ok := item.(map[string]interface{})
+		m, ok := item.(map[string]any)
 		if !ok {
 			out = append(out, item)
 			continue
 		}
-		hooksRaw, ok := m["hooks"].([]interface{})
+		hooksRaw, ok := m["hooks"].([]any)
 		if !ok {
 			out = append(out, item)
 			continue
 		}
 		hasTiller := false
 		for _, h := range hooksRaw {
-			hm, ok := h.(map[string]interface{})
+			hm, ok := h.(map[string]any)
 			if !ok {
 				continue
 			}
@@ -553,13 +553,13 @@ func filterTillerEntries(list []interface{}) []interface{} {
 }
 
 // getOrCreateMap returns or creates a nested map in parent[key].
-func getOrCreateMap(parent map[string]interface{}, key string) map[string]interface{} {
+func getOrCreateMap(parent map[string]any, key string) map[string]any {
 	if v, ok := parent[key]; ok {
-		if m, ok := v.(map[string]interface{}); ok {
+		if m, ok := v.(map[string]any); ok {
 			return m
 		}
 	}
-	m := map[string]interface{}{}
+	m := map[string]any{}
 	parent[key] = m
 	return m
 }

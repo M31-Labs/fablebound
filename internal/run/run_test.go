@@ -494,8 +494,7 @@ func TestAllocDispatch_NoDuplicateIDs(t *testing.T) {
 	results := make([]result, n)
 	var wg sync.WaitGroup
 	wg.Add(n)
-	for i := 0; i < n; i++ {
-		i := i
+	for i := range n {
 		go func() {
 			defer wg.Done()
 			did, ddir, err := s.AllocDispatch(id)
@@ -560,8 +559,7 @@ func TestConcurrentMetaWrite(t *testing.T) {
 	wg.Add(numWriters)
 	errCh := make(chan error, numWriters)
 
-	for i := 0; i < numWriters; i++ {
-		i := i
+	for i := range numWriters {
 		go func() {
 			defer wg.Done()
 			m := &run.Meta{

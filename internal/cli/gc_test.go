@@ -106,7 +106,7 @@ func TestRunsGC_DryRun(t *testing.T) {
 	}
 
 	// Create 5 completed runs.
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		makeTestRun(t, runsBase, "completed", time.Duration(5-i)*time.Hour)
 	}
 

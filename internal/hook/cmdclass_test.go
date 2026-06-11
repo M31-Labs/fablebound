@@ -165,7 +165,6 @@ func TestClassifyCommand(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.cmd, func(t *testing.T) {
 			got := ClassifyCommand(tc.cmd)
 			if got != tc.want {
@@ -224,7 +223,6 @@ func TestIsSelfUninstall(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.cmd, func(t *testing.T) {
 			got := IsSelfUninstall(tc.cmd)
 			if got != tc.want {

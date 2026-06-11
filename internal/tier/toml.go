@@ -163,15 +163,15 @@ func parse(data []byte) (*Config, error) {
 //
 //	<key> = "<value>"
 func parseStringValue(line, key string, lineNum int) (string, error) {
-	eqIdx := strings.IndexByte(line, '=')
-	if eqIdx < 0 {
+	before, after, ok := strings.Cut(line, "=")
+	if !ok {
 		return "", fmt.Errorf("line %d: missing '=' in %s assignment", lineNum, key)
 	}
-	k := strings.TrimSpace(line[:eqIdx])
+	k := strings.TrimSpace(before)
 	if k != key {
 		return "", fmt.Errorf("line %d: unexpected key %q (want %s)", lineNum, k, key)
 	}
-	val := strings.TrimSpace(line[eqIdx+1:])
+	val := strings.TrimSpace(after)
 	if !strings.HasPrefix(val, "\"") || !strings.HasSuffix(val, "\"") || len(val) < 2 {
 		return "", fmt.Errorf("line %d: %s value must be a quoted string", lineNum, key)
 	}
@@ -182,15 +182,15 @@ func parseStringValue(line, key string, lineNum int) (string, error) {
 //
 //	<key> = ["v1", "v2", ...]
 func parseStringArrayLine(line, key string, lineNum int) ([]string, error) {
-	eqIdx := strings.IndexByte(line, '=')
-	if eqIdx < 0 {
+	before, after, ok := strings.Cut(line, "=")
+	if !ok {
 		return nil, fmt.Errorf("line %d: missing '=' in %s assignment", lineNum, key)
 	}
-	k := strings.TrimSpace(line[:eqIdx])
+	k := strings.TrimSpace(before)
 	if k != key {
 		return nil, fmt.Errorf("line %d: unexpected key %q (want %s)", lineNum, k, key)
 	}
-	val := strings.TrimSpace(line[eqIdx+1:])
+	val := strings.TrimSpace(after)
 	if !strings.HasPrefix(val, "[") || !strings.HasSuffix(val, "]") {
 		return nil, fmt.Errorf("line %d: %s value must be a single-line array [\"...\"]", lineNum, key)
 	}
@@ -221,15 +221,15 @@ func parseStringArrayLine(line, key string, lineNum int) ([]string, error) {
 //	candidates = ["a:p/m", "b:p/m"]
 func parseCandidatesLine(line string, lineNum int) ([]Candidate, error) {
 	// Split on '=' and verify key.
-	eqIdx := strings.IndexByte(line, '=')
-	if eqIdx < 0 {
+	before, after, ok := strings.Cut(line, "=")
+	if !ok {
 		return nil, fmt.Errorf("line %d: missing '=' in candidates assignment", lineNum)
 	}
-	key := strings.TrimSpace(line[:eqIdx])
+	key := strings.TrimSpace(before)
 	if key != "candidates" {
 		return nil, fmt.Errorf("line %d: unexpected key %q (want candidates)", lineNum, key)
 	}
-	val := strings.TrimSpace(line[eqIdx+1:])
+	val := strings.TrimSpace(after)
 
 	// Must be a [ ... ] array.
 	if !strings.HasPrefix(val, "[") || !strings.HasSuffix(val, "]") {
@@ -276,18 +276,18 @@ func parseCandidatesLine(line string, lineNum int) ([]Candidate, error) {
 // parseCandidate parses a "adapter:provider/model" string.
 // provider may be "-" (for command adapters).
 func parseCandidate(s string, lineNum int) (Candidate, error) {
-	colonIdx := strings.IndexByte(s, ':')
-	if colonIdx < 0 {
+	before, after, ok := strings.Cut(s, ":")
+	if !ok {
 		return Candidate{}, fmt.Errorf("line %d: candidate %q missing ':' separator (want adapter:provider/model)", lineNum, s)
 	}
-	adapter := s[:colonIdx]
-	rest := s[colonIdx+1:]
-	slashIdx := strings.IndexByte(rest, '/')
-	if slashIdx < 0 {
+	adapter := before
+	rest := after
+	before0, after0, ok0 := strings.Cut(rest, "/")
+	if !ok0 {
 		return Candidate{}, fmt.Errorf("line %d: candidate %q missing '/' separator (want adapter:provider/model)", lineNum, s)
 	}
-	provider := rest[:slashIdx]
-	model := rest[slashIdx+1:]
+	provider := before0
+	model := after0
 
 	if adapter == "" {
 		return Candidate{}, fmt.Errorf("line %d: candidate %q has empty adapter", lineNum, s)

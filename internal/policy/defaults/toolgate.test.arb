@@ -229,6 +229,52 @@ test "depth-2 agent running tiller note is NOT denied by DenyTerminalDispatch" {
     expect rule DenyTerminalDispatch not matched
 }
 
+test "depth-2 worker queuing a dispatch with --queue is NOT denied (DenyTerminalDispatch exempt)" {
+    given {
+        agent.role: "worker"
+        agent.depth: 2
+        agent.dispatch_id: "d02"
+        tool.name: "Bash"
+        tool.command: "tiller dispatch --queue --role worker --brief -"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyTerminalDispatch not matched
+    expect rule ExecutionAllow matched
+}
+
+test "depth-2 worker queuing with --queue in non-first position is NOT denied (reorder exempt)" {
+    given {
+        agent.role: "worker"
+        agent.depth: 2
+        agent.dispatch_id: "d02"
+        tool.name: "Bash"
+        tool.command: "tiller dispatch --role worker --queue"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyTerminalDispatch not matched
+}
+
+test "depth-2 worker dispatching without --queue is denied (DenyTerminalDispatch)" {
+    given {
+        agent.role: "worker"
+        agent.depth: 2
+        agent.dispatch_id: "d02"
+        tool.name: "Bash"
+        tool.command: "tiller dispatch --role worker"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule DenyTerminalDispatch matched
+}
+
 # ── OrchestratorRead ──────────────────────────────────────────────────────────
 
 test "orchestrator Read tool is allowed (OrchestratorRead)" {

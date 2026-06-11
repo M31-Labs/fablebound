@@ -26,10 +26,16 @@ rule DenyDestructive priority 1 {
             tool.command matches "git +push +.*--force") }
     then Deny { reason: "destructive command" }
 }
+# Terminal depth — toolgate layer of the spawn-depth rule.
+# Depth >= 2 agents may QUEUE a dispatch (--queue: writes a pending record, no
+# process spawn) but may NOT directly spawn. The --queue exemption mirrors
+# dispatch.arb:DenyDirectSpawnAtDepth and the depth>=2 generated settings allow.
+# --queue is matched anywhere in the arg string so reordering can't bypass it.
 rule DenyTerminalDispatch priority 2 {
     when { agent.depth >= 2 and tool.name == "Bash" and
-           tool.command starts_with "tiller dispatch" }
-    then Deny { reason: "depth-2 agents are terminal; they cannot spawn" }
+           tool.command starts_with "tiller dispatch" and
+           not (tool.command matches "tiller dispatch( .*)? --queue( .*)?") }
+    then Deny { reason: "depth-2 agents may only queue dispatches (--queue); direct spawn is denied" }
 }
 
 rule OrchestratorRead priority 10 {

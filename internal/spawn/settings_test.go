@@ -166,7 +166,9 @@ func TestSettings_Depth2NoDispatch(t *testing.T) {
 			}
 
 			// The allow list must not contain the unrestricted tiller allow.
-			// It may contain the queue-only "Bash(tiller dispatch --queue *)" per spec §4.3.
+			// It may contain the queue-only "Bash(tiller dispatch --queue *)":
+			// Depth>=2 agents may queue (--queue) but not directly spawn; mirrors
+			// dispatch.arb:DenyDirectSpawnAtDepth and toolgate.arb:DenyTerminalDispatch.
 			for _, a := range allowStrings {
 				if a == "Bash(tiller *)" {
 					t.Errorf("depth-2 allow list for %q contains Bash(tiller *)", tc.profile)
@@ -260,7 +262,9 @@ func TestSettings_Depth2HasNoteForm(t *testing.T) {
 
 // TestSettings_Depth2ExecutionDenyDispatch verifies that the execution profile at
 // depth >= 2 contains "Bash(tiller dispatch *)" in the deny list (broad dispatch
-// without --queue is denied), providing a settings-layer guardrail per spec §4.3.
+// without --queue is denied as a settings-layer guardrail).
+// Depth>=2 agents may queue (--queue) but not directly spawn; mirrors
+// dispatch.arb:DenyDirectSpawnAtDepth and toolgate.arb:DenyTerminalDispatch.
 func TestSettings_Depth2ExecutionDenyDispatch(t *testing.T) {
 	got, err := spawn.Settings("execution", 2)
 	if err != nil {

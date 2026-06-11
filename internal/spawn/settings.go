@@ -55,8 +55,9 @@ func Settings(profile string, depth int) ([]byte, error) {
 }
 
 // fableAllowEntries returns the Bash(tiller …) entries appropriate for the
-// given depth.  At depth ≥ 2 it returns the queue-and-note-only forms per
-// spec §4.3: terminal agents may only queue dispatches and write notes.
+// given depth.  At depth ≥ 2 it returns the queue-and-note-only forms:
+// Depth>=2 agents may queue (--queue) but not directly spawn; mirrors
+// dispatch.arb:DenyDirectSpawnAtDepth and toolgate.arb:DenyTerminalDispatch.
 func fableAllowEntries(depth int) []string {
 	if depth >= 2 {
 		return []string{"Bash(tiller dispatch --queue *)", "Bash(tiller note *)"}
@@ -154,9 +155,9 @@ func readonlyPerms(fableEntries []string) map[string]interface{} {
 // execution is broad (Read/Glob/Grep/Edit/Write/Bash) with only Agent and
 // NotebookEdit denied.
 // At depth >= 2 (terminal), broad Bash(tiller *) is replaced with the
-// queue-and-note-only allow list as both a settings-layer guardrail and the
-// policy-specified affordance (spec §4.3). The toolgate policy also enforces
-// DenyDirectSpawnAtDepth, providing defence-in-depth.
+// queue-and-note-only allow list as a settings-layer guardrail.
+// Depth>=2 agents may queue (--queue) but not directly spawn; mirrors
+// dispatch.arb:DenyDirectSpawnAtDepth and toolgate.arb:DenyTerminalDispatch.
 func executionPerms(depth int) map[string]interface{} {
 	deny := []interface{}{
 		"Agent",

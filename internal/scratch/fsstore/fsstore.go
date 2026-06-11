@@ -507,20 +507,39 @@ func runNodeToDispatchNode(n *run.Node) *scratch.DispatchNode {
 
 // ── internal helpers ──────────────────────────────────────────────────────────
 
-// writeFileAtomic writes data to path with an exclusive flock, creating or
-// truncating the file. Uses the same flock discipline as run.flockWrite.
-func writeFileAtomic(path string, data []byte) error {
-	// Ensure parent directory exists.
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
+// writeFileSafe writes data to path crash-atomically: it writes to a sibling
+// temp file in the same directory, then renames it over the destination.
+// Because rename(2) is atomic on a single filesystem, readers always see
+// either the complete old file or the complete new file — never a truncated
+// intermediate. Parent directory is created if absent.
+func writeFileSafe(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
-	return os.WriteFile(path, data, 0o644)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return fmt.Errorf("write tmp %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp) // best-effort cleanup
+		return fmt.Errorf("rename %s → %s: %w", tmp, path, err)
+	}
+	return nil
+}
+
+// writeFileAtomic is an alias for writeFileSafe; it writes data to path via a
+// temp-file + rename so readers never observe a partially-written file.
+func writeFileAtomic(path string, data []byte) error {
+	return writeFileSafe(path, data)
 }
 
 // writeDispatchRaw marshals a scratch.Dispatch to meta.json with the same
 // indented JSON format as run.WriteMeta. It uses scratch.Dispatch's JSON tags
 // directly so that v2 fields with omitempty are included/excluded correctly,
 // producing byte-identical output to run.WriteMeta for v1-only dispatch fields.
+// The write is crash-atomic via a temp-file + rename; concurrent readers always
+// see either the complete old or complete new meta.json.
 func writeDispatchRaw(runDir string, d *scratch.Dispatch) error {
 	path := filepath.Join(runDir, "dispatches", d.ID, "meta.json")
 	// Ensure parent dir exists (AllocDispatch normally creates it, but defensive).
@@ -528,15 +547,13 @@ func writeDispatchRaw(runDir string, d *scratch.Dispatch) error {
 		return fmt.Errorf("mkdir: %w", err)
 	}
 
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	data, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
-		return fmt.Errorf("open %s: %w", path, err)
+		return fmt.Errorf("marshal dispatch %s: %w", d.ID, err)
 	}
-	defer f.Close()
-
-	enc := json.NewEncoder(f)
-	enc.SetIndent("", "  ")
-	return enc.Encode(d)
+	// Append a trailing newline to match json.Encoder.Encode output format.
+	data = append(data, '\n')
+	return writeFileSafe(path, data)
 }
 
 // readDispatchRaw reads meta.json into a scratch.Dispatch. By decoding into

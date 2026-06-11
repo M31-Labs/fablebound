@@ -638,12 +638,13 @@ func TestAllowReadOnlyBash_GitLog(t *testing.T) {
 	}
 }
 
-// TestAllowReadOnlyBash_GtsPipe: gts callgraph | wc is allowed (with env prefix).
+// TestAllowReadOnlyBash_GtsPipe: env-prefixed commands are denied (env assignments
+// can override PATH/LD_PRELOAD and are therefore treated as unsafe).
 func TestAllowReadOnlyBash_GtsPipe(t *testing.T) {
 	p := fableTranscript(t)
 	decision := runAmbientHookFull(t, p, "Bash", map[string]any{"command": "FOO=1 gts callgraph X | wc -l"})
-	if decision != "allow" {
-		t.Errorf("expected allow for 'FOO=1 gts callgraph X | wc -l', got %q", decision)
+	if decision != "deny" {
+		t.Errorf("expected deny for 'FOO=1 gts callgraph X | wc -l', got %q", decision)
 	}
 }
 

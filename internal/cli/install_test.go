@@ -750,3 +750,39 @@ func TestRunUninstall_Project(t *testing.T) {
 		t.Errorf("tiller-* files remain after --project uninstall: %v", remaining)
 	}
 }
+
+// TestHookCommandMatches exercises hookCommandMatches, including the guard
+// that previously panicked for commands shorter than 5 characters.
+func TestHookCommandMatches(t *testing.T) {
+	cases := []struct {
+		cmd  string
+		want bool
+	}{
+		// Valid tiller hook entries.
+		{"/usr/local/bin/tiller hook", true},
+		{"/home/user/go/bin/tiller hook", true},
+		{"tiller hook", true},
+		// Suffix is present but binary base name is not "tiller".
+		{"other hook", false},
+		{"notiller hook", false},
+		// 4-char command: must return false without panicking (regression).
+		{"hook", false},
+		// Shorter strings.
+		{"", false},
+		{"x", false},
+		{"hook", false},
+		// No " hook" suffix.
+		{"/usr/local/bin/tiller", false},
+		{"tiller", false},
+		{"tiller hookx", false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.cmd, func(t *testing.T) {
+			got := hookCommandMatches(tc.cmd)
+			if got != tc.want {
+				t.Errorf("hookCommandMatches(%q) = %v, want %v", tc.cmd, got, tc.want)
+			}
+		})
+	}
+}

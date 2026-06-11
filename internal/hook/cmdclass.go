@@ -269,19 +269,16 @@ func isVarAssignment(tok string) bool {
 // classifySegment classifies a single shell segment (already split and
 // trimmed) as "readonly" or "other".
 func classifySegment(seg string) string {
-	// Strip leading VAR=val assignments to find argv0.
+	// Any leading VAR=val assignment is treated as unsafe (could override PATH,
+	// LD_PRELOAD, etc. to subvert the command being classified).
 	fields := strings.Fields(seg)
 	if len(fields) == 0 {
 		return "readonly" // empty segment is harmless
 	}
-	start := 0
-	for start < len(fields) && isVarAssignment(fields[start]) {
-		start++
+	if isVarAssignment(fields[0]) {
+		return "other"
 	}
-	if start >= len(fields) {
-		return "readonly" // only env assignments — harmless
-	}
-	argv := fields[start:]
+	argv := fields
 	argv0base := filepath.Base(argv[0])
 	sub := ""
 	if len(argv) > 1 {
@@ -402,12 +399,11 @@ func IsSelfUninstall(cmd string) bool {
 	if len(fields) == 0 {
 		return false
 	}
-	// Strip leading env assignments.
-	start := 0
-	for start < len(fields) && isVarAssignment(fields[start]) {
-		start++
+	// Any leading VAR=val assignment is unsafe — could override PATH/LD_PRELOAD.
+	if len(fields) > 0 && isVarAssignment(fields[0]) {
+		return false
 	}
-	argv := fields[start:]
+	argv := fields
 	// Must start with "tiller" or a path whose base is "tiller".
 	if len(argv) < 2 {
 		return false

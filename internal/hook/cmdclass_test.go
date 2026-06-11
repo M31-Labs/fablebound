@@ -24,8 +24,8 @@ func TestClassifyCommand(t *testing.T) {
 		{"hypha mcp serve", "other"},
 		// "git branch new-feature" must classify other (non-list branch arg).
 		{"git branch new-feature", "other"},
-		// "FOO=1 gts callgraph X | wc -l" must classify readonly.
-		{"FOO=1 gts callgraph X | wc -l", "readonly"},
+		// "FOO=1 gts callgraph X | wc -l" must classify other (env prefix unsafe).
+		{"FOO=1 gts callgraph X | wc -l", "other"},
 		// "echo $(whoami)" must classify other (command substitution).
 		{"echo $(whoami)", "other"},
 
@@ -52,15 +52,15 @@ func TestClassifyCommand(t *testing.T) {
 		{"git describe --tags", "readonly"},
 		{"git shortlog -sn", "readonly"},
 		{"git grep TODO", "readonly"},
-		{"git branch", "readonly"},         // bare branch
-		{"git branch --list", "readonly"},  // --list flag
-		{"git branch -l", "readonly"},      // -l flag
+		{"git branch", "readonly"},           // bare branch
+		{"git branch --list", "readonly"},    // --list flag
+		{"git branch -l", "readonly"},        // -l flag
 		{"git branch -l 'main'", "readonly"}, // -l + pattern
-		{"git branch -d old", "other"},     // -d → other
-		{"git branch -D main", "other"},    // -D → other
-		{"git checkout main", "other"},     // checkout → other
-		{"git push origin main", "other"},  // push → other
-		{"git add .", "other"},             // add → other
+		{"git branch -d old", "other"},       // -d → other
+		{"git branch -D main", "other"},      // -D → other
+		{"git checkout main", "other"},       // checkout → other
+		{"git push origin main", "other"},    // push → other
+		{"git add .", "other"},               // add → other
 
 		// ── go variants ──────────────────────────────────────────────────────
 		{"go doc fmt.Println", "readonly"},
@@ -108,18 +108,24 @@ func TestClassifyCommand(t *testing.T) {
 		{"tiller init", "other"},
 		{"tiller run", "other"},
 
-		// ── Env prefix stripping ──────────────────────────────────────────────
-		{"BAR=2 ls -la", "readonly"},
-		{"FOO=1 BAR=2 gts hotspot .", "readonly"},
-		{"PATH=/tmp go build ./...", "other"}, // go build → other despite PATH prefix
+		// ── Env prefix rejection (any VAR=val prefix → other) ────────────────
+		{"BAR=2 ls -la", "other"},
+		{"FOO=1 BAR=2 gts hotspot .", "other"},
+		{"PATH=/tmp go build ./...", "other"}, // env prefix → other
 		{"X=1 rm -rf /", "other"},
+		// These must still classify correctly without env prefix.
+		{"git log", "readonly"},
+		{"tiller uninstall", "other"}, // tiller uninstall is not a readonly op
+		// Env prefix makes any command unsafe regardless of the command itself.
+		{"PATH=/tmp/evil tiller uninstall", "other"},
+		{"LD_PRELOAD=/x.so git log", "other"},
 
 		// ── Redirect/substitution guards ─────────────────────────────────────
-		{"ls > /tmp/out", "other"},           // output redirect
-		{"ls >> /tmp/out", "other"},          // append redirect
-		{"cat < /dev/stdin", "other"},        // input redirect
-		{"echo `date`", "other"},             // backtick substitution
-		{"echo $(date)", "other"},            // $() substitution
+		{"ls > /tmp/out", "other"},    // output redirect
+		{"ls >> /tmp/out", "other"},   // append redirect
+		{"cat < /dev/stdin", "other"}, // input redirect
+		{"echo `date`", "other"},      // backtick substitution
+		{"echo $(date)", "other"},     // $() substitution
 		// 2>&1 alone is permitted
 		{"ls 2>&1", "readonly"},
 		{"hypha recall x 2>&1 | head -5", "readonly"},
@@ -130,7 +136,7 @@ func TestClassifyCommand(t *testing.T) {
 		{"ls\ngit status", "readonly"},
 		{"git log | grep fix | wc -l", "readonly"},
 		{"git status; ls", "readonly"},
-		{"ls; rm file", "other"},             // rm not in allowlist
+		{"ls; rm file", "other"},               // rm not in allowlist
 		{"ls | sudo tee /etc/passwd", "other"}, // sudo not in allowlist
 
 		// ── Empty/degenerate ─────────────────────────────────────────────────
@@ -207,6 +213,10 @@ func TestIsSelfUninstall(t *testing.T) {
 		// ── Denied: dangerous patterns ────────────────────────────────────────
 		{"tiller uninstall > /dev/null", false},
 		{"tiller uninstall `rm x`", false},
+
+		// ── Denied: env assignments (could override PATH/LD_PRELOAD) ─────────
+		{"PATH=/tmp/evil tiller uninstall", false},
+		{"LD_PRELOAD=/tmp/x.so tiller uninstall", false},
 
 		// ── Denied: wrong binary ──────────────────────────────────────────────
 		{"notiller uninstall", false},

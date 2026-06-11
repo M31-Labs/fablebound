@@ -416,7 +416,7 @@ func writeSettings(path string, settings map[string]interface{}) error {
 // hookCommandMatches returns true if the hook command string is a tiller hook entry.
 func hookCommandMatches(cmd string) bool {
 	// cmd should end with " hook" and have "tiller" as the binary base name.
-	if len(cmd) < 4 {
+	if len(cmd) < 5 {
 		return false
 	}
 	if cmd[len(cmd)-5:] != " hook" {

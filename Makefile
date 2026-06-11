@@ -1,9 +1,11 @@
 .PHONY: build test vet clean policy-sync policy-replay seam-check
 
-BIN := tiller
+BIN     := tiller
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X m31labs.dev/tiller/internal/cli.Version=$(VERSION)
 
 build:
-	go build -o $(BIN) ./cmd/tiller
+	go build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/tiller
 
 test:
 	go test ./...

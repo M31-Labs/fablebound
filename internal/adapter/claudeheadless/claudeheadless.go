@@ -159,5 +159,3 @@ func pollToTerminal(ctx context.Context, s *adapter.DispatchSpec) (*adapter.Resu
 		}
 	}
 }
-
-

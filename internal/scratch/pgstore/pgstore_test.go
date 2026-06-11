@@ -496,8 +496,8 @@ func TestDispatchFacts(t *testing.T) {
 		model  string
 	}
 	specs := []dispSpec{
-		{status: "running", tier: "reason", model: "fable"},  // active + reason (tier)
-		{status: "running", tier: "", model: "fable"},        // active + reason (v1 model fallback)
+		{status: "running", tier: "reason", model: "fable"},   // active + reason (tier)
+		{status: "running", tier: "", model: "fable"},         // active + reason (v1 model fallback)
 		{status: "claimed", tier: "execute", model: "sonnet"}, // active, not reason
 		{status: "pending", tier: "", model: "sonnet"},        // active, not reason
 		{status: "completed", tier: "reason", model: "fable"}, // not active, but reason

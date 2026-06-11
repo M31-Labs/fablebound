@@ -15,8 +15,8 @@ type Meta struct {
 	Role           string     `json:"role"`
 	Model          string     `json:"model"`
 	Tier           string     `json:"tier,omitempty"` // reason|scrutiny|execute; empty on v1 records
-	Profile        string     `json:"profile"`         // settings/toolgate class
-	Status         string     `json:"status"`          // running|completed|failed|halted|stale
+	Profile        string     `json:"profile"`        // settings/toolgate class
+	Status         string     `json:"status"`         // running|completed|failed|halted|stale
 	Depth          int        `json:"depth"`
 	SupervisorPID  int        `json:"supervisor_pid,omitempty"` // PID of the _supervise process
 	MaxTurns       int        `json:"max_turns,omitempty"`

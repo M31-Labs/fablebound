@@ -3,3 +3,12 @@
 
 # built binary (root only, not cmd/tiller/)
 /tiller
+
+# GIT_TRACE debris — directories created when git is run with GIT_TRACE=1.
+# Their names contain "git.c:" and "trace:" and look like:
+#   20:24:20.008258 git.c:463   trace: built-in: git rev-parse ...
+*git.c:*trace:*
+
+# General Go build / analysis artefacts
+*.tmp
+.analyses/

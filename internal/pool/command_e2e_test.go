@@ -271,4 +271,3 @@ func TestCommandAdapterE2E(t *testing.T) {
 	t.Logf("dispatch routing: tier=%s adapter=%s provider=%s enforcement=%s",
 		finalD.Tier, finalD.Adapter, finalD.Provider, finalD.Enforcement)
 }
-

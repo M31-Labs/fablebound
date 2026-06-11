@@ -25,7 +25,7 @@ import (
 //   - Real claude 2.1.172 shape: JSON array of event objects; the result
 //     record is the element with "type":"result" and uses "total_cost_usd".
 //     [{"type":"system",...},{"type":"assistant",...},...,
-//      {"type":"result","subtype":"success","total_cost_usd":1.16,"num_turns":3,...}]
+//     {"type":"result","subtype":"success","total_cost_usd":1.16,"num_turns":3,...}]
 //
 // Use parseClaudeResult to decode either shape.
 type ClaudeResult struct {

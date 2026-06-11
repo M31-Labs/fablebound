@@ -32,7 +32,6 @@ func makeDispatchHandler(reg *adapter.Registry) func([]string) error {
 	}
 }
 
-
 // runDispatchWithRegistry is the handler for `tiller dispatch`.
 // Caller identity comes from environment; absent ⇒ role="user", depth=0.
 func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {

@@ -451,9 +451,9 @@ func (p *Pool) releaseDispatch(runID, dispatchID, executor, status string) {
 
 // gateResult holds the outcome of evalGate for use in audit + deny recording.
 type gateResult struct {
-	reason    string        // deny reason (empty on allow)
-	rule      string        // rule name that fired
-	req       policy.DispatchRequest
+	reason     string // deny reason (empty on allow)
+	rule       string // rule name that fired
+	req        policy.DispatchRequest
 	matchedRes policy.DispatchResult
 }
 

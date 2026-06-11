@@ -89,8 +89,8 @@ func scanTranscriptLines(r io.Reader, fn func(line string)) error {
 // Returns the tail lines in file order (oldest first, newest last), ready for
 // backward scan by the caller.
 func tailLines(f *os.File, maxLines int) ([]string, error) {
-	const chunkSize = 256 * 1024   // 256 KB per backward read
-	const maxLineBytes = 4 * 1<<20 // 4 MiB cap — matches scanTranscriptLines
+	const chunkSize = 256 * 1024     // 256 KB per backward read
+	const maxLineBytes = 4 * 1 << 20 // 4 MiB cap — matches scanTranscriptLines
 
 	size, err := f.Seek(0, io.SeekEnd)
 	if err != nil {

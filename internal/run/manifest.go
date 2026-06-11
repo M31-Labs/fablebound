@@ -10,10 +10,10 @@ import (
 // Manifest is the run-level record written to manifest.json.
 type Manifest struct {
 	RunID         string            `json:"run_id"`
-	Task          string            `json:"task"`          // first line of task.md
-	Workspace     string            `json:"workspace"`     // absolute path to workspace root
-	Status        string            `json:"status"`        // created|running|completed|failed|halted
-	FableBudget   int               `json:"reason_budget"` // max reason-tier dispatches; default 2 (was fable_budget in v1)
+	Task          string            `json:"task"`                // first line of task.md
+	Workspace     string            `json:"workspace"`           // absolute path to workspace root
+	Status        string            `json:"status"`              // created|running|completed|failed|halted
+	FableBudget   int               `json:"reason_budget"`       // max reason-tier dispatches; default 2 (was fable_budget in v1)
 	MaxDepth      int               `json:"max_depth,omitempty"` // max dispatch depth; 0 means absent → default 4
 	CreatedAt     time.Time         `json:"created_at"`
 	EndedAt       *time.Time        `json:"ended_at,omitempty"`

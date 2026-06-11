@@ -70,13 +70,13 @@ func buildPool(t *testing.T, st scratch.Store, runsBase string, stub *stubAdapte
 	reg := adapter.NewRegistry()
 	reg.Register(stub)
 	p, err := New(Options{
-		Store:         st,
-		RunsBase:      runsBase,
+		Store:           st,
+		RunsBase:        runsBase,
 		AdapterRegistry: reg,
-		PollInterval:  pollInterval,
-		MaxConcurrent: 1, // serialise to stay under DenyConcurrencyCap (cap=4)
-		JournalPath:   journalPath,
-		LeaseDuration: 5 * time.Second,
+		PollInterval:    pollInterval,
+		MaxConcurrent:   1, // serialise to stay under DenyConcurrencyCap (cap=4)
+		JournalPath:     journalPath,
+		LeaseDuration:   5 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("pool.New: %v", err)

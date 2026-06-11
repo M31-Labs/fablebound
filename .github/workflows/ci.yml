@@ -1,0 +1,44 @@
+# CI — build, vet, format, and test gates for every push and pull request.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ci:
+    name: Build / Vet / Format / Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Set up Go matching the version declared in go.mod (1.25.x).
+      # The module cache is enabled so dependencies are not re-downloaded
+      # on every run.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      # 1. Build — ensures the module compiles without errors.
+      - name: Build
+        run: go build ./...
+
+      # 2. Vet — runs the Go static analyser; catches common mistakes the
+      #    compiler does not reject.
+      - name: Vet
+        run: go vet ./...
+
+      # 3. Format check — fails the build if any Go source file is not
+      #    gofmt-formatted.  The tee writes the offending file list to stderr
+      #    so it appears in the log before the shell assertion fires.
+      - name: gofmt check
+        run: test -z "$(gofmt -l . | tee /dev/stderr)"
+
+      # 4. Test — runs all tests with the race detector and a fresh run each
+      #    time (-count=1 disables the test result cache).
+      - name: Test
+        run: go test ./... -race -count=1

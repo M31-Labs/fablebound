@@ -241,7 +241,7 @@ func TestSimMultiPool(t *testing.T) {
 	runScenarioA := func(t *testing.T, st scratch.Store, runsBase string) {
 		t.Helper()
 		const (
-			numPools     = 4
+			numPools      = 4
 			numDispatches = 20
 			// maxConcurrent per pool: keep total < DenyConcurrencyCap(4).
 			// Each pool gets MaxConcurrent=1; the stub is fast enough that
@@ -895,8 +895,8 @@ func TestSimGateDeny(t *testing.T) {
 
 // simBlockingAdapter blocks until the unblock channel is closed, then completes.
 type simBlockingAdapter struct {
-	unblock  <-chan struct{}
-	started  chan struct{} // closed when Run is entered
+	unblock   <-chan struct{}
+	started   chan struct{} // closed when Run is entered
 	completed atomic.Int32
 }
 

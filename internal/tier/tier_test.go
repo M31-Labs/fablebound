@@ -19,9 +19,9 @@ func TestDefaultsParse(t *testing.T) {
 	}
 
 	cases := []struct {
-		name       string
-		wantCount  int
-		wantFirst  string
+		name      string
+		wantCount int
+		wantFirst string
 	}{
 		{"reason", 1, "claude-headless:anthropic/fable"},
 		{"scrutiny", 1, "claude-headless:anthropic/opus"},
@@ -183,8 +183,8 @@ func TestUnknownTierErrors(t *testing.T) {
 // error that includes a 1-based line number.
 func TestMalformedFileErrors(t *testing.T) {
 	cases := []struct {
-		name    string
-		content string
+		name     string
+		content  string
 		wantLine int
 	}{
 		{

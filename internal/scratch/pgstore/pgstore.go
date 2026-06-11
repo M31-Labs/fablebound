@@ -291,7 +291,7 @@ func (s *Store) ListDispatches(runID string) ([]*scratch.Dispatch, error) {
 //
 // SQL logic mirrors fsstore:
 //   - active  = status IN ('running','pending','claimed')
-//   - reason  = tier='reason' OR (tier='' AND model='fable')  [v1 compat]
+//   - reason  = tier='reason' OR (tier=” AND model='fable')  [v1 compat]
 func (s *Store) DispatchFacts(runID string) (scratch.Facts, error) {
 	const q = `
 		SELECT
@@ -627,7 +627,7 @@ func scanDispatch(row rowScanner) (*scratch.Dispatch, error) {
 	return d, nil
 }
 
-// upsertDoc inserts or updates a doc row (kind brief|report; filename='').
+// upsertDoc inserts or updates a doc row (kind brief|report; filename=”).
 func (s *Store) upsertDoc(runID, dispatchID, kind, author string, body []byte) error {
 	now := time.Now().UTC()
 	_, err := s.db.db.ExecContext(context.Background(), `

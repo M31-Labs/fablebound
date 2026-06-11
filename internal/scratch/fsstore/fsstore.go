@@ -100,53 +100,6 @@ func manifestToRun(m *run.Manifest) *scratch.Run {
 	}
 }
 
-// dispatchToMeta converts a scratch.Dispatch to the internal run.Meta shape.
-// v2-only fields (Tier, Enforcement, ClaimedBy, LeaseUntil) are stored in meta.json
-// via the scratch.Dispatch struct's JSON tags, not via run.Meta — they are written
-// by writeDispatchRaw which marshals the full scratch.Dispatch directly.
-func dispatchToMeta(d *scratch.Dispatch) *run.Meta {
-	return &run.Meta{
-		ID:             d.ID,
-		Parent:         d.Parent,
-		Role:           d.Role,
-		Model:          d.Model,
-		Profile:        d.Profile,
-		Status:         d.Status,
-		Depth:          d.Depth,
-		SupervisorPID:  d.SupervisorPID,
-		MaxTurns:       d.MaxTurns,
-		TimeoutMinutes: d.TimeoutMinutes,
-		StartedAt:      d.StartedAt,
-		EndedAt:        d.EndedAt,
-		Exit:           d.Exit,
-		CostUSD:        d.CostUSD,
-		NumTurns:       d.NumTurns,
-		SessionID:      d.SessionID,
-	}
-}
-
-// metaToDispatch converts a run.Meta to scratch.Dispatch.
-func metaToDispatch(m *run.Meta) *scratch.Dispatch {
-	return &scratch.Dispatch{
-		ID:             m.ID,
-		Parent:         m.Parent,
-		Role:           m.Role,
-		Model:          m.Model,
-		Profile:        m.Profile,
-		Status:         m.Status,
-		Depth:          m.Depth,
-		SupervisorPID:  m.SupervisorPID,
-		MaxTurns:       m.MaxTurns,
-		TimeoutMinutes: m.TimeoutMinutes,
-		StartedAt:      m.StartedAt,
-		EndedAt:        m.EndedAt,
-		Exit:           m.Exit,
-		CostUSD:        m.CostUSD,
-		NumTurns:       m.NumTurns,
-		SessionID:      m.SessionID,
-	}
-}
-
 // ── Run lifecycle ─────────────────────────────────────────────────────────────
 
 // CreateRun initialises a new run directory and writes manifest.json.
@@ -244,8 +197,8 @@ func (fs *FS) WriteDispatch(runID string, d *scratch.Dispatch) error {
 
 // ListDispatches returns all dispatch records for a run.
 // Reads raw meta.json (via readDispatchRaw) to preserve all v2 fields
-// (DenyReason, Tier, Enforcement, ClaimedBy, LeaseUntil) which run.ScanMetas
-// would drop through the run.Meta → metaToDispatch mapping.
+// (DenyReason, Tier, Enforcement, ClaimedBy, LeaseUntil) that run.ScanMetas
+// would drop (it only knows about run.Meta fields).
 func (fs *FS) ListDispatches(runID string) ([]*scratch.Dispatch, error) {
 	dispatchesDir := filepath.Join(fs.runDir(runID), "dispatches")
 	entries, err := os.ReadDir(dispatchesDir)
@@ -481,28 +434,63 @@ func (fs *FS) BuildRunSummaryJSON(runID string) ([]byte, error) {
 }
 
 // BuildDispatchTree returns the full dispatch tree for runID as a *scratch.DispatchNode.
-// It converts the run.Node tree to scratch.DispatchNode so callers need not import internal/run.
+// It builds the tree directly from ListDispatches so that all v2 fields
+// (Enforcement, Provider, Adapter, ClaimedBy, LeaseUntil, DenyReason, …) are
+// preserved in the output. The previous approach went through run.BuildTree and
+// run.Meta, silently dropping v2 fields that run.Meta has no knowledge of.
 func (fs *FS) BuildDispatchTree(runID string) (*scratch.DispatchNode, error) {
-	root, err := run.BuildTree(fs.runDir(runID))
+	dispatches, err := fs.ListDispatches(runID)
 	if err != nil {
 		return nil, fmt.Errorf("fsstore.BuildDispatchTree %s: %w", runID, err)
 	}
-	return runNodeToDispatchNode(root), nil
+	return buildFSDispatchNodeTree(dispatches), nil
 }
 
-// runNodeToDispatchNode recursively converts a run.Node to a scratch.DispatchNode.
-func runNodeToDispatchNode(n *run.Node) *scratch.DispatchNode {
-	if n == nil {
+// buildFSDispatchNodeTree assembles a *scratch.DispatchNode tree from a flat
+// list of dispatches, mirroring the pgstore approach. Children are sorted by ID
+// to produce a deterministic order.
+func buildFSDispatchNodeTree(dispatches []*scratch.Dispatch) *scratch.DispatchNode {
+	byID := make(map[string]*scratch.DispatchNode, len(dispatches))
+	for _, d := range dispatches {
+		d := d
+		byID[d.ID] = &scratch.DispatchNode{Dispatch: d}
+	}
+
+	var roots []*scratch.DispatchNode
+	for _, n := range byID {
+		parentID := n.Dispatch.Parent
+		if parentID == "" {
+			roots = append(roots, n)
+		} else if parent, ok := byID[parentID]; ok {
+			parent.Children = append(parent.Children, n)
+		} else {
+			roots = append(roots, n)
+		}
+	}
+
+	sort.Slice(roots, func(i, j int) bool {
+		return fsDispNodeID(roots[i]) < fsDispNodeID(roots[j])
+	})
+	for _, n := range byID {
+		sort.Slice(n.Children, func(i, j int) bool {
+			return fsDispNodeID(n.Children[i]) < fsDispNodeID(n.Children[j])
+		})
+	}
+
+	if len(roots) == 0 {
 		return &scratch.DispatchNode{}
 	}
-	dn := &scratch.DispatchNode{}
-	if n.Meta != nil {
-		dn.Dispatch = metaToDispatch(n.Meta)
+	if len(roots) == 1 {
+		return roots[0]
 	}
-	for _, child := range n.Children {
-		dn.Children = append(dn.Children, runNodeToDispatchNode(child))
+	return &scratch.DispatchNode{Children: roots}
+}
+
+func fsDispNodeID(n *scratch.DispatchNode) string {
+	if n.Dispatch != nil {
+		return n.Dispatch.ID
 	}
-	return dn
+	return ""
 }
 
 // ── internal helpers ──────────────────────────────────────────────────────────

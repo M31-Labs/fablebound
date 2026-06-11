@@ -44,6 +44,7 @@ func Run(t *testing.T, open func(t *testing.T) scratch.Store) {
 	t.Run("RenderTree", func(t *testing.T) { testRenderTree(t, open(t)) })
 	t.Run("BuildRunSummaryJSON", func(t *testing.T) { testBuildRunSummaryJSON(t, open(t)) })
 	t.Run("BuildDispatchTree", func(t *testing.T) { testBuildDispatchTree(t, open(t)) })
+	t.Run("BuildDispatchTreeV2Fields", func(t *testing.T) { testBuildDispatchTreeV2Fields(t, open(t)) })
 	// P4.1 claim semantics.
 	t.Run("ClaimConcurrent", func(t *testing.T) { testClaimConcurrent(t, open(t)) })
 	t.Run("ClaimExpireRequeue", func(t *testing.T) { testClaimExpireRequeue(t, open(t)) })
@@ -646,6 +647,72 @@ func findDispatchNode(n *scratch.DispatchNode, id string) bool {
 		}
 	}
 	return false
+}
+
+// testBuildDispatchTreeV2Fields verifies that v2-only fields (Enforcement,
+// Provider, Adapter, DenyReason) survive a WriteDispatch → BuildDispatchTree
+// round-trip. Before the fsstore was fixed to build the tree directly from
+// ListDispatches, these fields were silently dropped on the fs store because the
+// old path went through run.BuildTree → run.Node → run.Meta → scratch.Dispatch,
+// and run.Meta has no knowledge of the v2 fields.
+func testBuildDispatchTreeV2Fields(t *testing.T, s scratch.Store) {
+	t.Helper()
+	runID := mustCreateRun(t, s)
+	did := mustAllocDispatch(t, s, runID)
+
+	d := &scratch.Dispatch{
+		ID:          did,
+		Role:        "worker",
+		Model:       "sonnet",
+		Status:      "denied",
+		StartedAt:   time.Now().UTC(),
+		Enforcement: "degraded",
+		Provider:    "anthropic",
+		Adapter:     "claude-headless",
+		DenyReason:  "pool-limit-reached",
+	}
+	if err := s.WriteDispatch(runID, d); err != nil {
+		t.Fatalf("WriteDispatch: %v", err)
+	}
+
+	root, err := s.BuildDispatchTree(runID)
+	if err != nil {
+		t.Fatalf("BuildDispatchTree: %v", err)
+	}
+
+	node := findDispatchNodeByID(root, did)
+	if node == nil {
+		t.Fatalf("BuildDispatchTree: dispatch %q not found in tree", did)
+	}
+	if node.Enforcement != "degraded" {
+		t.Errorf("Enforcement: got %q, want %q", node.Enforcement, "degraded")
+	}
+	if node.Provider != "anthropic" {
+		t.Errorf("Provider: got %q, want %q", node.Provider, "anthropic")
+	}
+	if node.Adapter != "claude-headless" {
+		t.Errorf("Adapter: got %q, want %q", node.Adapter, "claude-headless")
+	}
+	if node.DenyReason != "pool-limit-reached" {
+		t.Errorf("DenyReason: got %q, want %q", node.DenyReason, "pool-limit-reached")
+	}
+}
+
+// findDispatchNodeByID recursively finds a node whose Dispatch.ID matches id,
+// returning the Dispatch directly for convenient field inspection.
+func findDispatchNodeByID(n *scratch.DispatchNode, id string) *scratch.Dispatch {
+	if n == nil {
+		return nil
+	}
+	if n.Dispatch != nil && n.Dispatch.ID == id {
+		return n.Dispatch
+	}
+	for _, child := range n.Children {
+		if d := findDispatchNodeByID(child, id); d != nil {
+			return d
+		}
+	}
+	return nil
 }
 
 // ── P4.1 Claim conformance tests ──────────────────────────────────────────────

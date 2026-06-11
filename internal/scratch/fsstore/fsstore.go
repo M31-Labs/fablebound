@@ -226,18 +226,21 @@ func (fs *FS) ListDispatches(runID string) ([]*scratch.Dispatch, error) {
 
 // DispatchFacts returns active/reason counters for dispatch.arb.
 // active = status IN ("running","pending","claimed") — mirrors pgstore semantics.
+// Reads from ListDispatches (scratch.Dispatch) so that all v2 fields (Tier, etc.)
+// are available without going through the lossy run.Meta conversion path.
 func (fs *FS) DispatchFacts(runID string) (scratch.Facts, error) {
-	metas, err := run.ScanMetas(fs.runDir(runID))
+	dispatches, err := fs.ListDispatches(runID)
 	if err != nil {
 		return scratch.Facts{}, fmt.Errorf("fsstore.DispatchFacts %s: %w", runID, err)
 	}
 	var f scratch.Facts
-	for _, m := range metas {
-		switch m.Status {
+	for _, d := range dispatches {
+		switch d.Status {
 		case "running", "pending", "claimed":
 			f.Active++
 		}
-		if m.IsFableModel() {
+		// v2: Tier=="reason"; v1 fallback: Model=="fable".
+		if d.Tier == "reason" || (d.Tier == "" && d.Model == "fable") {
 			f.ReasonCount++
 		}
 	}
@@ -411,26 +414,191 @@ func (fs *FS) ReadAdapterConfig(runID, dispatchID string) ([]byte, error) {
 }
 
 // RenderTree renders the dispatch tree for runID as a human-readable string.
+// It builds the tree directly from ListDispatches (scratch.Dispatch records) so
+// that v2 fields (Tier, SupervisorPID, etc.) are all available for rendering
+// without going through the lossy run.Meta conversion path.
+//
+// Output format matches the former run.RenderTree output exactly:
+//
+//	root orchestrator(fable) [completed $0.31]
+//	  └─ d01 investigator(sonnet) [completed $0.04] → dispatches/d01/report.md
 func (fs *FS) RenderTree(runID string) (string, error) {
-	tree, err := run.RenderTree(fs.runDir(runID))
+	dispatches, err := fs.ListDispatches(runID)
 	if err != nil {
-		return "", fmt.Errorf("fsstore.RenderTree %s: %w", runID, err)
+		return "", fmt.Errorf("fsstore.RenderTree %s: list dispatches: %w", runID, err)
 	}
-	return tree, nil
+	root := buildFSDispatchNodeTree(dispatches)
+	runDir := fs.runDir(runID)
+	var sb strings.Builder
+	renderDispatchNode(&sb, root, runDir, "", true, true)
+	return sb.String(), nil
+}
+
+// renderDispatchNode renders one node of a scratch.DispatchNode tree into sb.
+// The format mirrors run.RenderTree (formatMetaWithReport):
+//
+//	<id> <role>(<tier|model>) [<effectiveStatus>[ $<cost>]][→ dispatches/<id>/report.md]
+func renderDispatchNode(sb *strings.Builder, n *scratch.DispatchNode, runDir, prefix string, isRoot bool, isLast bool) {
+	if n.Dispatch != nil {
+		var connector string
+		if !isRoot {
+			connector = "└─ "
+		}
+		label := formatDispatchLabel(n.Dispatch, runDir)
+		sb.WriteString(prefix + connector + label + "\n")
+	}
+
+	childPrefix := prefix
+	if !isRoot {
+		if isLast {
+			childPrefix = prefix + "     "
+		} else {
+			childPrefix = prefix + "│    "
+		}
+	}
+
+	for i, child := range n.Children {
+		last := i == len(n.Children)-1
+		renderDispatchNode(sb, child, runDir, childPrefix+"  ", false, last)
+	}
+}
+
+// formatDispatchLabel produces the per-dispatch text line used in RenderTree.
+// It mirrors run.formatMetaWithReport in render.go.
+func formatDispatchLabel(d *scratch.Dispatch, runDir string) string {
+	if d == nil {
+		return "(unknown)"
+	}
+
+	// Prefer Tier for v2 records; fall back to Model for v1 records.
+	label := d.Tier
+	if label == "" {
+		label = d.Model
+	}
+	if label == "" {
+		label = "?"
+	}
+
+	var cost string
+	if d.CostUSD > 0 {
+		cost = fmt.Sprintf(" $%.4f", d.CostUSD)
+	}
+
+	// Use effective status (stale for orphaned running dispatches).
+	status := dispatchEffectiveStatus(d, runDir)
+	base := fmt.Sprintf("%s %s(%s) [%s%s]", d.ID, d.Role, label, status, cost)
+
+	// Append → dispatches/<id>/report.md if the file exists.
+	if runDir != "" && status == "completed" {
+		reportPath := filepath.Join(runDir, "dispatches", d.ID, "report.md")
+		if _, err := os.Stat(reportPath); err == nil {
+			rel := filepath.Join("dispatches", d.ID, "report.md")
+			base += " → " + rel
+		}
+	}
+
+	return base
+}
+
+// dispatchEffectiveStatus returns "stale" if d is an orphaned running dispatch,
+// otherwise the recorded Status. Mirrors run.Meta.EffectiveStatus.
+func dispatchEffectiveStatus(d *scratch.Dispatch, runDir string) string {
+	if d.IsOrphanIn(runDir) {
+		return "stale"
+	}
+	return d.Status
 }
 
 // BuildRunSummaryJSON builds the derived run summary and returns it as
-// indented JSON bytes. Delegates to run.BuildRunSummary.
+// indented JSON bytes. Reads from scratch records (ReadRun + ListDispatches)
+// so that all v2 fields are available without going through run.Meta.
 func (fs *FS) BuildRunSummaryJSON(runID string) ([]byte, error) {
-	summary, err := run.BuildRunSummary(fs.runDir(runID))
+	r, err := fs.ReadRun(runID)
 	if err != nil {
-		return nil, fmt.Errorf("fsstore.BuildRunSummaryJSON %s: %w", runID, err)
+		return nil, fmt.Errorf("fsstore.BuildRunSummaryJSON %s: read run: %w", runID, err)
 	}
+	dispatches, err := fs.ListDispatches(runID)
+	if err != nil {
+		return nil, fmt.Errorf("fsstore.BuildRunSummaryJSON %s: list dispatches: %w", runID, err)
+	}
+	summary := buildFSRunSummary(r, dispatches, fs.runDir(runID))
 	data, err := json.MarshalIndent(summary, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("fsstore.BuildRunSummaryJSON %s: marshal: %w", runID, err)
 	}
 	return data, nil
+}
+
+// buildFSRunSummary builds a run.RunSummary from scratch records for JSON output.
+// Mirrors pgstore.buildRunSummaryFromRecords but adds report-path resolution
+// (which pgstore cannot do — it has no local filesystem access).
+func buildFSRunSummary(r *scratch.Run, dispatches []*scratch.Dispatch, runDir string) *run.RunSummary {
+	summary := &run.RunSummary{
+		RunID:        r.ID,
+		Task:         r.Task,
+		Status:       r.Status,
+		ReasonBudget: r.ReasonBudget,
+		PolicySHAs:   r.PolicySHAs,
+	}
+	if !r.CreatedAt.IsZero() {
+		summary.CreatedAt = r.CreatedAt.UTC().Format("2006-01-02T15:04:05Z")
+	}
+	if r.EndedAt != nil {
+		summary.EndedAt = r.EndedAt.UTC().Format("2006-01-02T15:04:05Z")
+	}
+
+	root := buildFSDispatchNodeTree(dispatches)
+	summary.Dispatches = buildFSDispatchSummaries(root, runDir)
+	return summary
+}
+
+// buildFSDispatchSummaries converts the root DispatchNode to a list of
+// DispatchSummary records for JSON output.
+func buildFSDispatchSummaries(n *scratch.DispatchNode, runDir string) []*run.DispatchSummary {
+	if n.Dispatch == nil {
+		// Synthetic container — flatten to just children's summaries.
+		var out []*run.DispatchSummary
+		for _, child := range n.Children {
+			out = append(out, fsDispatchNodeToSummary(child, runDir))
+		}
+		return out
+	}
+	return []*run.DispatchSummary{fsDispatchNodeToSummary(n, runDir)}
+}
+
+// fsDispatchNodeToSummary converts one DispatchNode to a DispatchSummary.
+// Mirrors pgstore.dispatchNodeToSummary but adds report-path resolution.
+func fsDispatchNodeToSummary(n *scratch.DispatchNode, runDir string) *run.DispatchSummary {
+	if n.Dispatch == nil {
+		return &run.DispatchSummary{}
+	}
+	d := n.Dispatch
+
+	ds := &run.DispatchSummary{
+		ID:       d.ID,
+		Parent:   d.Parent,
+		Role:     d.Role,
+		Model:    d.Model,
+		Profile:  d.Profile,
+		Status:   dispatchEffectiveStatus(d, runDir),
+		Depth:    d.Depth,
+		CostUSD:  d.CostUSD,
+		NumTurns: d.NumTurns,
+	}
+
+	// Set report path if the file exists on disk.
+	if runDir != "" {
+		reportPath := filepath.Join(runDir, "dispatches", d.ID, "report.md")
+		if _, err := os.Stat(reportPath); err == nil {
+			ds.Report = filepath.Join("dispatches", d.ID, "report.md")
+		}
+	}
+
+	for _, child := range n.Children {
+		ds.Children = append(ds.Children, fsDispatchNodeToSummary(child, runDir))
+	}
+
+	return ds
 }
 
 // BuildDispatchTree returns the full dispatch tree for runID as a *scratch.DispatchNode.

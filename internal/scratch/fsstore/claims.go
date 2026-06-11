@@ -149,9 +149,8 @@ func (fs *FS) ReleaseDispatch(runID, dispatchID, executor, terminalStatus string
 
 // ExpireLeases scans all dispatch directories for claimed dispatches whose
 // lease_until is in the past, and re-queues them to "pending".
-// It reads raw meta.json (via readDispatchRaw) rather than going through
-// ListDispatches, because ListDispatches delegates to run.ScanMetas which
-// maps to run.Meta — a struct that does not carry LeaseUntil/ClaimedBy.
+// It reads raw meta.json (via readDispatchRaw) directly for minimal I/O;
+// all v2 fields (ClaimedBy, LeaseUntil) are preserved.
 func (fs *FS) ExpireLeases(runID string) ([]string, error) {
 	dispatchesDir := filepath.Join(fs.runDir(runID), "dispatches")
 	entries, err := os.ReadDir(dispatchesDir)
@@ -212,10 +211,8 @@ func (fs *FS) ExpireLeases(runID string) ([]string, error) {
 }
 
 // ListPendingDispatches returns all pending dispatches in ascending ID order.
-// Reads raw meta.json to preserve Status accurately (ListDispatches uses
-// run.ScanMetas which maps to run.Meta and loses claimed_by/lease_until; the
-// status field itself is preserved by run.Meta, so the filter is correct, but
-// we read raw here for consistency with ExpireLeases).
+// Reads raw meta.json directly (via readDispatchRaw) for consistency with
+// ExpireLeases; all v2 fields are preserved.
 func (fs *FS) ListPendingDispatches(runID string) ([]*scratch.Dispatch, error) {
 	dispatchesDir := filepath.Join(fs.runDir(runID), "dispatches")
 	entries, err := os.ReadDir(dispatchesDir)

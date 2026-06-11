@@ -3,6 +3,7 @@ package spawn
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,19 @@ import (
 	"m31labs.dev/tiller/internal/scratch/fsstore"
 	"m31labs.dev/tiller/internal/storeutil"
 )
+
+// maxTranscriptParseBytes is the maximum transcript size we will read into
+// memory for JSON parsing. Transcripts larger than this cap are persisted to
+// disk (transcript.json is still written in full) but are not parsed; the
+// dispatch is marked halted with an explanatory report.md.
+//
+// The real claude ≥2.1.172 streaming-event array can be very large for long
+// sessions. 64 MiB is a generous ceiling that keeps heap usage bounded while
+// accommodating nearly all real workloads. Set to a smaller value in tests via
+// testTranscriptParseBytes.
+//
+// TODO: implement true incremental streaming JSON parse to eliminate this cap.
+var maxTranscriptParseBytes int64 = 64 << 20 // 64 MiB
 
 // ClaudeResult is the parsed --output-format json output from claude.
 // It normalises two historical shapes into one struct:
@@ -263,17 +277,16 @@ func Supervise(a SuperviseArgs) error {
 		})
 	}
 
-	// Read stdout into memory for JSON parsing.
-	buf := make([]byte, 0, 4096)
-	readBuf := make([]byte, 4096)
-	for {
-		n, readErr := stdoutPipe.Read(readBuf)
-		if n > 0 {
-			buf = append(buf, readBuf[:n]...)
-		}
-		if readErr != nil {
-			break
-		}
+	// Stream stdout directly to transcript.json on disk — no unbounded heap
+	// accumulation regardless of how large the streaming-event array grows.
+	transcriptFile, transcriptOpenErr := os.OpenFile(transcriptPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if transcriptOpenErr != nil {
+		logf("warning: open transcript.json for streaming: %v", transcriptOpenErr)
+		// Drain stdout so the child does not block on a full pipe.
+		_, _ = io.Copy(io.Discard, stdoutPipe)
+	} else {
+		_, _ = io.Copy(transcriptFile, stdoutPipe)
+		_ = transcriptFile.Close()
 	}
 
 	exitErr := cmd.Wait()
@@ -294,37 +307,74 @@ func Supervise(a SuperviseArgs) error {
 
 	logf("claude exited code=%d", exitCode)
 
-	// Parse JSON result — handles both legacy single-object and real array shapes.
+	// Determine transcript size and decide whether to parse.
 	var claudeRes ClaudeResult
 	finalStatus := "completed"
-	if parsedRes, parseErr := parseClaudeResult(buf); parseErr != nil {
-		logf("warning: failed to parse claude output as JSON: %v", parseErr)
-		// Write raw stdout as report.
-		_ = os.WriteFile(reportPath, buf, 0o644)
+
+	transcriptSize := int64(0)
+	if fi, statErr := os.Stat(transcriptPath); statErr == nil {
+		transcriptSize = fi.Size()
+	}
+
+	if transcriptOpenErr != nil {
+		// Could not stream to disk — no transcript to parse.
+		logf("warning: transcript.json was not written; parse skipped")
+		_ = os.WriteFile(reportPath, []byte("supervisor error: transcript.json could not be opened for streaming\n"), 0o644)
 		if timeoutKilled {
 			finalStatus = "halted"
 		} else if exitCode != 0 {
 			finalStatus = "failed"
 		}
+	} else if transcriptSize > maxTranscriptParseBytes {
+		// Transcript exceeds parse cap — do NOT load into memory.
+		// TODO: implement incremental streaming JSON parse to handle oversized transcripts.
+		logf("warning: transcript.json size %d exceeds parse cap %d; parse skipped", transcriptSize, maxTranscriptParseBytes)
+		reportMsg := fmt.Sprintf(
+			"supervisor: transcript.json (%d bytes) exceeds parse cap (%d bytes).\n"+
+				"The full transcript is preserved on disk but could not be parsed in-memory.\n"+
+				"Dispatch marked halted. See supervise.log for details.\n",
+			transcriptSize, maxTranscriptParseBytes,
+		)
+		_ = os.WriteFile(reportPath, []byte(reportMsg), 0o644)
+		finalStatus = "halted"
 	} else {
-		claudeRes = parsedRes
-		// Write report.md via the Store.
-		if err := st.WriteReport(runID, a.DispatchID, []byte(claudeRes.Result)); err != nil {
-			logf("warning: write report.md: %v", err)
-		}
+		// Read transcript back into memory (bounded by the cap check above).
+		buf, readErr := os.ReadFile(transcriptPath)
+		if readErr != nil {
+			logf("warning: read transcript.json for parsing: %v", readErr)
+			_ = os.WriteFile(reportPath, []byte(fmt.Sprintf("supervisor error: could not read transcript.json: %v\n", readErr)), 0o644)
+			if timeoutKilled {
+				finalStatus = "halted"
+			} else if exitCode != 0 {
+				finalStatus = "failed"
+			}
+		} else if parsedRes, parseErr := parseClaudeResult(buf); parseErr != nil {
+			// Parse JSON result — handles both legacy single-object and real array shapes.
+			logf("warning: failed to parse claude output as JSON: %v", parseErr)
+			// Write raw stdout as report.
+			_ = os.WriteFile(reportPath, buf, 0o644)
+			if timeoutKilled {
+				finalStatus = "halted"
+			} else if exitCode != 0 {
+				finalStatus = "failed"
+			}
+		} else {
+			claudeRes = parsedRes
+			// Write report.md via the Store.
+			if err := st.WriteReport(runID, a.DispatchID, []byte(claudeRes.Result)); err != nil {
+				logf("warning: write report.md: %v", err)
+			}
 
-		// Write transcript.json from raw output (not a Store record; raw JSON blob).
-		if err := os.WriteFile(transcriptPath, buf, 0o644); err != nil {
-			logf("warning: write transcript.json: %v", err)
-		}
+			// transcript.json is already on disk from the streaming copy above.
 
-		if claudeRes.IsError {
-			finalStatus = "failed"
-		} else if timeoutKilled {
-			finalStatus = "halted"
-		}
+			if claudeRes.IsError {
+				finalStatus = "failed"
+			} else if timeoutKilled {
+				finalStatus = "halted"
+			}
 
-		logf("report written (%d bytes), status=%s", len(claudeRes.Result), finalStatus)
+			logf("report written (%d bytes), status=%s", len(claudeRes.Result), finalStatus)
+		}
 	}
 
 	// Append kind:"report" to dispatch's context_trace.jsonl via the Store.

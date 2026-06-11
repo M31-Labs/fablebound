@@ -11,6 +11,7 @@ import (
 
 	"m31labs.dev/tiller/internal/hyphae"
 	"m31labs.dev/tiller/internal/policy"
+	"m31labs.dev/tiller/internal/procutil"
 	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/spawn"
 	"m31labs.dev/tiller/internal/storeutil"
@@ -297,7 +298,7 @@ func finalizeManifest(st scratch.Store, runID, runDir string, fableBudget int) e
 	for _, d := range dispatches {
 		if d.Status == "running" {
 			anyRunning = true
-			if d.IsOrphan() {
+			if d.IsOrphanIn(runDir) {
 				// Supervisor is dead (orphan): mark as stale.
 				now := time.Now()
 				d.Status = "stale"
@@ -366,13 +367,14 @@ func graceFail(st scratch.Store, runDir, runID string, d *scratch.Dispatch) {
 
 // killSupervisorProcess attempts to find and kill a tiller _supervise
 // process for the given dispatch (Linux /proc, best effort).
+// The cmdline identity match is delegated to procutil.CmdlineMatches so the
+// matching logic is shared with the orphan-detection path.
 func killSupervisorProcess(runDir, dispatchID string) {
 	procDir := "/proc"
 	entries, err := os.ReadDir(procDir)
 	if err != nil {
 		return
 	}
-	target := "_supervise " + runDir + " " + dispatchID
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -381,9 +383,7 @@ func killSupervisorProcess(runDir, dispatchID string) {
 		if err != nil {
 			continue
 		}
-		// cmdline is NUL-separated.
-		cmdline := strings.ReplaceAll(string(cmdlineData), "\x00", " ")
-		if strings.Contains(cmdline, target) {
+		if procutil.CmdlineMatches(cmdlineData, runDir, dispatchID) {
 			// Parse PID.
 			var pid int
 			if _, err := fmt.Sscanf(e.Name(), "%d", &pid); err == nil {

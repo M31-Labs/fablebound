@@ -106,7 +106,7 @@ func runAwait(args []string) error {
 		d, err := st.ReadDispatch(runID, dispatchID)
 		if err == nil {
 			// Check for orphan (supervisor dead) — treat as stale, exit 3.
-			if d.IsOrphan() {
+			if d.IsOrphanIn(runDir) {
 				reportPath := filepath.Join(runDir, "dispatches", dispatchID, "report.md")
 				fmt.Printf("%s stale %s\n", dispatchID, reportPath)
 				return &StaledError{DispatchID: dispatchID}

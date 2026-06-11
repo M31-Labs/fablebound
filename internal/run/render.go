@@ -72,7 +72,7 @@ func formatMetaWithReport(m *Meta, runDir string) string {
 	}
 
 	// Use EffectiveStatus so orphan running dispatches show as "stale".
-	status := m.EffectiveStatus()
+	status := m.EffectiveStatus(runDir)
 	base := fmt.Sprintf("%s %s(%s) [%s%s]", m.ID, m.Role, label, status, cost)
 
 	// Append → dispatches/<id>/report.md if the file exists.
@@ -171,7 +171,7 @@ func nodeToDispatchSummary(n *Node, runDir string) *DispatchSummary {
 		Role:     m.Role,
 		Model:    m.Model,
 		Profile:  m.Profile,
-		Status:   m.EffectiveStatus(),
+		Status:   m.EffectiveStatus(runDir),
 		Depth:    m.Depth,
 		CostUSD:  m.CostUSD,
 		NumTurns: m.NumTurns,

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"m31labs.dev/tiller/internal/procutil"
 )
 
 // Meta is the per-dispatch record written to dispatches/<id>/meta.json.
@@ -41,6 +43,10 @@ func (m *Meta) IsTerminal() bool {
 // IsOrphan returns true if this is a "running" dispatch whose supervisor
 // process no longer exists. SupervisorPID == 0 means the PID was never
 // recorded (older dispatches); those are not treated as orphans.
+//
+// Deprecated: prefer IsOrphanIn(runDir) which adds a cmdline identity check
+// that prevents a recycled PID from being mistaken for a live supervisor.
+// IsOrphan falls back to the kill-only check (no PID-reuse protection).
 func (m *Meta) IsOrphan() bool {
 	if m.Status != "running" {
 		return false
@@ -54,11 +60,29 @@ func (m *Meta) IsOrphan() bool {
 	return err == syscall.ESRCH
 }
 
-// EffectiveStatus returns "stale" if the dispatch is an orphan, otherwise
-// the recorded Status.  This is used by display code to show up-to-date state
-// without mutating the on-disk meta.
-func (m *Meta) EffectiveStatus() string {
-	if m.IsOrphan() {
+// IsOrphanIn returns true if this is a "running" dispatch whose supervisor
+// process is no longer alive or cannot be verified as the correct supervisor.
+// runDir is the absolute path to the run directory and is used to build the
+// cmdline identity token "_supervise <runDir> <id>" that guards against PID
+// reuse (a recycled PID whose owner is an unrelated process is treated as
+// orphaned). SupervisorPID == 0 means the PID was never recorded; those
+// dispatches are not treated as orphans.
+func (m *Meta) IsOrphanIn(runDir string) bool {
+	if m.Status != "running" {
+		return false
+	}
+	if m.SupervisorPID <= 0 {
+		return false
+	}
+	return !procutil.SupervisorAlive(m.SupervisorPID, runDir, m.ID)
+}
+
+// EffectiveStatus returns "stale" if the dispatch is an orphan (using the
+// identity-checked liveness test), otherwise the recorded Status. This is
+// used by display code to show up-to-date state without mutating the on-disk
+// meta. runDir must be the absolute path to the run directory.
+func (m *Meta) EffectiveStatus(runDir string) string {
+	if m.IsOrphanIn(runDir) {
 		return "stale"
 	}
 	return m.Status

@@ -10,6 +10,8 @@ package scratch
 import (
 	"syscall"
 	"time"
+
+	"m31labs.dev/tiller/internal/procutil"
 )
 
 // Run is the run-level record (spec §3.1 "manifest" row).
@@ -79,6 +81,10 @@ func (d *Dispatch) IsTerminal() bool {
 // IsOrphan returns true if this is a "running" dispatch whose supervisor
 // process no longer exists. SupervisorPID == 0 means the PID was never
 // recorded (older dispatches); those are not treated as orphans.
+//
+// Deprecated: prefer IsOrphanIn(runDir) which adds a cmdline identity check
+// that prevents a recycled PID from being mistaken for a live supervisor.
+// IsOrphan falls back to the kill-only check (no PID-reuse protection).
 func (d *Dispatch) IsOrphan() bool {
 	if d.Status != "running" {
 		return false
@@ -90,6 +96,23 @@ func (d *Dispatch) IsOrphan() bool {
 	err := syscall.Kill(d.SupervisorPID, 0)
 	// ESRCH = no such process → orphan.
 	return err == syscall.ESRCH
+}
+
+// IsOrphanIn returns true if this is a "running" dispatch whose supervisor
+// process is no longer alive or cannot be verified as the correct supervisor.
+// runDir is the absolute path to the run directory and is used to build the
+// cmdline identity token "_supervise <runDir> <id>" that guards against PID
+// reuse (a recycled PID whose owner is an unrelated process is treated as
+// orphaned). SupervisorPID == 0 means the PID was never recorded; those
+// dispatches are not treated as orphans.
+func (d *Dispatch) IsOrphanIn(runDir string) bool {
+	if d.Status != "running" {
+		return false
+	}
+	if d.SupervisorPID <= 0 {
+		return false
+	}
+	return !procutil.SupervisorAlive(d.SupervisorPID, runDir, d.ID)
 }
 
 // DispatchNode is a node in the dispatch tree returned by BuildDispatchTree.

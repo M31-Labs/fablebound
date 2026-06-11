@@ -434,29 +434,40 @@ func TestEffectiveStatus_Orphan(t *testing.T) {
 		Status:        "running",
 		SupervisorPID: pid,
 	}
-	if got := m.EffectiveStatus(); got != "stale" {
+	if got := m.EffectiveStatus("/any/rundir"); got != "stale" {
 		t.Errorf("EffectiveStatus after kill = %q, want stale", got)
 	}
 }
 
 // TestEffectiveStatus_Normal verifies EffectiveStatus returns the recorded
-// status when the supervisor is alive or no PID is recorded.
+// status when the dispatch is in a terminal state or has no PID recorded.
 func TestEffectiveStatus_Normal(t *testing.T) {
 	m := &run.Meta{
 		ID:     "d01",
 		Status: "completed",
 	}
-	if got := m.EffectiveStatus(); got != "completed" {
+	if got := m.EffectiveStatus("/any/rundir"); got != "completed" {
 		t.Errorf("EffectiveStatus for completed = %q, want completed", got)
 	}
 
+	// No PID recorded: not an orphan regardless of status.
 	m2 := &run.Meta{
-		ID:            "d01",
+		ID:     "d02",
+		Status: "running",
+	}
+	if got := m2.EffectiveStatus("/any/rundir"); got != "running" {
+		t.Errorf("EffectiveStatus for running+no PID = %q, want running", got)
+	}
+
+	// Alive PID with wrong cmdline → treated as orphan (PID-reuse fix).
+	// This is intentional: EffectiveStatus now does a full identity check.
+	m3 := &run.Meta{
+		ID:            "d03",
 		Status:        "running",
 		SupervisorPID: os.Getpid(),
 	}
-	if got := m2.EffectiveStatus(); got != "running" {
-		t.Errorf("EffectiveStatus for running+alive = %q, want running", got)
+	if got := m3.EffectiveStatus("/fake/rundir"); got != "stale" {
+		t.Errorf("EffectiveStatus for running+alive PID with wrong cmdline = %q, want stale (PID-reuse case)", got)
 	}
 }
 

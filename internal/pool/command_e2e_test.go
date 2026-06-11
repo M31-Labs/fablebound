@@ -153,11 +153,11 @@ func TestCommandAdapterE2E(t *testing.T) {
 
 	// Create a run record.
 	runID, err := st.CreateRun(&scratch.Run{
-		Task:        "P5.2 echo-agent end-to-end test",
-		Workspace:   projectDir,
-		Status:      "running",
-		FableBudget: 10,
-		MaxDepth:    4,
+		Task:         "P5.2 echo-agent end-to-end test",
+		Workspace:    projectDir,
+		Status:       "running",
+		ReasonBudget: 10,
+		MaxDepth:     4,
 	})
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)

@@ -56,10 +56,10 @@ func TestFactsourceGovernsDispatch(t *testing.T) {
 
 	runID := fmt.Sprintf("factsource-test-%d", time.Now().UnixNano())
 	_, err = s.CreateRun(&scratch.Run{
-		ID:          runID,
-		Task:        "factsource governance proof",
-		Status:      "running",
-		FableBudget: 2, // reason_budget = 2
+		ID:           runID,
+		Task:         "factsource governance proof",
+		Status:       "running",
+		ReasonBudget: 2, // reason_budget = 2
 	})
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)

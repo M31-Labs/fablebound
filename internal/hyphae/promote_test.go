@@ -25,12 +25,12 @@ func makeFixtureRun(t *testing.T, tmpDir string) string {
 	now := time.Now()
 	ended := now.Add(5 * time.Second)
 	r := &scratch.Run{
-		Task:        "Summarize the codebase architecture.\n\nAdditional context here.",
-		Workspace:   tmpDir,
-		Status:      "completed",
-		FableBudget: 2,
-		CreatedAt:   now,
-		EndedAt:     &ended,
+		Task:         "Summarize the codebase architecture.\n\nAdditional context here.",
+		Workspace:    tmpDir,
+		Status:       "completed",
+		ReasonBudget: 2,
+		CreatedAt:    now,
+		EndedAt:      &ended,
 	}
 	runID, err := st.CreateRun(r)
 	if err != nil {

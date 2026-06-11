@@ -19,11 +19,11 @@ func makeTestRun(t *testing.T, runsBase string, status string, ageOffset time.Du
 
 	now := time.Now().Add(-ageOffset)
 	r := &scratch.Run{
-		Task:        fmt.Sprintf("test task (%s)", status),
-		Workspace:   runsBase,
-		Status:      status,
-		FableBudget: 2,
-		CreatedAt:   now,
+		Task:         fmt.Sprintf("test task (%s)", status),
+		Workspace:    runsBase,
+		Status:       status,
+		ReasonBudget: 2,
+		CreatedAt:    now,
 	}
 	if status != "running" {
 		ended := now.Add(1 * time.Second)

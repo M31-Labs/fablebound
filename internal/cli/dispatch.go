@@ -113,7 +113,7 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 		return fmt.Errorf("dispatch: read run: %w", err)
 	}
 
-	reasonBudget := runRec.FableBudget // FableBudget field stores reason_budget (renamed in v2)
+	reasonBudget := runRec.ReasonBudget
 	if reasonBudget == 0 {
 		reasonBudget = 2
 	}

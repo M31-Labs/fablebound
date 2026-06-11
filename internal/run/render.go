@@ -133,7 +133,7 @@ func BuildRunSummary(runDir string) (*RunSummary, error) {
 		RunID:        manifest.RunID,
 		Task:         manifest.Task,
 		Status:       manifest.Status,
-		ReasonBudget: manifest.FableBudget,
+		ReasonBudget: manifest.ReasonBudget,
 		PolicySHAs:   manifest.PolicySHAs,
 		Dispatches:   dispatches,
 	}

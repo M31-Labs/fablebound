@@ -47,11 +47,11 @@ func setupFixture(t *testing.T) (scratch.Store, string, string) {
 	}
 	st := fsstore.Open(runsBase)
 	run := &scratch.Run{
-		Task:        "command adapter test",
-		Workspace:   workspace,
-		Status:      "running",
-		FableBudget: 2,
-		CreatedAt:   time.Now(),
+		Task:         "command adapter test",
+		Workspace:    workspace,
+		Status:       "running",
+		ReasonBudget: 2,
+		CreatedAt:    time.Now(),
 	}
 	runID, err := st.CreateRun(run)
 	if err != nil {

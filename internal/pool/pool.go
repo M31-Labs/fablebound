@@ -479,7 +479,7 @@ func (p *Pool) evalGate(_ context.Context, runID, dispatchID string) (bool, gate
 		return false, gateResult{}, fmt.Errorf("dispatch facts: %w", err)
 	}
 
-	reasonBudget := runRec.FableBudget
+	reasonBudget := runRec.ReasonBudget
 	if reasonBudget == 0 {
 		reasonBudget = 2
 	}

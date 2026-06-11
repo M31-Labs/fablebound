@@ -132,13 +132,13 @@ func runRun(args []string) error {
 	// Create the run record.
 	now := time.Now()
 	r := &scratch.Run{
-		Task:        task,
-		Workspace:   workspace,
-		Status:      "running",
-		FableBudget: *fableBudget,
-		MaxDepth:    *maxDepth,
-		CreatedAt:   now,
-		StoreMode:   effectiveStore,
+		Task:         task,
+		Workspace:    workspace,
+		Status:       "running",
+		ReasonBudget: *fableBudget,
+		MaxDepth:     *maxDepth,
+		CreatedAt:    now,
+		StoreMode:    effectiveStore,
 		PolicySHAs: map[string]string{
 			"dispatch": dispatchLoaded.SHA256,
 			"toolgate": toolLoaded.SHA256,
@@ -326,8 +326,8 @@ func finalizeManifest(st scratch.Store, runID, runDir string, fableBudget int) e
 	if err != nil {
 		// Reconstruct a minimal run record.
 		runRec = &scratch.Run{
-			ID:          runID,
-			FableBudget: fableBudget,
+			ID:           runID,
+			ReasonBudget: fableBudget,
 		}
 	}
 	runRec.Status = finalStatus

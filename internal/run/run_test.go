@@ -121,13 +121,13 @@ func TestManifestRoundtrip(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	m := &run.Manifest{
-		RunID:       id,
-		Task:        "test task",
-		Workspace:   "/tmp/ws",
-		Status:      "created",
-		FableBudget: 2,
-		CreatedAt:   now,
-		PolicySHAs:  map[string]string{"dispatch": "abc123", "toolgate": "def456"},
+		RunID:        id,
+		Task:         "test task",
+		Workspace:    "/tmp/ws",
+		Status:       "created",
+		ReasonBudget: 2,
+		CreatedAt:    now,
+		PolicySHAs:   map[string]string{"dispatch": "abc123", "toolgate": "def456"},
 	}
 
 	if err := run.WriteManifest(runDir, m); err != nil {
@@ -148,7 +148,7 @@ func TestManifestRoundtrip(t *testing.T) {
 
 // TestManifestLegacyFableBudget verifies that a raw v1 manifest.json containing
 // "fable_budget" (and no "reason_budget") is read back with the budget promoted
-// to the FableBudget field via the legacy fallback in ReadManifest.
+// to the ReasonBudget field via the legacy fallback in ReadManifest.
 func TestManifestLegacyFableBudget(t *testing.T) {
 	dir := t.TempDir()
 	// Write a minimal v1 manifest with only fable_budget (no reason_budget key).
@@ -161,8 +161,8 @@ func TestManifestLegacyFableBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadManifest: %v", err)
 	}
-	if m.FableBudget != 3 {
-		t.Errorf("legacy fable_budget not promoted: got FableBudget=%d, want 3", m.FableBudget)
+	if m.ReasonBudget != 3 {
+		t.Errorf("legacy fable_budget not promoted: got ReasonBudget=%d, want 3", m.ReasonBudget)
 	}
 }
 

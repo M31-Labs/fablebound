@@ -70,7 +70,7 @@ func TestRunCRUD(t *testing.T) {
 		Task:          "test task first line\nsecond line",
 		Workspace:     "/tmp/workspace",
 		Status:        "created",
-		FableBudget:   3,
+		ReasonBudget:  3,
 		CreatedAt:     now,
 		RootSessionID: "sess-abc",
 		PolicySHAs:    map[string]string{"toolgate": "deadbeef"},
@@ -103,8 +103,8 @@ func TestRunCRUD(t *testing.T) {
 	if got.Status != r.Status {
 		t.Errorf("ReadRun.Status: got %q, want %q", got.Status, r.Status)
 	}
-	if got.FableBudget != r.FableBudget {
-		t.Errorf("ReadRun.FableBudget: got %d, want %d", got.FableBudget, r.FableBudget)
+	if got.ReasonBudget != r.ReasonBudget {
+		t.Errorf("ReadRun.ReasonBudget: got %d, want %d", got.ReasonBudget, r.ReasonBudget)
 	}
 	if got.RootSessionID != r.RootSessionID {
 		t.Errorf("ReadRun.RootSessionID: got %q, want %q", got.RootSessionID, r.RootSessionID)

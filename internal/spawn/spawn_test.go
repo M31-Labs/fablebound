@@ -67,11 +67,11 @@ func setupFixtureRun(t *testing.T) (runDir string, binary string, stub string) {
 	// Create a run via the scratch.Store.
 	st := fsstore.Open(runBase)
 	r := &scratch.Run{
-		Task:        "test task",
-		Workspace:   workspace,
-		Status:      "running",
-		FableBudget: 2,
-		CreatedAt:   time.Now(),
+		Task:         "test task",
+		Workspace:    workspace,
+		Status:       "running",
+		ReasonBudget: 2,
+		CreatedAt:    time.Now(),
 	}
 	runID, err := st.CreateRun(r)
 	if err != nil {

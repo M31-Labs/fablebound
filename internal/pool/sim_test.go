@@ -147,11 +147,11 @@ func simSeedRun(
 	t.Helper()
 	var err error
 	runID, err = st.CreateRun(&scratch.Run{
-		Task:        "sim test run",
-		Workspace:   t.TempDir(),
-		Status:      "running",
-		FableBudget: 20,
-		MaxDepth:    maxDepth,
+		Task:         "sim test run",
+		Workspace:    t.TempDir(),
+		Status:       "running",
+		ReasonBudget: 20,
+		MaxDepth:     maxDepth,
 	})
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)

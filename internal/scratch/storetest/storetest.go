@@ -88,12 +88,12 @@ func testRunCRUD(t *testing.T, s scratch.Store) {
 	// Create.
 	now := time.Now().UTC().Truncate(time.Second)
 	r := &scratch.Run{
-		Task:        "my task",
-		Workspace:   t.TempDir(),
-		Status:      "created",
-		FableBudget: 3,
-		CreatedAt:   now,
-		PolicySHAs:  map[string]string{"dispatch": "abc123"},
+		Task:         "my task",
+		Workspace:    t.TempDir(),
+		Status:       "created",
+		ReasonBudget: 3,
+		CreatedAt:    now,
+		PolicySHAs:   map[string]string{"dispatch": "abc123"},
 	}
 	id, err := s.CreateRun(r)
 	if err != nil {
@@ -114,8 +114,8 @@ func testRunCRUD(t *testing.T, s scratch.Store) {
 	if got.Task != "my task" {
 		t.Errorf("ReadRun Task=%q want %q", got.Task, "my task")
 	}
-	if got.FableBudget != 3 {
-		t.Errorf("ReadRun FableBudget=%d want 3", got.FableBudget)
+	if got.ReasonBudget != 3 {
+		t.Errorf("ReadRun ReasonBudget=%d want 3", got.ReasonBudget)
 	}
 	if got.PolicySHAs["dispatch"] != "abc123" {
 		t.Errorf("ReadRun PolicySHAs dispatch=%q want abc123", got.PolicySHAs["dispatch"])

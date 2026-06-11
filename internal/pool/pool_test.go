@@ -89,11 +89,11 @@ func seedRun(t *testing.T, st scratch.Store, n int) (runID string, dispatchIDs [
 	t.Helper()
 	var err error
 	runID, err = st.CreateRun(&scratch.Run{
-		Task:        "pool test task",
-		Workspace:   t.TempDir(),
-		Status:      "running",
-		FableBudget: 10, // generous reason budget
-		MaxDepth:    8,  // generous depth
+		Task:         "pool test task",
+		Workspace:    t.TempDir(),
+		Status:       "running",
+		ReasonBudget: 10, // generous reason budget
+		MaxDepth:     8,  // generous depth
 	})
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
@@ -327,11 +327,11 @@ func TestEvalGateEnforcementRederivation(t *testing.T) {
 
 	// Create a run with generous budgets.
 	runID, err := st.CreateRun(&scratch.Run{
-		Task:        "spoofed enforcement test",
-		Workspace:   t.TempDir(),
-		Status:      "running",
-		FableBudget: 10,
-		MaxDepth:    8,
+		Task:         "spoofed enforcement test",
+		Workspace:    t.TempDir(),
+		Status:       "running",
+		ReasonBudget: 10,
+		MaxDepth:     8,
 	})
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)

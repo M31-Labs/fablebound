@@ -19,7 +19,7 @@ type Run struct {
 	Task          string // first line of task.md / brief text
 	Workspace     string // absolute path to workspace root
 	Status        string // created|running|completed|failed|halted
-	FableBudget   int    // max fable/reason dispatches; default 2 (v1 field, kept for compat)
+	ReasonBudget  int    // max reason dispatches; default 2 (v1 compat; was fable_budget on disk)
 	MaxDepth      int    // max dispatch depth; 0 means use default (4). spec §4.3
 	CreatedAt     time.Time
 	EndedAt       *time.Time        `json:"ended_at,omitempty"`

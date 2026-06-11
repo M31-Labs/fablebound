@@ -88,7 +88,7 @@ func (s *Store) CreateRun(r *scratch.Run) (string, error) {
 		INSERT INTO run (id, task, workspace, status, reason_budget, max_depth, created_at, ended_at,
 		                 root_session_id, policy_shas, hypha_trace_id)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-		r.ID, r.Task, r.Workspace, r.Status, r.FableBudget, maxDepth,
+		r.ID, r.Task, r.Workspace, r.Status, r.ReasonBudget, maxDepth,
 		r.CreatedAt, r.EndedAt,
 		r.RootSessionID, policySHAs, r.HyphaTraceID,
 	)
@@ -108,7 +108,7 @@ func (s *Store) ReadRun(runID string) (*scratch.Run, error) {
 	r := &scratch.Run{}
 	var policySHAsRaw []byte
 	if err := row.Scan(
-		&r.ID, &r.Task, &r.Workspace, &r.Status, &r.FableBudget, &r.MaxDepth,
+		&r.ID, &r.Task, &r.Workspace, &r.Status, &r.ReasonBudget, &r.MaxDepth,
 		&r.CreatedAt, &r.EndedAt,
 		&r.RootSessionID, &policySHAsRaw, &r.HyphaTraceID,
 	); err == sql.ErrNoRows {
@@ -141,7 +141,7 @@ func (s *Store) WriteRun(r *scratch.Run) error {
 		               created_at=$7, ended_at=$8, root_session_id=$9,
 		               policy_shas=$10, hypha_trace_id=$11
 		WHERE id=$1`,
-		r.ID, r.Task, r.Workspace, r.Status, r.FableBudget, maxDepth,
+		r.ID, r.Task, r.Workspace, r.Status, r.ReasonBudget, maxDepth,
 		r.CreatedAt, r.EndedAt,
 		r.RootSessionID, policySHAs, r.HyphaTraceID,
 	)
@@ -792,7 +792,7 @@ func buildRunSummaryFromRecords(r *scratch.Run, dispatches []*scratch.Dispatch) 
 		RunID:        r.ID,
 		Task:         r.Task,
 		Status:       r.Status,
-		ReasonBudget: r.FableBudget,
+		ReasonBudget: r.ReasonBudget,
 		PolicySHAs:   r.PolicySHAs,
 	}
 	if !r.CreatedAt.IsZero() {

@@ -13,7 +13,7 @@ type Manifest struct {
 	Task          string            `json:"task"`                // first line of task.md
 	Workspace     string            `json:"workspace"`           // absolute path to workspace root
 	Status        string            `json:"status"`              // created|running|completed|failed|halted
-	FableBudget   int               `json:"reason_budget"`       // max reason-tier dispatches; default 2 (was fable_budget in v1)
+	ReasonBudget  int               `json:"reason_budget"`       // max reason-tier dispatches; default 2 (was fable_budget in v1)
 	MaxDepth      int               `json:"max_depth,omitempty"` // max dispatch depth; 0 means absent → default 4
 	CreatedAt     time.Time         `json:"created_at"`
 	EndedAt       *time.Time        `json:"ended_at,omitempty"`
@@ -59,13 +59,13 @@ func ReadManifest(runDir string) (*Manifest, error) {
 	}
 	// Legacy fallback: if reason_budget is absent (zero) and fable_budget is present,
 	// use fable_budget value. This handles v1 manifest.json files transparently.
-	if m.FableBudget == 0 {
+	if m.ReasonBudget == 0 {
 		var raw map[string]json.RawMessage
 		if err := json.Unmarshal(data, &raw); err == nil {
 			if v, ok := raw["fable_budget"]; ok {
 				var n int
 				if err := json.Unmarshal(v, &n); err == nil && n > 0 {
-					m.FableBudget = n
+					m.ReasonBudget = n
 				}
 			}
 		}

@@ -255,11 +255,11 @@ func makeDispatchTestEnv(t *testing.T) (projectDir, runDir, runID string, st *fs
 	st = fsstore.Open(runsBase)
 
 	r := &scratch.Run{
-		Task:        "dispatch test run",
-		Workspace:   projectDir,
-		Status:      "running",
-		FableBudget: 3,
-		MaxDepth:    4,
+		Task:         "dispatch test run",
+		Workspace:    projectDir,
+		Status:       "running",
+		ReasonBudget: 3,
+		MaxDepth:     4,
 	}
 	var err error
 	runID, err = st.CreateRun(r)

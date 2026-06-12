@@ -23,6 +23,7 @@ package hook
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -443,12 +444,35 @@ func fableTranscript(t *testing.T) string {
 	return p
 }
 
+func fableTranscriptWithUsage(t *testing.T, inputTokens, outputTokens int) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "t.jsonl")
+	line := fmt.Sprintf(`{"type":"assistant","isSidechain":false,"message":{"model":"claude-fable-5","role":"assistant","usage":{"input_tokens":%d,"output_tokens":%d},"content":[{"type":"text","text":"hi"}]}}`+"\n", inputTokens, outputTokens)
+	if err := os.WriteFile(p, []byte(line), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	return p
+}
+
 func codexTranscript(t *testing.T, effort string) string {
 	t.Helper()
 	dir := t.TempDir()
 	p := filepath.Join(dir, "codex.jsonl")
 	line := `{"type":"turn_context","payload":{"model":"gpt-5.5","effort":"` + effort + `"}}` + "\n"
 	if err := os.WriteFile(p, []byte(line), 0o644); err != nil {
+		t.Fatalf("write Codex transcript: %v", err)
+	}
+	return p
+}
+
+func codexTranscriptWithUsage(t *testing.T, effort string, outputTokens int) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "codex.jsonl")
+	lines := `{"type":"turn_context","payload":{"model":"gpt-5.5","effort":"` + effort + `"}}` + "\n" +
+		`{"type":"turn_end","payload":{"usage":{"output_tokens":` + fmt.Sprint(outputTokens) + `}}}` + "\n"
+	if err := os.WriteFile(p, []byte(lines), 0o644); err != nil {
 		t.Fatalf("write Codex transcript: %v", err)
 	}
 	return p
@@ -604,6 +628,67 @@ func TestCodexAmbientApplyPatchDenied(t *testing.T) {
 	}
 	if decision := parseAmbientDecision(t, out); decision != "deny" {
 		t.Fatalf("expected deny, got %q", decision)
+	}
+}
+
+func TestClaudeAmbientGovernedPreToolUseAppendsUsageLedger(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_ROLE", "")
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := fableTranscriptWithUsage(t, 12, 34)
+	event := map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "Edit",
+		"tool_input":      map[string]any{"file_path": filepath.Join(workspace, "foo.go")},
+		"transcript_path": p,
+		"agent_id":        "",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	runHook := func() {
+		t.Helper()
+		var out bytes.Buffer
+		if err := Run(strings.NewReader(string(data)), &out, workspace); err != nil {
+			t.Fatalf("Run error: %v", err)
+		}
+		if decision := parseAmbientDecision(t, bytes.TrimSpace(out.Bytes())); decision != "deny" {
+			t.Fatalf("expected deny, got %q", decision)
+		}
+	}
+	runHook()
+	runHook()
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("ledger event count=%d want 1: %#v", len(events), events)
+	}
+	if events[0].Kind != "claude.ambient_usage" || events[0].Backend != "claude-code" {
+		t.Fatalf("unexpected ledger event: %#v", events[0])
+	}
+	if events[0].TokenUsage == nil || events[0].TokenUsage.InputTokens != 12 || events[0].TokenUsage.OutputTokens != 34 {
+		t.Fatalf("ledger token usage mismatch: %#v", events[0].TokenUsage)
+	}
+	if events[0].ID == "" {
+		t.Fatal("ledger event ID is empty")
+	}
+	hasUsageRef := false
+	for _, ref := range events[0].Refs {
+		if strings.HasPrefix(ref, "usage:") {
+			hasUsageRef = true
+			break
+		}
+	}
+	if !hasUsageRef {
+		t.Fatalf("ledger event missing stable usage ref: %#v", events[0].Refs)
 	}
 }
 
@@ -972,6 +1057,7 @@ func TestCodexLifecycleSessionStartAppendsLedger(t *testing.T) {
 		"hook_event_name": "SessionStart",
 		"transcript_path": p,
 		"model":           "gpt-5.5",
+		"usage":           map[string]any{"output_tokens": 321},
 	}
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -996,6 +1082,9 @@ func TestCodexLifecycleSessionStartAppendsLedger(t *testing.T) {
 	}
 	if events[0].Kind != "codex.session_start" || events[0].Backend != "codex" {
 		t.Fatalf("unexpected ledger event: %#v", events[0])
+	}
+	if events[0].TokenUsage == nil || events[0].TokenUsage.OutputTokens != 321 {
+		t.Fatalf("ledger token usage mismatch: %#v", events[0].TokenUsage)
 	}
 }
 
@@ -1045,6 +1134,7 @@ func TestCodexLifecycleSubagentStartCreatesAgentRunWhenIdentityPresent(t *testin
 		"agent_id":        "backend-agent-123",
 		"agent_type":      "tiller-worker",
 		"model":           "gpt-5.5",
+		"token_usage":     map[string]any{"input_tokens": 111, "output_tokens": 222},
 	}
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -1070,6 +1160,9 @@ func TestCodexLifecycleSubagentStartCreatesAgentRunWhenIdentityPresent(t *testin
 	if events[0].Kind != "codex.subagent_start" || events[0].AgentRunID == "" {
 		t.Fatalf("unexpected ledger event: %#v", events[0])
 	}
+	if events[0].TokenUsage == nil || events[0].TokenUsage.OutputTokens != 222 {
+		t.Fatalf("ledger token usage mismatch: %#v", events[0].TokenUsage)
+	}
 	agents, err := st.ListAgentRuns(filepath.Base(runDir))
 	if err != nil {
 		t.Fatalf("ListAgentRuns: %v", err)
@@ -1080,6 +1173,9 @@ func TestCodexLifecycleSubagentStartCreatesAgentRunWhenIdentityPresent(t *testin
 	if agents[0].BackendAgentID != "backend-agent-123" || agents[0].Role != "worker" || agents[0].Tier != "execute" || agents[0].Status != scratch.AgentRunStatusRunning {
 		t.Fatalf("unexpected agent run: %#v", agents[0])
 	}
+	if agents[0].TokenUsage == nil || agents[0].TokenUsage.InputTokens != 111 || agents[0].TokenUsage.OutputTokens != 222 {
+		t.Fatalf("agent token usage mismatch: %#v", agents[0].TokenUsage)
+	}
 }
 
 func TestCodexLifecycleRootMultiAgentToolAppendsLedgerAndStaysSilent(t *testing.T) {
@@ -1087,7 +1183,7 @@ func TestCodexLifecycleRootMultiAgentToolAppendsLedgerAndStaysSilent(t *testing.
 	runDir := makeAmbientLifecycleRunDir(t, workspace)
 	t.Setenv("TILLER_RUN_DIR", runDir)
 
-	p := codexTranscript(t, "xhigh")
+	p := codexTranscriptWithUsage(t, "xhigh", 654)
 	out := runCodexAmbientHook(t, p, "functions.spawn_agent", map[string]any{
 		"agent_type": "tiller-worker",
 	})
@@ -1105,6 +1201,9 @@ func TestCodexLifecycleRootMultiAgentToolAppendsLedgerAndStaysSilent(t *testing.
 	}
 	if events[0].Kind != "codex.lifecycle_tool" || events[0].Status != scratch.AgentRunStatusRequested {
 		t.Fatalf("unexpected ledger event: %#v", events[0])
+	}
+	if events[0].TokenUsage == nil || events[0].TokenUsage.OutputTokens != 654 {
+		t.Fatalf("ledger token usage mismatch: %#v", events[0].TokenUsage)
 	}
 	if !strings.Contains(events[0].Summary, "functions.spawn_agent") {
 		t.Fatalf("ledger summary missing tool name: %#v", events[0])

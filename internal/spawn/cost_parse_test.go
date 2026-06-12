@@ -67,6 +67,21 @@ func TestParseClaudeResult_RealFormat(t *testing.T) {
 	if cr.IsError {
 		t.Error("IsError = true, want false")
 	}
+	if cr.TokenUsage == nil {
+		t.Fatal("TokenUsage is nil, want parsed usage")
+	}
+	if cr.TokenUsage.InputTokens != 5000 {
+		t.Errorf("InputTokens = %d, want 5000", cr.TokenUsage.InputTokens)
+	}
+	if cr.TokenUsage.OutputTokens != 800 {
+		t.Errorf("OutputTokens = %d, want 800", cr.TokenUsage.OutputTokens)
+	}
+	if cr.TokenUsage.CacheCreationInputTokens != 10000 {
+		t.Errorf("CacheCreationInputTokens = %d, want 10000", cr.TokenUsage.CacheCreationInputTokens)
+	}
+	if cr.TokenUsage.CacheReadInputTokens != 2000 {
+		t.Errorf("CacheReadInputTokens = %d, want 2000", cr.TokenUsage.CacheReadInputTokens)
+	}
 }
 
 // TestParseClaudeResult_RealFormat_Inline verifies the real format inline
@@ -90,5 +105,20 @@ func TestParseClaudeResult_RealFormat_Inline(t *testing.T) {
 	}
 	if cr.SessionID != "sess-abc" {
 		t.Errorf("SessionID = %q, want sess-abc", cr.SessionID)
+	}
+}
+
+func TestParseClaudeResult_LegacyUsage(t *testing.T) {
+	input := []byte(`{"type":"result","result":"stub report","cost_usd":0.001,"num_turns":1,"session_id":"stub-session-99","is_error":false,"usage":{"input_tokens":12,"output_tokens":34,"total_tokens":46}}` + "\n")
+
+	cr, err := parseClaudeResult(input)
+	if err != nil {
+		t.Fatalf("parseClaudeResult legacy usage: %v", err)
+	}
+	if cr.TokenUsage == nil {
+		t.Fatal("TokenUsage is nil, want parsed usage")
+	}
+	if cr.TokenUsage.InputTokens != 12 || cr.TokenUsage.OutputTokens != 34 || cr.TokenUsage.TotalTokens != 46 {
+		t.Fatalf("TokenUsage mismatch: %#v", cr.TokenUsage)
 	}
 }

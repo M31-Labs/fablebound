@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"m31labs.dev/tiller/internal/harness"
+	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/tier"
 )
 
@@ -169,6 +170,70 @@ func latestModelEffort(transcriptPath string) (model, effort string, ok bool) {
 		return "", "", false
 	}
 	return lastModel, lastEffort, true
+}
+
+// LatestTokenUsage returns the latest token usage object visible in the tail of
+// a Codex JSONL transcript. It is intentionally best-effort and bounded to the
+// same tail window used for hot-path model detection.
+func LatestTokenUsage(transcriptPath string) *scratch.TokenUsage {
+	if transcriptPath == "" {
+		return nil
+	}
+	f, err := os.Open(transcriptPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	const maxLines = 400
+	tail, err := tailLines(f, maxLines)
+	if err != nil {
+		return nil
+	}
+	for _, line := range slices.Backward(tail) {
+		if usage := tokenUsageFromLine(line); usage != nil {
+			return usage
+		}
+	}
+	return nil
+}
+
+func tokenUsageFromLine(line string) *scratch.TokenUsage {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(line), &raw); err != nil {
+		return nil
+	}
+	for _, key := range []string{"token_usage", "usage"} {
+		if usage := decodeTokenUsage(raw[key]); usage != nil {
+			return usage
+		}
+	}
+	for _, key := range []string{"payload", "message"} {
+		var nested map[string]json.RawMessage
+		if err := json.Unmarshal(raw[key], &nested); err != nil {
+			continue
+		}
+		for _, usageKey := range []string{"token_usage", "usage"} {
+			if usage := decodeTokenUsage(nested[usageKey]); usage != nil {
+				return usage
+			}
+		}
+	}
+	return nil
+}
+
+func decodeTokenUsage(data json.RawMessage) *scratch.TokenUsage {
+	if len(data) == 0 {
+		return nil
+	}
+	var usage scratch.TokenUsage
+	if err := json.Unmarshal(data, &usage); err != nil {
+		return nil
+	}
+	if usage.Empty() {
+		return nil
+	}
+	return &usage
 }
 
 // NormalizeModelEffort combines a Codex model and reasoning effort into the

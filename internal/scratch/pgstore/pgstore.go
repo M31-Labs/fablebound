@@ -231,7 +231,7 @@ func (s *Store) ReadDispatch(runID, dispatchID string) (*scratch.Dispatch, error
 	row := s.db.db.QueryRowContext(context.Background(), `
 		SELECT id, parent_id, role, model, profile, status, depth,
 		       supervisor_pid, max_turns, timeout_minutes, started_at, ended_at,
-		       exit_code, cost_usd, num_turns, session_id, tier, enforcement,
+		       exit_code, cost_usd, num_turns, session_id, token_usage, tier, enforcement,
 		       sandbox_spec, claimed_by, lease_until, adapter_name, provider, deny_reason
 		FROM dispatch WHERE run_id=$1 AND id=$2`, runID, dispatchID)
 	return scanDispatch(row)
@@ -247,19 +247,19 @@ func (s *Store) WriteDispatch(runID string, d *scratch.Dispatch) error {
 		INSERT INTO dispatch (
 			run_id, id, parent_id, role, model, profile, status, depth,
 			supervisor_pid, max_turns, timeout_minutes, started_at, ended_at,
-			exit_code, cost_usd, num_turns, session_id, tier, enforcement,
+			exit_code, cost_usd, num_turns, session_id, token_usage, tier, enforcement,
 			sandbox_spec, claimed_by, lease_until, adapter_name, provider, deny_reason)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
 		ON CONFLICT (run_id, id) DO UPDATE SET
 			parent_id=$3, role=$4, model=$5, profile=$6, status=$7, depth=$8,
 			supervisor_pid=$9, max_turns=$10, timeout_minutes=$11, started_at=$12,
 			ended_at=$13, exit_code=$14, cost_usd=$15, num_turns=$16, session_id=$17,
-			tier=$18, enforcement=$19, sandbox_spec=$20, claimed_by=$21, lease_until=$22,
-			adapter_name=$23, provider=$24, deny_reason=$25`,
+			token_usage=$18, tier=$19, enforcement=$20, sandbox_spec=$21, claimed_by=$22, lease_until=$23,
+			adapter_name=$24, provider=$25, deny_reason=$26`,
 		runID, d.ID, d.Parent, d.Role, d.Model, d.Profile, d.Status, d.Depth,
 		d.SupervisorPID, d.MaxTurns, d.TimeoutMinutes, d.StartedAt, d.EndedAt,
 		d.Exit, d.CostUSD, d.NumTurns, d.SessionID,
-		d.Tier, d.Enforcement, sandboxSpec, d.ClaimedBy, d.LeaseUntil,
+		mustMarshalTokenUsage(d.TokenUsage), d.Tier, d.Enforcement, sandboxSpec, d.ClaimedBy, d.LeaseUntil,
 		d.Adapter, d.Provider, d.DenyReason,
 	)
 	if err != nil {
@@ -273,7 +273,7 @@ func (s *Store) ListDispatches(runID string) ([]*scratch.Dispatch, error) {
 	rows, err := s.db.db.QueryContext(context.Background(), `
 		SELECT id, parent_id, role, model, profile, status, depth,
 		       supervisor_pid, max_turns, timeout_minutes, started_at, ended_at,
-		       exit_code, cost_usd, num_turns, session_id, tier, enforcement,
+		       exit_code, cost_usd, num_turns, session_id, token_usage, tier, enforcement,
 		       sandbox_spec, claimed_by, lease_until, adapter_name, provider, deny_reason
 		FROM dispatch WHERE run_id=$1 ORDER BY id`, runID)
 	if err != nil {
@@ -366,18 +366,18 @@ func (s *Store) WriteAgentRun(runID string, ar *scratch.AgentRun) error {
 	_, err = s.db.db.ExecContext(context.Background(), `
 		INSERT INTO agent_run (
 			run_id, id, dispatch_id, backend, backend_agent_id, role, tier, model,
-			effort, parent_run_id, parent_agent_id, base_git_rev, base_dirty_hash,
+			effort, token_usage, parent_run_id, parent_agent_id, base_git_rev, base_dirty_hash,
 			claimed_paths, spawned_at, completed_at, reported_at, status,
 			changed_files, verification, caveats, diff_hash, summary, refs)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
 		ON CONFLICT (run_id, id) DO UPDATE SET
 			dispatch_id=$3, backend=$4, backend_agent_id=$5, role=$6, tier=$7, model=$8,
-			effort=$9, parent_run_id=$10, parent_agent_id=$11, base_git_rev=$12,
-			base_dirty_hash=$13, claimed_paths=$14, spawned_at=$15, completed_at=$16,
-			reported_at=$17, status=$18, changed_files=$19, verification=$20,
-			caveats=$21, diff_hash=$22, summary=$23, refs=$24`,
+			effort=$9, token_usage=$10, parent_run_id=$11, parent_agent_id=$12, base_git_rev=$13,
+			base_dirty_hash=$14, claimed_paths=$15, spawned_at=$16, completed_at=$17,
+			reported_at=$18, status=$19, changed_files=$20, verification=$21,
+			caveats=$22, diff_hash=$23, summary=$24, refs=$25`,
 		runID, ar.ID, ar.DispatchID, ar.Backend, ar.BackendAgentID, ar.Role, ar.Tier,
-		ar.Model, ar.Effort, ar.ParentRunID, ar.ParentAgentID, ar.BaseGitRev,
+		ar.Model, ar.Effort, mustMarshalTokenUsage(ar.TokenUsage), ar.ParentRunID, ar.ParentAgentID, ar.BaseGitRev,
 		ar.BaseDirtyHash, claimedPaths, ar.SpawnedAt, ar.CompletedAt, ar.ReportedAt,
 		ar.Status, changedFiles, verification, caveats, ar.DiffHash, ar.Summary, refs,
 	)
@@ -391,7 +391,7 @@ func (s *Store) WriteAgentRun(runID string, ar *scratch.AgentRun) error {
 func (s *Store) ListAgentRuns(runID string) ([]*scratch.AgentRun, error) {
 	rows, err := s.db.db.QueryContext(context.Background(), `
 		SELECT id, dispatch_id, backend, backend_agent_id, role, tier, model,
-		       effort, parent_run_id, parent_agent_id, base_git_rev, base_dirty_hash,
+		       effort, token_usage, parent_run_id, parent_agent_id, base_git_rev, base_dirty_hash,
 		       claimed_paths, spawned_at, completed_at, reported_at, status,
 		       changed_files, verification, caveats, diff_hash, summary, refs
 		FROM agent_run WHERE run_id=$1 ORDER BY id`, runID)
@@ -403,15 +403,18 @@ func (s *Store) ListAgentRuns(runID string) ([]*scratch.AgentRun, error) {
 	var out []*scratch.AgentRun
 	for rows.Next() {
 		ar := &scratch.AgentRun{RunID: runID}
-		var claimedPaths, changedFiles, verification, caveats, refs []byte
+		var claimedPaths, changedFiles, verification, caveats, refs, tokenUsage []byte
 		if err := rows.Scan(
 			&ar.ID, &ar.DispatchID, &ar.Backend, &ar.BackendAgentID, &ar.Role,
-			&ar.Tier, &ar.Model, &ar.Effort, &ar.ParentRunID, &ar.ParentAgentID,
+			&ar.Tier, &ar.Model, &ar.Effort, &tokenUsage, &ar.ParentRunID, &ar.ParentAgentID,
 			&ar.BaseGitRev, &ar.BaseDirtyHash, &claimedPaths, &ar.SpawnedAt,
 			&ar.CompletedAt, &ar.ReportedAt, &ar.Status, &changedFiles,
 			&verification, &caveats, &ar.DiffHash, &ar.Summary, &refs,
 		); err != nil {
 			return nil, fmt.Errorf("pgstore.ListAgentRuns scan: %w", err)
+		}
+		if err := unmarshalTokenUsage(tokenUsage, &ar.TokenUsage); err != nil {
+			return nil, fmt.Errorf("pgstore.ListAgentRuns token_usage: %w", err)
 		}
 		if err := unmarshalStringSlice(claimedPaths, &ar.ClaimedPaths); err != nil {
 			return nil, fmt.Errorf("pgstore.ListAgentRuns claimed_paths: %w", err)
@@ -548,10 +551,10 @@ func (s *Store) AppendLedgerEvent(runID string, ev scratch.LedgerEvent) error {
 	_, err = s.db.db.ExecContext(context.Background(), `
 		INSERT INTO ledger_event (
 			id, run_id, agent_run_id, checkpoint_candidate_id, dispatch_id,
-			backend, kind, status, at, summary, refs)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+			backend, kind, status, at, token_usage, summary, refs)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 		ev.ID, runID, ev.AgentRunID, ev.CheckpointCandidate, ev.DispatchID,
-		ev.Backend, ev.Kind, ev.Status, ev.At, ev.Summary, refs,
+		ev.Backend, ev.Kind, ev.Status, ev.At, mustMarshalTokenUsage(ev.TokenUsage), ev.Summary, refs,
 	)
 	if err != nil {
 		return fmt.Errorf("pgstore.AppendLedgerEvent %s/%s: %w", runID, ev.ID, err)
@@ -563,7 +566,7 @@ func (s *Store) AppendLedgerEvent(runID string, ev scratch.LedgerEvent) error {
 func (s *Store) ListLedgerEvents(runID string) ([]scratch.LedgerEvent, error) {
 	rows, err := s.db.db.QueryContext(context.Background(), `
 		SELECT id, agent_run_id, checkpoint_candidate_id, dispatch_id, backend,
-		       kind, status, at, summary, refs
+		       kind, status, at, token_usage, summary, refs
 		FROM ledger_event WHERE run_id=$1 ORDER BY seq`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("pgstore.ListLedgerEvents %s: %w", runID, err)
@@ -573,12 +576,15 @@ func (s *Store) ListLedgerEvents(runID string) ([]scratch.LedgerEvent, error) {
 	var out []scratch.LedgerEvent
 	for rows.Next() {
 		ev := scratch.LedgerEvent{RunID: runID}
-		var refs []byte
+		var refs, tokenUsage []byte
 		if err := rows.Scan(
 			&ev.ID, &ev.AgentRunID, &ev.CheckpointCandidate, &ev.DispatchID,
-			&ev.Backend, &ev.Kind, &ev.Status, &ev.At, &ev.Summary, &refs,
+			&ev.Backend, &ev.Kind, &ev.Status, &ev.At, &tokenUsage, &ev.Summary, &refs,
 		); err != nil {
 			return nil, fmt.Errorf("pgstore.ListLedgerEvents scan: %w", err)
+		}
+		if err := unmarshalTokenUsage(tokenUsage, &ev.TokenUsage); err != nil {
+			return nil, fmt.Errorf("pgstore.ListLedgerEvents token_usage: %w", err)
 		}
 		if err := unmarshalStringSlice(refs, &ev.Refs); err != nil {
 			return nil, fmt.Errorf("pgstore.ListLedgerEvents refs: %w", err)
@@ -890,11 +896,12 @@ type rowScanner interface {
 func scanDispatch(row rowScanner) (*scratch.Dispatch, error) {
 	d := &scratch.Dispatch{}
 	var sandboxSpec string
+	var tokenUsage []byte
 	err := row.Scan(
 		&d.ID, &d.Parent, &d.Role, &d.Model, &d.Profile,
 		&d.Status, &d.Depth, &d.SupervisorPID, &d.MaxTurns, &d.TimeoutMinutes,
 		&d.StartedAt, &d.EndedAt, &d.Exit, &d.CostUSD, &d.NumTurns,
-		&d.SessionID, &d.Tier, &d.Enforcement, &sandboxSpec, &d.ClaimedBy, &d.LeaseUntil,
+		&d.SessionID, &tokenUsage, &d.Tier, &d.Enforcement, &sandboxSpec, &d.ClaimedBy, &d.LeaseUntil,
 		&d.Adapter, &d.Provider, &d.DenyReason,
 	)
 	if err == sql.ErrNoRows {
@@ -902,6 +909,9 @@ func scanDispatch(row rowScanner) (*scratch.Dispatch, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	if err := unmarshalTokenUsage(tokenUsage, &d.TokenUsage); err != nil {
+		return nil, fmt.Errorf("decode token_usage: %w", err)
 	}
 	if sandboxSpec != "" {
 		var rec sandbox.Record
@@ -972,6 +982,34 @@ func marshalStringSlice(v []string) ([]byte, error) {
 		return []byte("[]"), nil
 	}
 	return json.Marshal(v)
+}
+
+func mustMarshalTokenUsage(v *scratch.TokenUsage) []byte {
+	if v == nil || v.Empty() {
+		return []byte("{}")
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return []byte("{}")
+	}
+	return data
+}
+
+func unmarshalTokenUsage(data []byte, out **scratch.TokenUsage) error {
+	if len(data) == 0 || string(data) == "{}" {
+		*out = nil
+		return nil
+	}
+	var usage scratch.TokenUsage
+	if err := json.Unmarshal(data, &usage); err != nil {
+		return err
+	}
+	if usage.Empty() {
+		*out = nil
+		return nil
+	}
+	*out = &usage
+	return nil
 }
 
 func unmarshalStringSlice(data []byte, out *[]string) error {
@@ -1139,20 +1177,35 @@ func dispatchNodeToSummary(n *scratch.DispatchNode) *run.DispatchSummary {
 	}
 	d := n.Dispatch
 	ds := &run.DispatchSummary{
-		ID:       d.ID,
-		Parent:   d.Parent,
-		Role:     d.Role,
-		Model:    d.Model,
-		Profile:  d.Profile,
-		Status:   d.Status,
-		Depth:    d.Depth,
-		CostUSD:  d.CostUSD,
-		NumTurns: d.NumTurns,
+		ID:         d.ID,
+		Parent:     d.Parent,
+		Role:       d.Role,
+		Model:      d.Model,
+		Profile:    d.Profile,
+		Status:     d.Status,
+		Depth:      d.Depth,
+		CostUSD:    d.CostUSD,
+		NumTurns:   d.NumTurns,
+		TokenUsage: pgTokenUsageToRun(d.TokenUsage),
 	}
 	for _, child := range n.Children {
 		ds.Children = append(ds.Children, dispatchNodeToSummary(child))
 	}
 	return ds
+}
+
+func pgTokenUsageToRun(u *scratch.TokenUsage) *run.TokenUsage {
+	if u == nil || u.Empty() {
+		return nil
+	}
+	return &run.TokenUsage{
+		InputTokens:              u.InputTokens,
+		OutputTokens:             u.OutputTokens,
+		CacheCreationInputTokens: u.CacheCreationInputTokens,
+		CacheReadInputTokens:     u.CacheReadInputTokens,
+		ReasoningTokens:          u.ReasoningTokens,
+		TotalTokens:              u.TotalTokens,
+	}
 }
 
 // ── spool file reader (for diagnostics / shipping) ────────────────────────────

@@ -706,15 +706,16 @@ func fsDispatchNodeToSummary(n *scratch.DispatchNode, runDir string) *run.Dispat
 	d := n.Dispatch
 
 	ds := &run.DispatchSummary{
-		ID:       d.ID,
-		Parent:   d.Parent,
-		Role:     d.Role,
-		Model:    d.Model,
-		Profile:  d.Profile,
-		Status:   dispatchEffectiveStatus(d, runDir),
-		Depth:    d.Depth,
-		CostUSD:  d.CostUSD,
-		NumTurns: d.NumTurns,
+		ID:         d.ID,
+		Parent:     d.Parent,
+		Role:       d.Role,
+		Model:      d.Model,
+		Profile:    d.Profile,
+		Status:     dispatchEffectiveStatus(d, runDir),
+		Depth:      d.Depth,
+		CostUSD:    d.CostUSD,
+		NumTurns:   d.NumTurns,
+		TokenUsage: fsTokenUsageToRun(d.TokenUsage),
 	}
 
 	// Set report path if the file exists on disk.
@@ -730,6 +731,20 @@ func fsDispatchNodeToSummary(n *scratch.DispatchNode, runDir string) *run.Dispat
 	}
 
 	return ds
+}
+
+func fsTokenUsageToRun(u *scratch.TokenUsage) *run.TokenUsage {
+	if u == nil || u.Empty() {
+		return nil
+	}
+	return &run.TokenUsage{
+		InputTokens:              u.InputTokens,
+		OutputTokens:             u.OutputTokens,
+		CacheCreationInputTokens: u.CacheCreationInputTokens,
+		CacheReadInputTokens:     u.CacheReadInputTokens,
+		ReasoningTokens:          u.ReasoningTokens,
+		TotalTokens:              u.TotalTokens,
+	}
 }
 
 // BuildDispatchTree returns the full dispatch tree for runID as a *scratch.DispatchNode.

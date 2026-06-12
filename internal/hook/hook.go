@@ -392,17 +392,19 @@ func canonPath(p string) string {
 
 // HookEventFull is a superset HookEvent that also captures ambient-mode fields.
 type HookEventFull struct {
-	HookEventName        string          `json:"hook_event_name"`
-	ToolName             string          `json:"tool_name"`
-	ToolInput            json.RawMessage `json:"tool_input"`
-	ToolResponse         json.RawMessage `json:"tool_response"`
-	TranscriptPath       string          `json:"transcript_path"`
-	AgentID              string          `json:"agent_id"`
-	AgentType            string          `json:"agent_type"`
-	Model                string          `json:"model"`
-	Effort               string          `json:"effort"`
-	ReasoningEffort      string          `json:"reasoning_effort"`
-	ModelReasoningEffort string          `json:"model_reasoning_effort"`
+	HookEventName        string              `json:"hook_event_name"`
+	ToolName             string              `json:"tool_name"`
+	ToolInput            json.RawMessage     `json:"tool_input"`
+	ToolResponse         json.RawMessage     `json:"tool_response"`
+	TranscriptPath       string              `json:"transcript_path"`
+	AgentID              string              `json:"agent_id"`
+	AgentType            string              `json:"agent_type"`
+	Model                string              `json:"model"`
+	Effort               string              `json:"effort"`
+	ReasoningEffort      string              `json:"reasoning_effort"`
+	ModelReasoningEffort string              `json:"model_reasoning_effort"`
+	Usage                *scratch.TokenUsage `json:"usage,omitempty"`
+	TokenUsage           *scratch.TokenUsage `json:"token_usage,omitempty"`
 }
 
 // handleAmbientPreToolUse evaluates the ambient policy for a governed ambient
@@ -730,6 +732,10 @@ func runAmbient(stdin io.Reader, stdout io.Writer, workspaceDir, backend string)
 	if !governed {
 		// Not governed — ambient mode is invisible.
 		return nil
+	}
+
+	if backend == "claude-code" {
+		appendClaudeAmbientUsageLedger(full)
 	}
 
 	if backend == "codex" && isCodexMultiAgentLifecycleTool(full.ToolName) {

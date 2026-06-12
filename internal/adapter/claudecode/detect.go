@@ -13,6 +13,7 @@ import (
 	"os"
 	"slices"
 
+	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/tier"
 )
 
@@ -31,6 +32,15 @@ type transcriptAssistantLine struct {
 	AgentID     string `json:"agentId"`
 	Message     struct {
 		Model string `json:"model"`
+	} `json:"message"`
+}
+
+type transcriptUsageLine struct {
+	Type        string `json:"type"`
+	IsSidechain *bool  `json:"isSidechain"`
+	AgentID     string `json:"agentId"`
+	Message     struct {
+		Usage scratch.TokenUsage `json:"usage"`
 	} `json:"message"`
 }
 
@@ -249,6 +259,45 @@ func DetectTierWithConfig(transcriptPath string, ambient *tier.AmbientConfig) (t
 		return tierName, true
 	}
 	return "", false
+}
+
+// LatestTokenUsage returns the latest root assistant message usage visible in
+// the tail of a Claude Code JSONL transcript. It is bounded to the same tail
+// window used for hot-path model detection and returns nil when usage is absent
+// or only present on sidechain/subagent lines.
+func LatestTokenUsage(transcriptPath string) *scratch.TokenUsage {
+	if transcriptPath == "" {
+		return nil
+	}
+	f, err := os.Open(transcriptPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	const maxLines = 400
+	tail, err := tailLines(f, maxLines)
+	if err != nil {
+		return nil
+	}
+	for _, line := range slices.Backward(tail) {
+		var tl transcriptUsageLine
+		if err := json.Unmarshal([]byte(line), &tl); err != nil {
+			continue
+		}
+		if tl.Type != "assistant" {
+			continue
+		}
+		if tl.IsSidechain != nil && *tl.IsSidechain {
+			continue
+		}
+		if tl.Message.Usage.Empty() {
+			continue
+		}
+		usage := tl.Message.Usage
+		return &usage
+	}
+	return nil
 }
 
 // IsFableModel reports whether model is a fable-tier model ID.

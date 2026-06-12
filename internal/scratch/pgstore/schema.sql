@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS dispatch (
     cost_usd         NUMERIC(12,6) NOT NULL DEFAULT 0,
     num_turns        INTEGER     NOT NULL DEFAULT 0,
     session_id       TEXT        NOT NULL DEFAULT '',
+    token_usage      JSONB       NOT NULL DEFAULT '{}',
     -- v2 tier / enforcement fields
     tier             TEXT        NOT NULL DEFAULT '',         -- reason|scrutiny|execute
     enforcement      TEXT        NOT NULL DEFAULT 'full',     -- full|degraded|sandboxed
@@ -95,6 +96,9 @@ ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS deny_reason TEXT NOT NULL DEFAULT 
 -- Stores a JSON sandbox.Record so queryable mirrors retain sandbox provenance.
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS sandbox_spec TEXT NOT NULL DEFAULT '';
 
+-- Idempotent migration: add provider-neutral token accounting metadata.
+ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS token_usage JSONB NOT NULL DEFAULT '{}';
+
 -- agent_run stores backend lifecycle metadata for abstracted interactive and
 -- non-interactive agents.
 CREATE TABLE IF NOT EXISTS agent_run (
@@ -107,6 +111,7 @@ CREATE TABLE IF NOT EXISTS agent_run (
     tier               TEXT        NOT NULL DEFAULT '',
     model              TEXT        NOT NULL DEFAULT '',
     effort             TEXT        NOT NULL DEFAULT '',
+    token_usage        JSONB       NOT NULL DEFAULT '{}',
     parent_run_id      TEXT        NOT NULL DEFAULT '',
     parent_agent_id    TEXT        NOT NULL DEFAULT '',
     base_git_rev       TEXT        NOT NULL DEFAULT '',
@@ -129,6 +134,7 @@ CREATE INDEX IF NOT EXISTS agent_run_run_id_idx ON agent_run (run_id);
 CREATE INDEX IF NOT EXISTS agent_run_status_idx ON agent_run (status);
 
 ALTER TABLE agent_run ALTER COLUMN status SET DEFAULT 'spawned';
+ALTER TABLE agent_run ADD COLUMN IF NOT EXISTS token_usage JSONB NOT NULL DEFAULT '{}';
 
 -- checkpoint_candidate stores append-only checkpoint reports that must be
 -- freshness-checked against base_git_rev/base_dirty_hash before commit.
@@ -175,12 +181,14 @@ CREATE TABLE IF NOT EXISTS ledger_event (
     kind                    TEXT        NOT NULL DEFAULT '',
     status                  TEXT        NOT NULL DEFAULT '',
     at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    token_usage             JSONB       NOT NULL DEFAULT '{}',
     summary                 TEXT        NOT NULL DEFAULT '',
     refs                    JSONB       NOT NULL DEFAULT '[]'
 );
 
 CREATE INDEX IF NOT EXISTS ledger_event_run_id_idx ON ledger_event (run_id);
 CREATE INDEX IF NOT EXISTS ledger_event_kind_idx   ON ledger_event (kind);
+ALTER TABLE ledger_event ADD COLUMN IF NOT EXISTS token_usage JSONB NOT NULL DEFAULT '{}';
 
 -- dispatch_seq is an atomic per-run dispatch counter for AllocDispatch.
 -- One row per run; next_n is incremented atomically via INSERT ... ON CONFLICT.
@@ -314,4 +322,8 @@ ON CONFLICT (version) DO NOTHING;
 
 INSERT INTO schema_version (version, description)
 VALUES (10, 'align agent and checkpoint lifecycle status vocabulary')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO schema_version (version, description)
+VALUES (11, 'add provider-neutral token usage metadata')
 ON CONFLICT (version) DO NOTHING;

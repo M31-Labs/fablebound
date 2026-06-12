@@ -3,6 +3,7 @@ package codex
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -110,5 +111,32 @@ func TestDetectTierWithConfig_CollaborationModeEffort(t *testing.T) {
 	tierName, ok := DetectTierWithConfig("", path, testAmbient())
 	if !ok || tierName != "reason" {
 		t.Fatalf("got (%q, %v), want (reason, true)", tierName, ok)
+	}
+}
+
+func TestLatestTokenUsageUsesBoundedTail(t *testing.T) {
+	lines := []string{
+		`{"type":"turn_end","payload":{"usage":{"output_tokens":1}}}`,
+	}
+	for i := 0; i < 410; i++ {
+		lines = append(lines, `{"type":"event","payload":{"i":`+strconv.Itoa(i)+`}}`)
+	}
+	path := writeTranscript(t, lines...)
+
+	if usage := LatestTokenUsage(path); usage != nil {
+		t.Fatalf("old usage outside tail should not be returned: %#v", usage)
+	}
+
+	lines = append(lines,
+		`{"type":"turn_context","payload":{"model":"gpt-5.5","effort":"xhigh"}}`,
+		`{"type":"turn_end","payload":{"usage":{"input_tokens":22,"output_tokens":654}}}`,
+	)
+	path = writeTranscript(t, lines...)
+	usage := LatestTokenUsage(path)
+	if usage == nil {
+		t.Fatal("LatestTokenUsage returned nil")
+	}
+	if usage.InputTokens != 22 || usage.OutputTokens != 654 {
+		t.Fatalf("usage mismatch: %#v", usage)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	codexadapter "m31labs.dev/tiller/internal/adapter/codex"
 	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/scratch/fsstore"
 )
@@ -26,6 +27,7 @@ func appendCodexLifecycleRecord(full HookEventFull) {
 	now := time.Now().UTC()
 
 	agentType := codexAgentType(full)
+	tokenUsage := codexTokenUsage(full)
 	agentRunID := ""
 	if full.HookEventName == "SubagentStart" && full.AgentID != "" {
 		agentRunID = codexAgentRunID(full.AgentID)
@@ -37,6 +39,7 @@ func appendCodexLifecycleRecord(full HookEventFull) {
 			Role:           codexAgentRole(agentType),
 			Tier:           codexAgentTier(agentType),
 			Model:          full.Model,
+			TokenUsage:     tokenUsage,
 			SpawnedAt:      now,
 			Status:         scratch.AgentRunStatusRunning,
 		}
@@ -50,6 +53,7 @@ func appendCodexLifecycleRecord(full HookEventFull) {
 		Kind:       codexLedgerKind(full),
 		Status:     codexLifecycleStatus(full),
 		At:         now,
+		TokenUsage: tokenUsage,
 		Summary:    codexLifecycleSummary(full),
 		Refs:       codexLifecycleRefs(full),
 	}
@@ -149,6 +153,19 @@ func codexLedgerEventID(full HookEventFull, at time.Time) string {
 func codexAgentRunID(backendAgentID string) string {
 	sum := sha256.Sum256([]byte("codex-agent\x00" + backendAgentID))
 	return "codex-agent-" + hex.EncodeToString(sum[:8])
+}
+
+func codexTokenUsage(full HookEventFull) *scratch.TokenUsage {
+	for _, usage := range []*scratch.TokenUsage{full.TokenUsage, full.Usage} {
+		if usage != nil && !usage.Empty() {
+			cp := *usage
+			return &cp
+		}
+	}
+	if usage := codexadapter.LatestTokenUsage(full.TranscriptPath); usage != nil {
+		return usage
+	}
+	return nil
 }
 
 func codexAgentRole(agentType string) string {

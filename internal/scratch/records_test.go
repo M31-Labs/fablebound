@@ -57,6 +57,7 @@ func TestLifecycleRecordsJSONRoundtrip(t *testing.T) {
 		Tier:           "execute",
 		Model:          "gpt-5.5",
 		Effort:         "medium",
+		TokenUsage:     &TokenUsage{InputTokens: 100, OutputTokens: 25, ReasoningTokens: 7},
 		ParentRunID:    "parent-run",
 		ParentAgentID:  "parent-agent",
 		BaseGitRev:     "abc123",
@@ -84,6 +85,9 @@ func TestLifecycleRecordsJSONRoundtrip(t *testing.T) {
 	}
 	if got.ID != ar.ID || got.BaseGitRev != ar.BaseGitRev || got.Status != ar.Status {
 		t.Fatalf("AgentRun mismatch: got %#v want %#v", got, ar)
+	}
+	if got.TokenUsage == nil || got.TokenUsage.InputTokens != 100 || got.TokenUsage.OutputTokens != 25 {
+		t.Fatalf("AgentRun token usage mismatch: got %#v", got.TokenUsage)
 	}
 
 	candidate := CheckpointCandidate{
@@ -117,6 +121,7 @@ func TestLifecycleRecordsJSONRoundtrip(t *testing.T) {
 		CheckpointCandidate: candidate.ID,
 		Kind:                "checkpoint_candidate",
 		At:                  reportedAt,
+		TokenUsage:          &TokenUsage{OutputTokens: 9},
 		Summary:             "candidate reported",
 		Refs:                []string{"checkpoint_candidates.jsonl"},
 	}
@@ -130,5 +135,34 @@ func TestLifecycleRecordsJSONRoundtrip(t *testing.T) {
 	}
 	if gotEvent.ID != event.ID || gotEvent.CheckpointCandidate != event.CheckpointCandidate {
 		t.Fatalf("LedgerEvent mismatch: got %#v want %#v", gotEvent, event)
+	}
+	if gotEvent.TokenUsage == nil || gotEvent.TokenUsage.OutputTokens != 9 {
+		t.Fatalf("LedgerEvent token usage mismatch: got %#v", gotEvent.TokenUsage)
+	}
+}
+
+func TestTokenUsageOmittedWhenUnknown(t *testing.T) {
+	data, err := json.Marshal(Dispatch{ID: "d01", Role: "worker"})
+	if err != nil {
+		t.Fatalf("Marshal Dispatch: %v", err)
+	}
+	if string(data) == "" {
+		t.Fatal("empty json")
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal raw dispatch: %v", err)
+	}
+	if _, ok := raw["token_usage"]; ok {
+		t.Fatalf("token_usage should be omitted when unknown: %s", data)
+	}
+
+	u := TokenUsage{}
+	if !u.Empty() {
+		t.Fatal("zero TokenUsage should be empty")
+	}
+	u.OutputTokens = 1
+	if u.Empty() {
+		t.Fatal("non-zero TokenUsage should not be empty")
 	}
 }

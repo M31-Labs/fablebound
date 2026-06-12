@@ -46,6 +46,15 @@ func fixturePath(t *testing.T, name string) string {
 	return p
 }
 
+func writeTranscript(t *testing.T, lines ...string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	return p
+}
+
 // ─── Fix 1: <synthetic> skip ────────────────────────────────────────────────
 
 // TestSyntheticSkip: trailing <synthetic> after real fable line must NOT
@@ -267,6 +276,44 @@ func TestDetectTierLarge(t *testing.T) {
 	}
 	if tier != "reason" {
 		t.Errorf("DetectTier large transcript: got tier=%q, want reason", tier)
+	}
+}
+
+func TestLatestTokenUsageRootAssistantOnly(t *testing.T) {
+	p := writeTranscript(t,
+		`{"type":"assistant","isSidechain":false,"message":{"model":"claude-fable-5","role":"assistant","usage":{"input_tokens":11,"output_tokens":22},"content":[{"type":"text","text":"root"}]}}`,
+		`{"type":"assistant","isSidechain":true,"agentId":"agent-1","message":{"model":"claude-sonnet-4-8","role":"assistant","usage":{"input_tokens":999,"output_tokens":999},"content":[{"type":"text","text":"sidechain"}]}}`,
+	)
+
+	usage := LatestTokenUsage(p)
+	if usage == nil {
+		t.Fatal("LatestTokenUsage returned nil")
+	}
+	if usage.InputTokens != 11 || usage.OutputTokens != 22 {
+		t.Fatalf("usage mismatch: %#v", usage)
+	}
+}
+
+func TestLatestTokenUsageUsesBoundedTail(t *testing.T) {
+	lines := []string{
+		`{"type":"assistant","isSidechain":false,"message":{"model":"claude-fable-5","role":"assistant","usage":{"output_tokens":1},"content":[{"type":"text","text":"old"}]}}`,
+	}
+	for i := 0; i < 410; i++ {
+		lines = append(lines, fmt.Sprintf(`{"type":"tool_result","content":"filler-%d"}`, i))
+	}
+	p := writeTranscript(t, lines...)
+	if usage := LatestTokenUsage(p); usage != nil {
+		t.Fatalf("old usage outside tail should not be returned: %#v", usage)
+	}
+
+	lines = append(lines, `{"type":"assistant","isSidechain":false,"message":{"model":"claude-fable-5","role":"assistant","usage":{"input_tokens":33,"output_tokens":44},"content":[{"type":"text","text":"new"}]}}`)
+	p = writeTranscript(t, lines...)
+	usage := LatestTokenUsage(p)
+	if usage == nil {
+		t.Fatal("LatestTokenUsage returned nil")
+	}
+	if usage.InputTokens != 33 || usage.OutputTokens != 44 {
+		t.Fatalf("usage mismatch: %#v", usage)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"m31labs.dev/arbiter/audit"
+	"m31labs.dev/tiller/internal/run"
 	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/scratch/pgstore"
 )
@@ -105,6 +106,9 @@ func TestRunCRUD(t *testing.T) {
 	}
 	if got.ReasonBudget != r.ReasonBudget {
 		t.Errorf("ReadRun.ReasonBudget: got %d, want %d", got.ReasonBudget, r.ReasonBudget)
+	}
+	if got.MaxDepth != run.DefaultMaxDepth {
+		t.Errorf("ReadRun.MaxDepth default: got %d, want %d", got.MaxDepth, run.DefaultMaxDepth)
 	}
 	if got.RootSessionID != r.RootSessionID {
 		t.Errorf("ReadRun.RootSessionID: got %q, want %q", got.RootSessionID, r.RootSessionID)

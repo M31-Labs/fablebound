@@ -61,6 +61,30 @@ type Store interface {
 	// Subsumes run.ActiveCount + run.FableCount.
 	DispatchFacts(runID string) (Facts, error)
 
+	// ── Agent / checkpoint lifecycle records ─────────────────────────────────
+
+	// CreateAgentRun stores a newly spawned agent lifecycle record.
+	CreateAgentRun(runID string, ar *AgentRun) error
+
+	// WriteAgentRun updates an agent lifecycle record.
+	WriteAgentRun(runID string, ar *AgentRun) error
+
+	// ListAgentRuns returns all agent lifecycle records for a run.
+	ListAgentRuns(runID string) ([]*AgentRun, error)
+
+	// AppendCheckpointCandidate records a checkpoint candidate for later
+	// freshness checks and review.
+	AppendCheckpointCandidate(runID string, c CheckpointCandidate) error
+
+	// ListCheckpointCandidates returns checkpoint candidates in append order.
+	ListCheckpointCandidates(runID string) ([]CheckpointCandidate, error)
+
+	// AppendLedgerEvent records an append-only lifecycle event.
+	AppendLedgerEvent(runID string, ev LedgerEvent) error
+
+	// ListLedgerEvents returns ledger events in append order.
+	ListLedgerEvents(runID string) ([]LedgerEvent, error)
+
 	// ── Document records ───────────────────────────────────────────────────────
 
 	// WriteBrief writes the brief document for a dispatch (brief.md).

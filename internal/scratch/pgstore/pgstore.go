@@ -27,6 +27,7 @@ import (
 
 	"m31labs.dev/tiller/internal/auditlog"
 	"m31labs.dev/tiller/internal/run"
+	"m31labs.dev/tiller/internal/sandbox"
 	"m31labs.dev/tiller/internal/scratch"
 
 	"m31labs.dev/arbiter/audit"
@@ -82,7 +83,7 @@ func (s *Store) CreateRun(r *scratch.Run) (string, error) {
 
 	maxDepth := r.MaxDepth
 	if maxDepth == 0 {
-		maxDepth = 4 // spec §4.3 default
+		maxDepth = run.DefaultMaxDepth
 	}
 	_, err = s.db.db.ExecContext(context.Background(), `
 		INSERT INTO run (id, task, workspace, status, reason_budget, max_depth, created_at, ended_at,
@@ -121,7 +122,7 @@ func (s *Store) ReadRun(runID string) (*scratch.Run, error) {
 	}
 	// Apply default when column is zero (pre-migration rows).
 	if r.MaxDepth == 0 {
-		r.MaxDepth = 4
+		r.MaxDepth = run.DefaultMaxDepth
 	}
 	return r, nil
 }
@@ -134,7 +135,7 @@ func (s *Store) WriteRun(r *scratch.Run) error {
 	}
 	maxDepth := r.MaxDepth
 	if maxDepth == 0 {
-		maxDepth = 4 // spec §4.3 default
+		maxDepth = run.DefaultMaxDepth
 	}
 	_, err = s.db.db.ExecContext(context.Background(), `
 		UPDATE run SET task=$2, workspace=$3, status=$4, reason_budget=$5, max_depth=$6,
@@ -231,30 +232,34 @@ func (s *Store) ReadDispatch(runID, dispatchID string) (*scratch.Dispatch, error
 		SELECT id, parent_id, role, model, profile, status, depth,
 		       supervisor_pid, max_turns, timeout_minutes, started_at, ended_at,
 		       exit_code, cost_usd, num_turns, session_id, tier, enforcement,
-		       claimed_by, lease_until, adapter_name, provider, deny_reason
+		       sandbox_spec, claimed_by, lease_until, adapter_name, provider, deny_reason
 		FROM dispatch WHERE run_id=$1 AND id=$2`, runID, dispatchID)
 	return scanDispatch(row)
 }
 
 // WriteDispatch upserts a dispatch record.
 func (s *Store) WriteDispatch(runID string, d *scratch.Dispatch) error {
-	_, err := s.db.db.ExecContext(context.Background(), `
+	sandboxSpec, err := encodeSandboxRecord(d.Sandbox)
+	if err != nil {
+		return fmt.Errorf("pgstore.WriteDispatch %s/%s: sandbox: %w", runID, d.ID, err)
+	}
+	_, err = s.db.db.ExecContext(context.Background(), `
 		INSERT INTO dispatch (
 			run_id, id, parent_id, role, model, profile, status, depth,
 			supervisor_pid, max_turns, timeout_minutes, started_at, ended_at,
 			exit_code, cost_usd, num_turns, session_id, tier, enforcement,
-			claimed_by, lease_until, adapter_name, provider, deny_reason)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+			sandbox_spec, claimed_by, lease_until, adapter_name, provider, deny_reason)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
 		ON CONFLICT (run_id, id) DO UPDATE SET
 			parent_id=$3, role=$4, model=$5, profile=$6, status=$7, depth=$8,
 			supervisor_pid=$9, max_turns=$10, timeout_minutes=$11, started_at=$12,
 			ended_at=$13, exit_code=$14, cost_usd=$15, num_turns=$16, session_id=$17,
-			tier=$18, enforcement=$19, claimed_by=$20, lease_until=$21,
-			adapter_name=$22, provider=$23, deny_reason=$24`,
+			tier=$18, enforcement=$19, sandbox_spec=$20, claimed_by=$21, lease_until=$22,
+			adapter_name=$23, provider=$24, deny_reason=$25`,
 		runID, d.ID, d.Parent, d.Role, d.Model, d.Profile, d.Status, d.Depth,
 		d.SupervisorPID, d.MaxTurns, d.TimeoutMinutes, d.StartedAt, d.EndedAt,
 		d.Exit, d.CostUSD, d.NumTurns, d.SessionID,
-		d.Tier, d.Enforcement, d.ClaimedBy, d.LeaseUntil,
+		d.Tier, d.Enforcement, sandboxSpec, d.ClaimedBy, d.LeaseUntil,
 		d.Adapter, d.Provider, d.DenyReason,
 	)
 	if err != nil {
@@ -269,7 +274,7 @@ func (s *Store) ListDispatches(runID string) ([]*scratch.Dispatch, error) {
 		SELECT id, parent_id, role, model, profile, status, depth,
 		       supervisor_pid, max_turns, timeout_minutes, started_at, ended_at,
 		       exit_code, cost_usd, num_turns, session_id, tier, enforcement,
-		       claimed_by, lease_until, adapter_name, provider, deny_reason
+		       sandbox_spec, claimed_by, lease_until, adapter_name, provider, deny_reason
 		FROM dispatch WHERE run_id=$1 ORDER BY id`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("pgstore.ListDispatches %s: %w", runID, err)
@@ -308,6 +313,279 @@ func (s *Store) DispatchFacts(runID string) (scratch.Facts, error) {
 		return scratch.Facts{}, fmt.Errorf("pgstore.DispatchFacts %s: %w", runID, err)
 	}
 	return f, nil
+}
+
+// ── Agent / checkpoint lifecycle records ─────────────────────────────────────
+
+// CreateAgentRun stores a newly spawned agent lifecycle record.
+func (s *Store) CreateAgentRun(runID string, ar *scratch.AgentRun) error {
+	return s.WriteAgentRun(runID, ar)
+}
+
+// WriteAgentRun upserts an agent lifecycle record.
+func (s *Store) WriteAgentRun(runID string, ar *scratch.AgentRun) error {
+	if ar == nil {
+		return fmt.Errorf("pgstore.WriteAgentRun: nil agent run")
+	}
+	if ar.ID == "" {
+		return fmt.Errorf("pgstore.WriteAgentRun: id is required")
+	}
+	if ar.Status == "" {
+		ar.Status = scratch.AgentRunStatusSpawned
+	}
+	if ar.Status != "" && !scratch.ValidAgentRunStatus(ar.Status) {
+		return fmt.Errorf("pgstore.WriteAgentRun: unknown status %q", ar.Status)
+	}
+	if ar.RunID == "" {
+		ar.RunID = runID
+	}
+	if ar.SpawnedAt.IsZero() {
+		ar.SpawnedAt = time.Now().UTC()
+	}
+	claimedPaths, err := marshalStringSlice(ar.ClaimedPaths)
+	if err != nil {
+		return fmt.Errorf("pgstore.WriteAgentRun: claimed_paths: %w", err)
+	}
+	changedFiles, err := marshalStringSlice(ar.ChangedFiles)
+	if err != nil {
+		return fmt.Errorf("pgstore.WriteAgentRun: changed_files: %w", err)
+	}
+	verification, err := marshalStringSlice(ar.Verification)
+	if err != nil {
+		return fmt.Errorf("pgstore.WriteAgentRun: verification: %w", err)
+	}
+	caveats, err := marshalStringSlice(ar.Caveats)
+	if err != nil {
+		return fmt.Errorf("pgstore.WriteAgentRun: caveats: %w", err)
+	}
+	refs, err := marshalStringSlice(ar.Refs)
+	if err != nil {
+		return fmt.Errorf("pgstore.WriteAgentRun: refs: %w", err)
+	}
+
+	_, err = s.db.db.ExecContext(context.Background(), `
+		INSERT INTO agent_run (
+			run_id, id, dispatch_id, backend, backend_agent_id, role, tier, model,
+			effort, parent_run_id, parent_agent_id, base_git_rev, base_dirty_hash,
+			claimed_paths, spawned_at, completed_at, reported_at, status,
+			changed_files, verification, caveats, diff_hash, summary, refs)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+		ON CONFLICT (run_id, id) DO UPDATE SET
+			dispatch_id=$3, backend=$4, backend_agent_id=$5, role=$6, tier=$7, model=$8,
+			effort=$9, parent_run_id=$10, parent_agent_id=$11, base_git_rev=$12,
+			base_dirty_hash=$13, claimed_paths=$14, spawned_at=$15, completed_at=$16,
+			reported_at=$17, status=$18, changed_files=$19, verification=$20,
+			caveats=$21, diff_hash=$22, summary=$23, refs=$24`,
+		runID, ar.ID, ar.DispatchID, ar.Backend, ar.BackendAgentID, ar.Role, ar.Tier,
+		ar.Model, ar.Effort, ar.ParentRunID, ar.ParentAgentID, ar.BaseGitRev,
+		ar.BaseDirtyHash, claimedPaths, ar.SpawnedAt, ar.CompletedAt, ar.ReportedAt,
+		ar.Status, changedFiles, verification, caveats, ar.DiffHash, ar.Summary, refs,
+	)
+	if err != nil {
+		return fmt.Errorf("pgstore.WriteAgentRun %s/%s: %w", runID, ar.ID, err)
+	}
+	return nil
+}
+
+// ListAgentRuns returns all agent lifecycle records for a run.
+func (s *Store) ListAgentRuns(runID string) ([]*scratch.AgentRun, error) {
+	rows, err := s.db.db.QueryContext(context.Background(), `
+		SELECT id, dispatch_id, backend, backend_agent_id, role, tier, model,
+		       effort, parent_run_id, parent_agent_id, base_git_rev, base_dirty_hash,
+		       claimed_paths, spawned_at, completed_at, reported_at, status,
+		       changed_files, verification, caveats, diff_hash, summary, refs
+		FROM agent_run WHERE run_id=$1 ORDER BY id`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("pgstore.ListAgentRuns %s: %w", runID, err)
+	}
+	defer rows.Close()
+
+	var out []*scratch.AgentRun
+	for rows.Next() {
+		ar := &scratch.AgentRun{RunID: runID}
+		var claimedPaths, changedFiles, verification, caveats, refs []byte
+		if err := rows.Scan(
+			&ar.ID, &ar.DispatchID, &ar.Backend, &ar.BackendAgentID, &ar.Role,
+			&ar.Tier, &ar.Model, &ar.Effort, &ar.ParentRunID, &ar.ParentAgentID,
+			&ar.BaseGitRev, &ar.BaseDirtyHash, &claimedPaths, &ar.SpawnedAt,
+			&ar.CompletedAt, &ar.ReportedAt, &ar.Status, &changedFiles,
+			&verification, &caveats, &ar.DiffHash, &ar.Summary, &refs,
+		); err != nil {
+			return nil, fmt.Errorf("pgstore.ListAgentRuns scan: %w", err)
+		}
+		if err := unmarshalStringSlice(claimedPaths, &ar.ClaimedPaths); err != nil {
+			return nil, fmt.Errorf("pgstore.ListAgentRuns claimed_paths: %w", err)
+		}
+		if err := unmarshalStringSlice(changedFiles, &ar.ChangedFiles); err != nil {
+			return nil, fmt.Errorf("pgstore.ListAgentRuns changed_files: %w", err)
+		}
+		if err := unmarshalStringSlice(verification, &ar.Verification); err != nil {
+			return nil, fmt.Errorf("pgstore.ListAgentRuns verification: %w", err)
+		}
+		if err := unmarshalStringSlice(caveats, &ar.Caveats); err != nil {
+			return nil, fmt.Errorf("pgstore.ListAgentRuns caveats: %w", err)
+		}
+		if err := unmarshalStringSlice(refs, &ar.Refs); err != nil {
+			return nil, fmt.Errorf("pgstore.ListAgentRuns refs: %w", err)
+		}
+		out = append(out, ar)
+	}
+	return out, rows.Err()
+}
+
+// AppendCheckpointCandidate records a checkpoint candidate.
+func (s *Store) AppendCheckpointCandidate(runID string, c scratch.CheckpointCandidate) error {
+	if c.Status == "" {
+		c.Status = scratch.CheckpointStatusProposed
+	}
+	if c.Status != "" && !scratch.ValidCheckpointStatus(c.Status) {
+		return fmt.Errorf("pgstore.AppendCheckpointCandidate: unknown status %q", c.Status)
+	}
+	if c.RunID == "" {
+		c.RunID = runID
+	}
+	if c.ReportedAt.IsZero() {
+		c.ReportedAt = time.Now().UTC()
+	}
+	claimedPaths, err := marshalStringSlice(c.ClaimedPaths)
+	if err != nil {
+		return fmt.Errorf("pgstore.AppendCheckpointCandidate: claimed_paths: %w", err)
+	}
+	changedFiles, err := marshalStringSlice(c.ChangedFiles)
+	if err != nil {
+		return fmt.Errorf("pgstore.AppendCheckpointCandidate: changed_files: %w", err)
+	}
+	verification, err := marshalStringSlice(c.Verification)
+	if err != nil {
+		return fmt.Errorf("pgstore.AppendCheckpointCandidate: verification: %w", err)
+	}
+	caveats, err := marshalStringSlice(c.Caveats)
+	if err != nil {
+		return fmt.Errorf("pgstore.AppendCheckpointCandidate: caveats: %w", err)
+	}
+	refs, err := marshalStringSlice(c.Refs)
+	if err != nil {
+		return fmt.Errorf("pgstore.AppendCheckpointCandidate: refs: %w", err)
+	}
+
+	_, err = s.db.db.ExecContext(context.Background(), `
+		INSERT INTO checkpoint_candidate (
+			id, run_id, agent_run_id, dispatch_id, backend, role, tier, model, effort,
+			parent_run_id, parent_agent_id, base_git_rev, base_dirty_hash, claimed_paths,
+			reported_at, status, changed_files, verification, caveats, diff_hash, summary, refs)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
+		c.ID, runID, c.AgentRunID, c.DispatchID, c.Backend, c.Role, c.Tier,
+		c.Model, c.Effort, c.ParentRunID, c.ParentAgentID, c.BaseGitRev,
+		c.BaseDirtyHash, claimedPaths, c.ReportedAt, c.Status, changedFiles,
+		verification, caveats, c.DiffHash, c.Summary, refs,
+	)
+	if err != nil {
+		return fmt.Errorf("pgstore.AppendCheckpointCandidate %s/%s: %w", runID, c.ID, err)
+	}
+	return nil
+}
+
+// ListCheckpointCandidates returns checkpoint candidates in append order.
+func (s *Store) ListCheckpointCandidates(runID string) ([]scratch.CheckpointCandidate, error) {
+	rows, err := s.db.db.QueryContext(context.Background(), `
+		SELECT id, agent_run_id, dispatch_id, backend, role, tier, model, effort,
+		       parent_run_id, parent_agent_id, base_git_rev, base_dirty_hash,
+		       claimed_paths, reported_at, status, changed_files, verification,
+		       caveats, diff_hash, summary, refs
+		FROM checkpoint_candidate WHERE run_id=$1 ORDER BY seq`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("pgstore.ListCheckpointCandidates %s: %w", runID, err)
+	}
+	defer rows.Close()
+
+	var out []scratch.CheckpointCandidate
+	for rows.Next() {
+		c := scratch.CheckpointCandidate{RunID: runID}
+		var claimedPaths, changedFiles, verification, caveats, refs []byte
+		if err := rows.Scan(
+			&c.ID, &c.AgentRunID, &c.DispatchID, &c.Backend, &c.Role, &c.Tier,
+			&c.Model, &c.Effort, &c.ParentRunID, &c.ParentAgentID, &c.BaseGitRev,
+			&c.BaseDirtyHash, &claimedPaths, &c.ReportedAt, &c.Status,
+			&changedFiles, &verification, &caveats, &c.DiffHash, &c.Summary, &refs,
+		); err != nil {
+			return nil, fmt.Errorf("pgstore.ListCheckpointCandidates scan: %w", err)
+		}
+		if err := unmarshalStringSlice(claimedPaths, &c.ClaimedPaths); err != nil {
+			return nil, fmt.Errorf("pgstore.ListCheckpointCandidates claimed_paths: %w", err)
+		}
+		if err := unmarshalStringSlice(changedFiles, &c.ChangedFiles); err != nil {
+			return nil, fmt.Errorf("pgstore.ListCheckpointCandidates changed_files: %w", err)
+		}
+		if err := unmarshalStringSlice(verification, &c.Verification); err != nil {
+			return nil, fmt.Errorf("pgstore.ListCheckpointCandidates verification: %w", err)
+		}
+		if err := unmarshalStringSlice(caveats, &c.Caveats); err != nil {
+			return nil, fmt.Errorf("pgstore.ListCheckpointCandidates caveats: %w", err)
+		}
+		if err := unmarshalStringSlice(refs, &c.Refs); err != nil {
+			return nil, fmt.Errorf("pgstore.ListCheckpointCandidates refs: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// AppendLedgerEvent records an append-only lifecycle event.
+func (s *Store) AppendLedgerEvent(runID string, ev scratch.LedgerEvent) error {
+	if ev.Kind == "" {
+		return fmt.Errorf("pgstore.AppendLedgerEvent: kind is required")
+	}
+	if ev.RunID == "" {
+		ev.RunID = runID
+	}
+	if ev.At.IsZero() {
+		ev.At = time.Now().UTC()
+	}
+	refs, err := marshalStringSlice(ev.Refs)
+	if err != nil {
+		return fmt.Errorf("pgstore.AppendLedgerEvent: refs: %w", err)
+	}
+	_, err = s.db.db.ExecContext(context.Background(), `
+		INSERT INTO ledger_event (
+			id, run_id, agent_run_id, checkpoint_candidate_id, dispatch_id,
+			backend, kind, status, at, summary, refs)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		ev.ID, runID, ev.AgentRunID, ev.CheckpointCandidate, ev.DispatchID,
+		ev.Backend, ev.Kind, ev.Status, ev.At, ev.Summary, refs,
+	)
+	if err != nil {
+		return fmt.Errorf("pgstore.AppendLedgerEvent %s/%s: %w", runID, ev.ID, err)
+	}
+	return nil
+}
+
+// ListLedgerEvents returns ledger events in append order.
+func (s *Store) ListLedgerEvents(runID string) ([]scratch.LedgerEvent, error) {
+	rows, err := s.db.db.QueryContext(context.Background(), `
+		SELECT id, agent_run_id, checkpoint_candidate_id, dispatch_id, backend,
+		       kind, status, at, summary, refs
+		FROM ledger_event WHERE run_id=$1 ORDER BY seq`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("pgstore.ListLedgerEvents %s: %w", runID, err)
+	}
+	defer rows.Close()
+
+	var out []scratch.LedgerEvent
+	for rows.Next() {
+		ev := scratch.LedgerEvent{RunID: runID}
+		var refs []byte
+		if err := rows.Scan(
+			&ev.ID, &ev.AgentRunID, &ev.CheckpointCandidate, &ev.DispatchID,
+			&ev.Backend, &ev.Kind, &ev.Status, &ev.At, &ev.Summary, &refs,
+		); err != nil {
+			return nil, fmt.Errorf("pgstore.ListLedgerEvents scan: %w", err)
+		}
+		if err := unmarshalStringSlice(refs, &ev.Refs); err != nil {
+			return nil, fmt.Errorf("pgstore.ListLedgerEvents refs: %w", err)
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
 }
 
 // ── Document records ──────────────────────────────────────────────────────────
@@ -611,11 +889,12 @@ type rowScanner interface {
 
 func scanDispatch(row rowScanner) (*scratch.Dispatch, error) {
 	d := &scratch.Dispatch{}
+	var sandboxSpec string
 	err := row.Scan(
 		&d.ID, &d.Parent, &d.Role, &d.Model, &d.Profile,
 		&d.Status, &d.Depth, &d.SupervisorPID, &d.MaxTurns, &d.TimeoutMinutes,
 		&d.StartedAt, &d.EndedAt, &d.Exit, &d.CostUSD, &d.NumTurns,
-		&d.SessionID, &d.Tier, &d.Enforcement, &d.ClaimedBy, &d.LeaseUntil,
+		&d.SessionID, &d.Tier, &d.Enforcement, &sandboxSpec, &d.ClaimedBy, &d.LeaseUntil,
 		&d.Adapter, &d.Provider, &d.DenyReason,
 	)
 	if err == sql.ErrNoRows {
@@ -624,7 +903,28 @@ func scanDispatch(row rowScanner) (*scratch.Dispatch, error) {
 	if err != nil {
 		return nil, err
 	}
+	if sandboxSpec != "" {
+		var rec sandbox.Record
+		if err := json.Unmarshal([]byte(sandboxSpec), &rec); err != nil {
+			return nil, fmt.Errorf("decode sandbox_spec: %w", err)
+		}
+		d.Sandbox = &rec
+	}
 	return d, nil
+}
+
+func encodeSandboxRecord(rec *sandbox.Record) (string, error) {
+	if rec == nil {
+		return "", nil
+	}
+	if err := rec.Validate(); err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // upsertDoc inserts or updates a doc row (kind brief|report; filename=”).
@@ -665,6 +965,21 @@ func marshalJSONB(v any) ([]byte, error) {
 		return []byte("{}"), nil
 	}
 	return json.Marshal(v)
+}
+
+func marshalStringSlice(v []string) ([]byte, error) {
+	if v == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(v)
+}
+
+func unmarshalStringSlice(data []byte, out *[]string) error {
+	if len(data) == 0 {
+		*out = nil
+		return nil
+	}
+	return json.Unmarshal(data, out)
 }
 
 // buildRunNodeTree builds a run.Node tree from dispatch records for rendering.

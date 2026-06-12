@@ -144,6 +144,39 @@ func TestManifestRoundtrip(t *testing.T) {
 	if got.PolicySHAs["dispatch"] != "abc123" {
 		t.Errorf("policy sha mismatch: %v", got.PolicySHAs)
 	}
+	if got.MaxDepth != run.DefaultMaxDepth {
+		t.Errorf("default MaxDepth = %d, want %d", got.MaxDepth, run.DefaultMaxDepth)
+	}
+}
+
+func TestManifestExplicitMaxDepthRoundtrip(t *testing.T) {
+	base := t.TempDir()
+	s := run.NewStore(base)
+	id, err := s.CreateRun()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runDir := s.RunDir(id)
+
+	m := &run.Manifest{
+		RunID:        id,
+		Task:         "test task",
+		Workspace:    "/tmp/ws",
+		Status:       "created",
+		ReasonBudget: 2,
+		MaxDepth:     4,
+		CreatedAt:    time.Now().UTC().Truncate(time.Second),
+	}
+	if err := run.WriteManifest(runDir, m); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	got, err := run.ReadManifest(runDir)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if got.MaxDepth != 4 {
+		t.Errorf("explicit MaxDepth = %d, want 4", got.MaxDepth)
+	}
 }
 
 // TestManifestLegacyFableBudget verifies that a raw v1 manifest.json containing

@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS run (
     workspace        TEXT        NOT NULL DEFAULT '',
     status           TEXT        NOT NULL DEFAULT 'created',  -- created|running|completed|failed|halted
     reason_budget    INTEGER     NOT NULL DEFAULT 2,
-    max_depth        INTEGER     NOT NULL DEFAULT 4,           -- max dispatch depth; spec §4.3
+    max_depth        INTEGER     NOT NULL DEFAULT 2,           -- max dispatch depth; root=0, depth-1 may dispatch, depth-2 terminal
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     ended_at         TIMESTAMPTZ,
     root_session_id  TEXT        NOT NULL DEFAULT '',
@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS run (
 -- Idempotent migration: add max_depth to run if it does not exist (schema version 4).
 -- ADD COLUMN IF NOT EXISTS resolves via search_path, so per-test schemas and the
 -- production schema are handled identically.
-ALTER TABLE run ADD COLUMN IF NOT EXISTS max_depth INTEGER NOT NULL DEFAULT 4;
+ALTER TABLE run ADD COLUMN IF NOT EXISTS max_depth INTEGER NOT NULL DEFAULT 2;
+ALTER TABLE run ALTER COLUMN max_depth SET DEFAULT 2;
 
 -- dispatch corresponds to spec §3.1 "dispatch" record.
 -- State machine: pending → claimed → running → completed | failed | expired
@@ -62,7 +63,8 @@ CREATE TABLE IF NOT EXISTS dispatch (
     session_id       TEXT        NOT NULL DEFAULT '',
     -- v2 tier / enforcement fields
     tier             TEXT        NOT NULL DEFAULT '',         -- reason|scrutiny|execute
-    enforcement      TEXT        NOT NULL DEFAULT 'full',     -- full|degraded
+    enforcement      TEXT        NOT NULL DEFAULT 'full',     -- full|degraded|sandboxed
+    sandbox_spec     TEXT        NOT NULL DEFAULT '',         -- JSON sandbox.Record
     -- dispatch pool / lease fields (active from P4)
     claimed_by       TEXT        NOT NULL DEFAULT '',
     lease_until      TIMESTAMPTZ,
@@ -88,6 +90,97 @@ ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT '';
 -- Populated when a pool-time gate denies a dispatch (status='denied').
 -- Empty string for all other statuses; NOT NULL DEFAULT '' so v1 rows are unaffected.
 ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS deny_reason TEXT NOT NULL DEFAULT '';
+
+-- Idempotent migration: add sandbox_spec to dispatch (schema version 8).
+-- Stores a JSON sandbox.Record so queryable mirrors retain sandbox provenance.
+ALTER TABLE dispatch ADD COLUMN IF NOT EXISTS sandbox_spec TEXT NOT NULL DEFAULT '';
+
+-- agent_run stores backend lifecycle metadata for abstracted interactive and
+-- non-interactive agents.
+CREATE TABLE IF NOT EXISTS agent_run (
+    run_id             TEXT        NOT NULL REFERENCES run(id),
+    id                 TEXT        NOT NULL,
+    dispatch_id        TEXT        NOT NULL DEFAULT '',
+    backend            TEXT        NOT NULL DEFAULT '',
+    backend_agent_id   TEXT        NOT NULL DEFAULT '',
+    role               TEXT        NOT NULL DEFAULT '',
+    tier               TEXT        NOT NULL DEFAULT '',
+    model              TEXT        NOT NULL DEFAULT '',
+    effort             TEXT        NOT NULL DEFAULT '',
+    parent_run_id      TEXT        NOT NULL DEFAULT '',
+    parent_agent_id    TEXT        NOT NULL DEFAULT '',
+    base_git_rev       TEXT        NOT NULL DEFAULT '',
+    base_dirty_hash    TEXT        NOT NULL DEFAULT '',
+    claimed_paths      JSONB       NOT NULL DEFAULT '[]',
+    spawned_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at       TIMESTAMPTZ,
+    reported_at        TIMESTAMPTZ,
+    status             TEXT        NOT NULL DEFAULT 'spawned', -- requested|spawned|running|completed|failed|halted|late|stale|superseded|closed
+    changed_files      JSONB       NOT NULL DEFAULT '[]',
+    verification       JSONB       NOT NULL DEFAULT '[]',
+    caveats            JSONB       NOT NULL DEFAULT '[]',
+    diff_hash          TEXT        NOT NULL DEFAULT '',
+    summary            TEXT        NOT NULL DEFAULT '',
+    refs               JSONB       NOT NULL DEFAULT '[]',
+    PRIMARY KEY (run_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS agent_run_run_id_idx ON agent_run (run_id);
+CREATE INDEX IF NOT EXISTS agent_run_status_idx ON agent_run (status);
+
+ALTER TABLE agent_run ALTER COLUMN status SET DEFAULT 'spawned';
+
+-- checkpoint_candidate stores append-only checkpoint reports that must be
+-- freshness-checked against base_git_rev/base_dirty_hash before commit.
+CREATE TABLE IF NOT EXISTS checkpoint_candidate (
+    seq                BIGSERIAL   PRIMARY KEY,
+    id                 TEXT        NOT NULL DEFAULT '',
+    run_id             TEXT        NOT NULL REFERENCES run(id),
+    agent_run_id       TEXT        NOT NULL DEFAULT '',
+    dispatch_id        TEXT        NOT NULL DEFAULT '',
+    backend            TEXT        NOT NULL DEFAULT '',
+    role               TEXT        NOT NULL DEFAULT '',
+    tier               TEXT        NOT NULL DEFAULT '',
+    model              TEXT        NOT NULL DEFAULT '',
+    effort             TEXT        NOT NULL DEFAULT '',
+    parent_run_id      TEXT        NOT NULL DEFAULT '',
+    parent_agent_id    TEXT        NOT NULL DEFAULT '',
+    base_git_rev       TEXT        NOT NULL DEFAULT '',
+    base_dirty_hash    TEXT        NOT NULL DEFAULT '',
+    claimed_paths      JSONB       NOT NULL DEFAULT '[]',
+    reported_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    status             TEXT        NOT NULL DEFAULT 'proposed', -- proposed|fresh|late_valid|late_stale|conflicting|accepted|rejected
+    changed_files      JSONB       NOT NULL DEFAULT '[]',
+    verification       JSONB       NOT NULL DEFAULT '[]',
+    caveats            JSONB       NOT NULL DEFAULT '[]',
+    diff_hash          TEXT        NOT NULL DEFAULT '',
+    summary            TEXT        NOT NULL DEFAULT '',
+    refs               JSONB       NOT NULL DEFAULT '[]'
+);
+
+CREATE INDEX IF NOT EXISTS checkpoint_candidate_run_id_idx ON checkpoint_candidate (run_id);
+CREATE INDEX IF NOT EXISTS checkpoint_candidate_status_idx ON checkpoint_candidate (status);
+
+ALTER TABLE checkpoint_candidate ALTER COLUMN status SET DEFAULT 'proposed';
+
+-- ledger_event is an append-only lifecycle stream for cross-dispatch events.
+CREATE TABLE IF NOT EXISTS ledger_event (
+    seq                     BIGSERIAL   PRIMARY KEY,
+    id                      TEXT        NOT NULL DEFAULT '',
+    run_id                  TEXT        NOT NULL REFERENCES run(id),
+    agent_run_id            TEXT        NOT NULL DEFAULT '',
+    checkpoint_candidate_id TEXT        NOT NULL DEFAULT '',
+    dispatch_id             TEXT        NOT NULL DEFAULT '',
+    backend                 TEXT        NOT NULL DEFAULT '',
+    kind                    TEXT        NOT NULL DEFAULT '',
+    status                  TEXT        NOT NULL DEFAULT '',
+    at                      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    summary                 TEXT        NOT NULL DEFAULT '',
+    refs                    JSONB       NOT NULL DEFAULT '[]'
+);
+
+CREATE INDEX IF NOT EXISTS ledger_event_run_id_idx ON ledger_event (run_id);
+CREATE INDEX IF NOT EXISTS ledger_event_kind_idx   ON ledger_event (kind);
 
 -- dispatch_seq is an atomic per-run dispatch counter for AllocDispatch.
 -- One row per run; next_n is incremented atomically via INSERT ... ON CONFLICT.
@@ -205,4 +298,20 @@ ON CONFLICT (version) DO NOTHING;
 
 INSERT INTO schema_version (version, description)
 VALUES (6, 'add deny_reason column to dispatch table for pool-time gate denials')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO schema_version (version, description)
+VALUES (7, 'change default max_depth to 2 for terminal depth-2 agents')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO schema_version (version, description)
+VALUES (8, 'add sandbox_spec column to dispatch table for runtime isolation metadata')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO schema_version (version, description)
+VALUES (9, 'add agent/checkpoint lifecycle tables')
+ON CONFLICT (version) DO NOTHING;
+
+INSERT INTO schema_version (version, description)
+VALUES (10, 'align agent and checkpoint lifecycle status vocabulary')
 ON CONFLICT (version) DO NOTHING;

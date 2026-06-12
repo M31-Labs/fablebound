@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"m31labs.dev/arbiter/audit"
+	"m31labs.dev/tiller/internal/sandbox"
 	"m31labs.dev/tiller/internal/scratch"
 )
 
@@ -45,6 +46,8 @@ func Run(t *testing.T, open func(t *testing.T) scratch.Store) {
 	t.Run("BuildRunSummaryJSON", func(t *testing.T) { testBuildRunSummaryJSON(t, open(t)) })
 	t.Run("BuildDispatchTree", func(t *testing.T) { testBuildDispatchTree(t, open(t)) })
 	t.Run("BuildDispatchTreeV2Fields", func(t *testing.T) { testBuildDispatchTreeV2Fields(t, open(t)) })
+	t.Run("AgentCheckpointLedgerRoundtrip", func(t *testing.T) { testAgentCheckpointLedgerRoundtrip(t, open(t)) })
+	t.Run("AgentCheckpointStatusDefaults", func(t *testing.T) { testAgentCheckpointStatusDefaults(t, open(t)) })
 	// P4.1 claim semantics.
 	t.Run("ClaimConcurrent", func(t *testing.T) { testClaimConcurrent(t, open(t)) })
 	t.Run("ClaimExpireRequeue", func(t *testing.T) { testClaimExpireRequeue(t, open(t)) })
@@ -303,6 +306,181 @@ func testDispatchFacts(t *testing.T, s scratch.Store) {
 	// ReasonCount: d01 + d03 = 2 fable models.
 	if facts.ReasonCount != 2 {
 		t.Errorf("DispatchFacts.ReasonCount=%d want 2", facts.ReasonCount)
+	}
+}
+
+func testAgentCheckpointLedgerRoundtrip(t *testing.T, s scratch.Store) {
+	t.Helper()
+	runID := mustCreateRun(t, s)
+	did := mustAllocDispatch(t, s, runID)
+	spawnedAt := time.Date(2026, 6, 11, 10, 0, 0, 0, time.UTC)
+	completedAt := spawnedAt.Add(2 * time.Minute)
+	reportedAt := spawnedAt.Add(3 * time.Minute)
+
+	ar := &scratch.AgentRun{
+		ID:             "agent-001",
+		DispatchID:     did,
+		Backend:        "codex",
+		BackendAgentID: "backend-agent-001",
+		Role:           "worker",
+		Tier:           "execute",
+		Model:          "gpt-5.5",
+		Effort:         "medium",
+		ParentRunID:    "parent-run",
+		ParentAgentID:  "parent-agent",
+		BaseGitRev:     "abc123",
+		BaseDirtyHash:  "dirty456",
+		ClaimedPaths:   []string{"internal/scratch/records.go"},
+		SpawnedAt:      spawnedAt,
+		Status:         scratch.AgentRunStatusRunning,
+	}
+	if err := s.CreateAgentRun(runID, ar); err != nil {
+		t.Fatalf("CreateAgentRun: %v", err)
+	}
+	ar.Status = scratch.AgentRunStatusCompleted
+	ar.CompletedAt = &completedAt
+	ar.ReportedAt = &reportedAt
+	ar.ChangedFiles = []string{"internal/scratch/records.go", "internal/harness/harness.go"}
+	ar.Verification = []string{"go test ./internal/harness ./internal/scratch/..."}
+	ar.Caveats = []string{"pgstore requires TILLER_TEST_PG_DSN for live conformance"}
+	ar.DiffHash = "diff789"
+	ar.Summary = "implemented lifecycle records"
+	ar.Refs = []string{"dispatches/" + did + "/report.md"}
+	if err := s.WriteAgentRun(runID, ar); err != nil {
+		t.Fatalf("WriteAgentRun: %v", err)
+	}
+
+	agents, err := s.ListAgentRuns(runID)
+	if err != nil {
+		t.Fatalf("ListAgentRuns: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("ListAgentRuns count=%d want 1", len(agents))
+	}
+	gotAgent := agents[0]
+	if gotAgent.ID != ar.ID || gotAgent.RunID != runID || gotAgent.Status != scratch.AgentRunStatusCompleted {
+		t.Fatalf("agent roundtrip mismatch: got %#v", gotAgent)
+	}
+	if gotAgent.BaseGitRev != "abc123" || gotAgent.BaseDirtyHash != "dirty456" {
+		t.Errorf("base context mismatch: rev=%q dirty=%q", gotAgent.BaseGitRev, gotAgent.BaseDirtyHash)
+	}
+	if len(gotAgent.ChangedFiles) != 2 || gotAgent.ChangedFiles[1] != "internal/harness/harness.go" {
+		t.Errorf("changed files mismatch: %#v", gotAgent.ChangedFiles)
+	}
+
+	candidate := scratch.CheckpointCandidate{
+		ID:            "cp-001",
+		AgentRunID:    ar.ID,
+		DispatchID:    did,
+		Backend:       "codex",
+		Role:          "worker",
+		Tier:          "execute",
+		Model:         "gpt-5.5",
+		Effort:        "medium",
+		ParentRunID:   "parent-run",
+		ParentAgentID: "parent-agent",
+		BaseGitRev:    "abc123",
+		BaseDirtyHash: "dirty456",
+		ClaimedPaths:  []string{"internal/scratch"},
+		ReportedAt:    reportedAt,
+		Status:        scratch.CheckpointStatusProposed,
+		ChangedFiles:  ar.ChangedFiles,
+		Verification:  ar.Verification,
+		Caveats:       ar.Caveats,
+		DiffHash:      ar.DiffHash,
+		Summary:       ar.Summary,
+		Refs:          ar.Refs,
+	}
+	if err := s.AppendCheckpointCandidate(runID, candidate); err != nil {
+		t.Fatalf("AppendCheckpointCandidate: %v", err)
+	}
+	candidates, err := s.ListCheckpointCandidates(runID)
+	if err != nil {
+		t.Fatalf("ListCheckpointCandidates: %v", err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("ListCheckpointCandidates count=%d want 1", len(candidates))
+	}
+	if candidates[0].ID != candidate.ID || candidates[0].RunID != runID || candidates[0].Status != scratch.CheckpointStatusProposed {
+		t.Fatalf("candidate roundtrip mismatch: got %#v", candidates[0])
+	}
+	if candidates[0].BaseGitRev != candidate.BaseGitRev || candidates[0].BaseDirtyHash != candidate.BaseDirtyHash {
+		t.Errorf("candidate base context mismatch: %#v", candidates[0])
+	}
+
+	event := scratch.LedgerEvent{
+		ID:                  "event-001",
+		AgentRunID:          ar.ID,
+		CheckpointCandidate: candidate.ID,
+		DispatchID:          did,
+		Backend:             "codex",
+		Kind:                "checkpoint_candidate",
+		Status:              scratch.CheckpointStatusProposed,
+		At:                  reportedAt,
+		Summary:             "checkpoint candidate reported",
+		Refs:                []string{"checkpoint_candidates.jsonl"},
+	}
+	if err := s.AppendLedgerEvent(runID, event); err != nil {
+		t.Fatalf("AppendLedgerEvent: %v", err)
+	}
+	events, err := s.ListLedgerEvents(runID)
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("ListLedgerEvents count=%d want 1", len(events))
+	}
+	if events[0].ID != event.ID || events[0].RunID != runID || events[0].Kind != event.Kind {
+		t.Fatalf("ledger event roundtrip mismatch: got %#v", events[0])
+	}
+}
+
+func testAgentCheckpointStatusDefaults(t *testing.T, s scratch.Store) {
+	t.Helper()
+	runID := mustCreateRun(t, s)
+	did := mustAllocDispatch(t, s, runID)
+
+	ar := &scratch.AgentRun{
+		ID:         "agent-default-status",
+		DispatchID: did,
+		Backend:    "codex",
+		SpawnedAt:  time.Date(2026, 6, 11, 11, 0, 0, 0, time.UTC),
+		// Status intentionally empty; store must persist the default.
+	}
+	if err := s.CreateAgentRun(runID, ar); err != nil {
+		t.Fatalf("CreateAgentRun empty status: %v", err)
+	}
+	agents, err := s.ListAgentRuns(runID)
+	if err != nil {
+		t.Fatalf("ListAgentRuns: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("ListAgentRuns count=%d want 1", len(agents))
+	}
+	if agents[0].Status != scratch.AgentRunStatusSpawned {
+		t.Fatalf("agent default status roundtrip=%q want %q", agents[0].Status, scratch.AgentRunStatusSpawned)
+	}
+
+	candidate := scratch.CheckpointCandidate{
+		ID:         "cp-default-status",
+		AgentRunID: ar.ID,
+		DispatchID: did,
+		Backend:    "codex",
+		ReportedAt: time.Date(2026, 6, 11, 11, 1, 0, 0, time.UTC),
+		// Status intentionally empty; store must persist the default.
+	}
+	if err := s.AppendCheckpointCandidate(runID, candidate); err != nil {
+		t.Fatalf("AppendCheckpointCandidate empty status: %v", err)
+	}
+	candidates, err := s.ListCheckpointCandidates(runID)
+	if err != nil {
+		t.Fatalf("ListCheckpointCandidates: %v", err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("ListCheckpointCandidates count=%d want 1", len(candidates))
+	}
+	if candidates[0].Status != scratch.CheckpointStatusProposed {
+		t.Fatalf("checkpoint default status roundtrip=%q want %q", candidates[0].Status, scratch.CheckpointStatusProposed)
 	}
 }
 
@@ -649,7 +827,7 @@ func findDispatchNode(n *scratch.DispatchNode, id string) bool {
 }
 
 // testBuildDispatchTreeV2Fields verifies that v2-only fields (Enforcement,
-// Provider, Adapter, DenyReason) survive a WriteDispatch → BuildDispatchTree
+// Provider, Adapter, DenyReason, Sandbox) survive a WriteDispatch → BuildDispatchTree
 // round-trip. Before the fsstore was fixed to build the tree directly from
 // ListDispatches, these fields were silently dropped on the fs store because the
 // old path went through run.BuildTree → run.Node → run.Meta → scratch.Dispatch,
@@ -669,6 +847,18 @@ func testBuildDispatchTreeV2Fields(t *testing.T, s scratch.Store) {
 		Provider:    "anthropic",
 		Adapter:     "claude-headless",
 		DenyReason:  "pool-limit-reached",
+		Sandbox: &sandbox.Record{
+			Mode:      sandbox.ModeContainer,
+			Profile:   "execution",
+			Status:    sandbox.StatusRequested,
+			Workspace: sandbox.WorkspaceOverlay,
+			Network:   sandbox.NetworkDisabled,
+			Horizon: []sandbox.HorizonManifest{{
+				Path:       "/home/draco/work/horizon/examples/execdeny/exec.cap.json",
+				SHA256:     "abc123",
+				Capability: "kernel.process.exec.deny",
+			}},
+		},
 	}
 	if err := s.WriteDispatch(runID, d); err != nil {
 		t.Fatalf("WriteDispatch: %v", err)
@@ -694,6 +884,15 @@ func testBuildDispatchTreeV2Fields(t *testing.T, s scratch.Store) {
 	}
 	if node.DenyReason != "pool-limit-reached" {
 		t.Errorf("DenyReason: got %q, want %q", node.DenyReason, "pool-limit-reached")
+	}
+	if node.Sandbox == nil {
+		t.Fatal("Sandbox: nil, want record")
+	}
+	if node.Sandbox.Mode != sandbox.ModeContainer {
+		t.Errorf("Sandbox.Mode: got %q, want %q", node.Sandbox.Mode, sandbox.ModeContainer)
+	}
+	if !node.Sandbox.HorizonEnabled() {
+		t.Error("Sandbox.HorizonEnabled: false, want true")
 	}
 }
 

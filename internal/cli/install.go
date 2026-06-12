@@ -388,7 +388,7 @@ func printInstallPlan(settingsPath, agentsDir string, entry settingsHookEntry, e
 }
 
 func codexManagedHookEvents() []string {
-	return []string{"PreToolUse", "SessionStart", "SubagentStart"}
+	return []string{"PreToolUse", "PostToolUse", "SessionStart", "SubagentStart"}
 }
 
 // runUninstall implements `tiller uninstall [--backend BACKEND] [--print] [--project]`.

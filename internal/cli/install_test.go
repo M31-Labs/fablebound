@@ -894,9 +894,6 @@ func TestRunInstallCodexProject(t *testing.T) {
 		t.Fatalf("parse hooks.json: %v", err)
 	}
 	hooks := settings["hooks"].(map[string]any)
-	if _, ok := hooks["PostToolUse"]; ok {
-		t.Fatal("Codex install must not add PostToolUse")
-	}
 	for _, eventName := range codexManagedHookEvents() {
 		list := hooks[eventName].([]any)
 		if len(list) != 1 {

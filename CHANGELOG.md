@@ -57,8 +57,8 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Ambient summary persona** - `tiller-summary` uses cheap read-only models for
   compact status updates, run ledger summaries, stale/late report triage, and
   checkpoint candidate synthesis across Claude Code, Codex, and OpenCode installs.
-- **Codex lifecycle context** - Codex installs `SessionStart` and `SubagentStart`
-  hooks alongside `PreToolUse`. `SessionStart` emits startup context only when
+- **Codex lifecycle context** - Codex installs `SessionStart`, `SubagentStart`,
+  and `PostToolUse` hooks alongside `PreToolUse`. `SessionStart` emits startup context only when
   the root session is proven governed, such as `gpt-5.5 xhigh`; subagent
   context is role-specific and non-blocking for `tiller-*` agents.
 - **Sirena Codex skill** - Codex installs a `using-sirena` skill for `.sir`,

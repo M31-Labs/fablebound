@@ -217,6 +217,183 @@ func TestRenderStatusMarkdownSpendBudgetBands(t *testing.T) {
 	}
 }
 
+func TestRenderStatusMarkdownStaleLateWorkPopulated(t *testing.T) {
+	base := t.TempDir()
+	st := fsstore.Open(base)
+	now := time.Date(2026, 6, 12, 13, 0, 0, 0, time.UTC)
+	runID, err := st.CreateRun(&scratch.Run{
+		ID:        "20260612-130000-stale-late",
+		Task:      "triage stale late work",
+		Workspace: "/workspace/tiller",
+		Status:    "running",
+		CreatedAt: now.Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	if err := st.WriteAgentRun(runID, &scratch.AgentRun{
+		ID:           "agent-late",
+		Backend:      "codex",
+		Role:         "worker",
+		Status:       scratch.AgentRunStatusLate,
+		SpawnedAt:    now.Add(-20 * time.Minute),
+		Summary:      "finished after root moved on",
+		ChangedFiles: []string{"internal/scratch/status.go"},
+		Caveats:      []string{"needs root triage"},
+	}); err != nil {
+		t.Fatalf("WriteAgentRun late: %v", err)
+	}
+	if err := st.WriteAgentRun(runID, &scratch.AgentRun{
+		ID:        "agent-stale",
+		Backend:   "claude",
+		Role:      "summary",
+		Status:    scratch.AgentRunStatusStale,
+		SpawnedAt: now.Add(-30 * time.Minute),
+	}); err != nil {
+		t.Fatalf("WriteAgentRun stale: %v", err)
+	}
+	if err := st.WriteAgentRun(runID, &scratch.AgentRun{
+		ID:        "agent-superseded",
+		Backend:   "codex",
+		Role:      "debugger",
+		Status:    scratch.AgentRunStatusSuperseded,
+		SpawnedAt: now.Add(-40 * time.Minute),
+	}); err != nil {
+		t.Fatalf("WriteAgentRun superseded: %v", err)
+	}
+	if err := st.WriteAgentRun(runID, &scratch.AgentRun{
+		ID:        "agent-completed",
+		Backend:   "codex",
+		Role:      "worker",
+		Status:    scratch.AgentRunStatusCompleted,
+		SpawnedAt: now.Add(-10 * time.Minute),
+	}); err != nil {
+		t.Fatalf("WriteAgentRun completed: %v", err)
+	}
+
+	if err := st.AppendCheckpointCandidate(runID, scratch.CheckpointCandidate{
+		ID:           "cp-late-valid",
+		AgentRunID:   "agent-late",
+		Status:       scratch.CheckpointStatusLateValid,
+		ReportedAt:   now.Add(-5 * time.Minute),
+		Summary:      "candidate needs conflict check",
+		ChangedFiles: []string{"README.md"},
+		Caveats:      []string{"late but applies cleanly"},
+	}); err != nil {
+		t.Fatalf("AppendCheckpointCandidate late_valid: %v", err)
+	}
+	if err := st.AppendCheckpointCandidate(runID, scratch.CheckpointCandidate{
+		ID:         "cp-late-stale",
+		AgentRunID: "agent-stale",
+		Status:     scratch.CheckpointStatusLateStale,
+		ReportedAt: now.Add(-15 * time.Minute),
+	}); err != nil {
+		t.Fatalf("AppendCheckpointCandidate late_stale: %v", err)
+	}
+	if err := st.AppendCheckpointCandidate(runID, scratch.CheckpointCandidate{
+		ID:         "cp-conflicting",
+		AgentRunID: "agent-superseded",
+		Status:     scratch.CheckpointStatusConflicting,
+		ReportedAt: now.Add(-25 * time.Minute),
+	}); err != nil {
+		t.Fatalf("AppendCheckpointCandidate conflicting: %v", err)
+	}
+	if err := st.AppendCheckpointCandidate(runID, scratch.CheckpointCandidate{
+		ID:         "cp-fresh",
+		AgentRunID: "agent-completed",
+		Status:     scratch.CheckpointStatusFresh,
+		ReportedAt: now.Add(-1 * time.Minute),
+	}); err != nil {
+		t.Fatalf("AppendCheckpointCandidate fresh: %v", err)
+	}
+
+	data, err := scratch.RenderStatusMarkdown(st, runID, scratch.StatusOptions{UpdatedAt: now, RecentLimit: 10})
+	if err != nil {
+		t.Fatalf("RenderStatusMarkdown: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		"## Stale/Late Work",
+		"- agents:",
+		"  - total: 3",
+		"  - by_status: late=1, stale=1, superseded=1",
+		"    - `agent-late` codex worker late 2026-06-12T12:40:00Z",
+		"      summary: finished after root moved on",
+		"      changed_files: internal/scratch/status.go",
+		"      caveats: needs root triage",
+		"- checkpoint_candidates:",
+		"  - total: 3",
+		"  - by_status: conflicting=1, late_stale=1, late_valid=1",
+		"    - `cp-late-valid` late_valid agent-late 2026-06-12T12:55:00Z",
+		"      summary: candidate needs conflict check",
+		"      changed_files: README.md",
+		"      caveats: late but applies cleanly",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status markdown missing %q:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{
+		"    - `agent-completed`",
+		"    - `cp-fresh`",
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("status markdown included non-attention item %q:\n%s", unwanted, got)
+		}
+	}
+}
+
+func TestRenderStatusMarkdownStaleLateWorkEmpty(t *testing.T) {
+	base := t.TempDir()
+	st := fsstore.Open(base)
+	now := time.Date(2026, 6, 12, 14, 0, 0, 0, time.UTC)
+	runID, err := st.CreateRun(&scratch.Run{
+		ID:        "20260612-140000-no-stale-late",
+		Task:      "nothing to triage",
+		Workspace: "/workspace/tiller",
+		Status:    "running",
+		CreatedAt: now.Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.WriteAgentRun(runID, &scratch.AgentRun{
+		ID:        "agent-ok",
+		Backend:   "codex",
+		Role:      "worker",
+		Status:    scratch.AgentRunStatusCompleted,
+		SpawnedAt: now.Add(-20 * time.Minute),
+	}); err != nil {
+		t.Fatalf("WriteAgentRun: %v", err)
+	}
+	if err := st.AppendCheckpointCandidate(runID, scratch.CheckpointCandidate{
+		ID:         "cp-ok",
+		AgentRunID: "agent-ok",
+		Status:     scratch.CheckpointStatusFresh,
+		ReportedAt: now.Add(-5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("AppendCheckpointCandidate: %v", err)
+	}
+
+	data, err := scratch.RenderStatusMarkdown(st, runID, scratch.StatusOptions{UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("RenderStatusMarkdown: %v", err)
+	}
+	got := string(data)
+	staleLate := strings.Index(got, "## Stale/Late Work\n\n- none")
+	if staleLate < 0 {
+		t.Fatalf("status markdown missing empty stale/late marker:\n%s", got)
+	}
+	tokenUsage := strings.Index(got, "## Observed Token Usage")
+	if tokenUsage < 0 {
+		t.Fatalf("status markdown missing token usage section:\n%s", got)
+	}
+	if staleLate > tokenUsage {
+		t.Fatalf("stale/late section should appear before token usage:\n%s", got)
+	}
+}
+
 func formatInt64ForTest(value int64) string {
 	return strconv.FormatInt(value, 10)
 }

@@ -21,6 +21,9 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Ambient task descriptors** - governed root `Task`/`Agent` and Codex
   `spawn_agent` requests now append descriptor-shaped ledger events and render
   a `## Task Descriptors` section in `status.md`.
+- **Ambient stale/late triage** - `status.md` now renders a `## Stale/Late Work`
+  section for late/stale/superseded agents and late/conflicting checkpoint
+  candidates, with `none` when there is nothing to triage.
 - **Checkpoint guidance** - ambient prompts now treat coherent verified slices
   as commit checkpoints. Agents report exact files, verification, and caveats;
   a repo-configured checkpoint tool is preferred when present, with plain

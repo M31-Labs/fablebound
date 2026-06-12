@@ -122,6 +122,37 @@ func RenderStatusMarkdown(st Store, runID string, opts StatusOptions) ([]byte, e
 	}
 	sb.WriteString("\n")
 
+	sb.WriteString("## Stale/Late Work\n\n")
+	attentionAgents := attentionAgents(agents)
+	attentionCandidates := attentionCandidates(candidates)
+	if len(attentionAgents) == 0 && len(attentionCandidates) == 0 {
+		sb.WriteString("- none\n\n")
+	} else {
+		sb.WriteString("- agents:\n")
+		sb.WriteString(fmt.Sprintf("  - total: %d\n", len(attentionAgents)))
+		writeCounts(&sb, "  - by_status", agentStatusCounts(attentionAgents))
+		sb.WriteString("  - recent:\n")
+		for _, ar := range recentAgents(attentionAgents, opts.RecentLimit) {
+			sb.WriteString(fmt.Sprintf("    - `%s` %s %s %s %s\n", ar.ID, valueOr(ar.Backend, "unknown"), valueOr(ar.Role, "unknown"), valueOr(ar.Status, "unknown"), formatTime(ar.SpawnedAt)))
+			writeOptionalStatusDetails(&sb, "      ", ar.Summary, ar.ChangedFiles, ar.Caveats)
+		}
+		if len(attentionAgents) == 0 {
+			sb.WriteString("    - none\n")
+		}
+		sb.WriteString("- checkpoint_candidates:\n")
+		sb.WriteString(fmt.Sprintf("  - total: %d\n", len(attentionCandidates)))
+		writeCounts(&sb, "  - by_status", checkpointStatusCounts(attentionCandidates))
+		sb.WriteString("  - recent:\n")
+		for _, c := range recentCandidates(attentionCandidates, opts.RecentLimit) {
+			sb.WriteString(fmt.Sprintf("    - `%s` %s %s %s\n", c.ID, valueOr(c.Status, "unknown"), valueOr(c.AgentRunID, "no-agent"), formatTime(c.ReportedAt)))
+			writeOptionalStatusDetails(&sb, "      ", c.Summary, c.ChangedFiles, c.Caveats)
+		}
+		if len(attentionCandidates) == 0 {
+			sb.WriteString("    - none\n")
+		}
+		sb.WriteString("\n")
+	}
+
 	sb.WriteString("## Observed Token Usage\n\n")
 	dispatchUsage := sumDispatchUsage(dispatches)
 	agentUsage := sumAgentUsage(agents)
@@ -198,6 +229,18 @@ func writeCounts(sb *strings.Builder, label string, counts map[string]int) {
 func writeUsage(sb *strings.Builder, label string, u TokenUsage) {
 	sb.WriteString(fmt.Sprintf("%s: input=%d output=%d cache_create=%d cache_read=%d reasoning=%d total=%d\n",
 		label, u.InputTokens, u.OutputTokens, u.CacheCreationInputTokens, u.CacheReadInputTokens, u.ReasoningTokens, u.TotalTokens))
+}
+
+func writeOptionalStatusDetails(sb *strings.Builder, indent, summary string, changedFiles, caveats []string) {
+	if summary != "" {
+		sb.WriteString(fmt.Sprintf("%ssummary: %s\n", indent, oneLine(summary)))
+	}
+	if len(changedFiles) > 0 {
+		sb.WriteString(fmt.Sprintf("%schanged_files: %s\n", indent, strings.Join(changedFiles, ", ")))
+	}
+	if len(caveats) > 0 {
+		sb.WriteString(fmt.Sprintf("%scaveats: %s\n", indent, truncateStatusText(strings.Join(oneLineStrings(caveats), "; "), 240)))
+	}
 }
 
 func shouldWriteSpendBudget(opts StatusOptions, ledgerUsage, combinedUsage TokenUsage) bool {
@@ -304,6 +347,28 @@ func taskDescriptorEvents(events []LedgerEvent) []LedgerEvent {
 	for _, ev := range events {
 		if ev.Kind == "ambient.task_descriptor" {
 			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+func attentionAgents(agents []*AgentRun) []*AgentRun {
+	out := make([]*AgentRun, 0)
+	for _, ar := range agents {
+		switch ar.Status {
+		case AgentRunStatusLate, AgentRunStatusStale, AgentRunStatusSuperseded:
+			out = append(out, ar)
+		}
+	}
+	return out
+}
+
+func attentionCandidates(candidates []CheckpointCandidate) []CheckpointCandidate {
+	out := make([]CheckpointCandidate, 0)
+	for _, c := range candidates {
+		switch c.Status {
+		case CheckpointStatusLateValid, CheckpointStatusLateStale, CheckpointStatusConflicting:
+			out = append(out, c)
 		}
 	}
 	return out
@@ -472,6 +537,14 @@ func oneLine(value string) string {
 		return "unknown"
 	}
 	return value
+}
+
+func oneLineStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, oneLine(value))
+	}
+	return out
 }
 
 func valueOr(value, fallback string) string {

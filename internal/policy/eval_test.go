@@ -408,7 +408,7 @@ func TestAmbientNextActionDecisions(t *testing.T) {
 		want   string
 	}{
 		{
-			name: "checkpoint",
+			name: "checkpoint fresh",
 			mutate: func(req *AmbientNextActionRequest) {
 				req.DistillationAvailable = true
 				req.DistillationCount = 1
@@ -419,6 +419,58 @@ func TestAmbientNextActionDecisions(t *testing.T) {
 				req.RiskChangedFilesCount = 2
 			},
 			want: "checkpoint",
+		},
+		{
+			name: "checkpoint proposed",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.DistillationAvailable = true
+				req.DistillationCount = 1
+				req.DistillationAgeSeconds = 120
+				req.DistillationStatus = "fresh"
+				req.CheckpointProposedCount = 1
+				req.CheckpointHasVerification = true
+				req.RiskChangedFilesCount = 2
+			},
+			want: "checkpoint",
+		},
+		{
+			name: "review verified policy checkpoint",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.CheckpointFreshCount = 1
+				req.CheckpointHasVerification = true
+				req.RiskChangedFilesCount = 1
+				req.RiskTouchesPolicy = true
+			},
+			want: "review",
+		},
+		{
+			name: "review verified sandbox checkpoint",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.CheckpointProposedCount = 1
+				req.CheckpointHasVerification = true
+				req.RiskChangedFilesCount = 1
+				req.RiskTouchesSandbox = true
+			},
+			want: "review",
+		},
+		{
+			name: "review verified conflicting checkpoint",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.CheckpointFreshCount = 1
+				req.CheckpointHasVerification = true
+				req.CheckpointConflictingCount = 1
+				req.RiskChangedFilesCount = 1
+			},
+			want: "review",
+		},
+		{
+			name: "late checkpoint distills",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.CheckpointLateCount = 1
+				req.CheckpointHasVerification = true
+				req.RiskChangedFilesCount = 1
+			},
+			want: "distill",
 		},
 		{
 			name: "wait",

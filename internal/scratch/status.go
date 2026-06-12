@@ -174,7 +174,7 @@ func RenderStatusMarkdown(st Store, runID string, opts StatusOptions) ([]byte, e
 	}
 
 	facts := BuildAmbientNextActionFacts(r, dispatches, agents, candidates, ledger, opts)
-	decision, fallback := EvalAmbientNextActionForStatus(facts)
+	decision, fallback := EvalAmbientNextActionForStatusInProject(facts, r.Workspace)
 	sb.WriteString("## Arbiter Next Action\n\n")
 	writeKV(&sb, "action", decision.Action)
 	writeKV(&sb, "confidence", fmt.Sprint(decision.Confidence))

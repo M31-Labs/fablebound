@@ -58,12 +58,21 @@ strategy AmbientNextAction returns AmbientDecision {
             target: "agents",
             budget_posture: "ok",
         }
-    when { checkpoint.fresh_count > 0 and checkpoint.has_verification and work.pending_agent_count == 0 and work.failed_agent_count == 0 }
+    when { risk.touches_policy or risk.touches_sandbox or checkpoint.conflicting_count > 0 }
+        then Review {
+            action: "review",
+            confidence: 84,
+            risk: "high",
+            reason: "policy, sandbox, or conflicting checkpoint surface needs scrutiny",
+            target: "risk",
+            budget_posture: "ok",
+        }
+    when { (checkpoint.fresh_count > 0 or checkpoint.proposed_count > 0) and checkpoint.has_verification and work.pending_agent_count == 0 and work.failed_agent_count == 0 and not risk.touches_policy and not risk.touches_sandbox and checkpoint.conflicting_count == 0 }
         then Checkpoint {
             action: "checkpoint",
             confidence: 90,
             risk: "low",
-            reason: "fresh verified checkpoint candidate is ready",
+            reason: "verified checkpoint candidate is ready",
             target: "checkpoint",
             budget_posture: "ok",
         }
@@ -83,15 +92,6 @@ strategy AmbientNextAction returns AmbientDecision {
             risk: "medium",
             reason: "failed descriptor work can be retried with a tighter packet",
             target: "descriptor",
-            budget_posture: "ok",
-        }
-    when { risk.touches_policy or risk.touches_sandbox or checkpoint.conflicting_count > 0 }
-        then Review {
-            action: "review",
-            confidence: 84,
-            risk: "high",
-            reason: "policy, sandbox, or conflicting checkpoint surface needs scrutiny",
-            target: "risk",
             budget_posture: "ok",
         }
     when { run.reason_budget > 0 and run.reason_budget_used >= run.reason_budget }

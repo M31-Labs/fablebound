@@ -1,6 +1,8 @@
 package scratch_test
 
 import (
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -631,12 +633,68 @@ func TestRenderStatusMarkdownRecommendedNextActionsProceed(t *testing.T) {
 }
 
 func TestRenderStatusMarkdownArbiterNextActionCheckpoint(t *testing.T) {
+	tests := []struct {
+		name   string
+		status string
+	}{
+		{name: "fresh", status: scratch.CheckpointStatusFresh},
+		{name: "proposed", status: scratch.CheckpointStatusProposed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := t.TempDir()
+			st := fsstore.Open(base)
+			now := time.Date(2026, 6, 12, 17, 0, 0, 0, time.UTC)
+			runID, err := st.CreateRun(&scratch.Run{
+				ID:        "20260612-170000-arbiter-" + tt.name,
+				Task:      "checkpoint action",
+				Workspace: "/workspace/tiller",
+				Status:    "running",
+				CreatedAt: now.Add(-time.Hour),
+			})
+			if err != nil {
+				t.Fatalf("CreateRun: %v", err)
+			}
+			if err := st.AppendCheckpointCandidate(runID, scratch.CheckpointCandidate{
+				ID:           "cp-" + tt.name,
+				Status:       tt.status,
+				ReportedAt:   now.Add(-2 * time.Minute),
+				ChangedFiles: []string{"internal/scratch/status.go"},
+				Verification: []string{"go test ./internal/scratch"},
+			}); err != nil {
+				t.Fatalf("AppendCheckpointCandidate: %v", err)
+			}
+
+			data, err := scratch.RenderStatusMarkdown(st, runID, scratch.StatusOptions{UpdatedAt: now})
+			if err != nil {
+				t.Fatalf("RenderStatusMarkdown: %v", err)
+			}
+			got := string(data)
+			for _, want := range []string{
+				"## Arbiter Next Action",
+				"- action: checkpoint",
+				"- confidence: 90",
+				"- risk: low",
+				"- reason: verified checkpoint candidate is ready",
+				"- target: checkpoint",
+				"- budget_posture: ok",
+				"- fallback: false",
+			} {
+				if !strings.Contains(got, want) {
+					t.Fatalf("status markdown missing %q:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderStatusMarkdownArbiterNextActionIgnoresLateVerification(t *testing.T) {
 	base := t.TempDir()
 	st := fsstore.Open(base)
-	now := time.Date(2026, 6, 12, 17, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 6, 12, 17, 30, 0, 0, time.UTC)
 	runID, err := st.CreateRun(&scratch.Run{
-		ID:        "20260612-170000-arbiter",
-		Task:      "checkpoint action",
+		ID:        "20260612-173000-late-verification",
+		Task:      "late verification",
 		Workspace: "/workspace/tiller",
 		Status:    "running",
 		CreatedAt: now.Add(-time.Hour),
@@ -645,8 +703,8 @@ func TestRenderStatusMarkdownArbiterNextActionCheckpoint(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	if err := st.AppendCheckpointCandidate(runID, scratch.CheckpointCandidate{
-		ID:           "cp-fresh",
-		Status:       scratch.CheckpointStatusFresh,
+		ID:           "cp-late",
+		Status:       scratch.CheckpointStatusLateValid,
 		ReportedAt:   now.Add(-2 * time.Minute),
 		ChangedFiles: []string{"internal/scratch/status.go"},
 		Verification: []string{"go test ./internal/scratch"},
@@ -660,14 +718,122 @@ func TestRenderStatusMarkdownArbiterNextActionCheckpoint(t *testing.T) {
 	}
 	got := string(data)
 	for _, want := range []string{
-		"## Arbiter Next Action",
-		"- action: checkpoint",
-		"- confidence: 90",
-		"- risk: low",
-		"- reason: fresh verified checkpoint candidate is ready",
-		"- target: checkpoint",
-		"- budget_posture: ok",
+		"- action: distill",
+		"- target: distillation",
 		"- fallback: false",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status markdown missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "- action: checkpoint") {
+		t.Fatalf("status markdown checkpointed late candidate:\n%s", got)
+	}
+}
+
+func TestRenderStatusMarkdownUsesProjectAmbientNextActionPolicy(t *testing.T) {
+	base := t.TempDir()
+	workspace := t.TempDir()
+	policyDir := filepath.Join(workspace, ".tiller", "policy")
+	if err := os.MkdirAll(policyDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll policy dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(policyDir, "ambient_next_action.arb"), []byte(`outcome AmbientDecision {
+    action: string
+    confidence: number
+    risk: string
+    reason: string
+    target: string
+    budget_posture: string
+}
+
+strategy AmbientNextAction returns AmbientDecision {
+	when { run.status == "running" }
+		then LocalOverride {
+		action: "ask_user",
+		confidence: 99,
+		risk: "medium",
+        reason: "local override selected",
+		target: "override",
+		budget_posture: "ok",
+	}
+	else LocalFallback {
+		action: "proceed",
+		confidence: 1,
+		risk: "low",
+		reason: "local fallback",
+		target: "override",
+		budget_posture: "ok",
+	}
+}
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile local policy: %v", err)
+	}
+
+	st := fsstore.Open(base)
+	now := time.Date(2026, 6, 12, 18, 0, 0, 0, time.UTC)
+	runID, err := st.CreateRun(&scratch.Run{
+		ID:        "20260612-180000-local-policy",
+		Task:      "local policy",
+		Workspace: workspace,
+		Status:    "running",
+		CreatedAt: now.Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	data, err := scratch.RenderStatusMarkdown(st, runID, scratch.StatusOptions{UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("RenderStatusMarkdown: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		"- action: ask_user",
+		"- confidence: 99",
+		"- reason: local override selected",
+		"- target: override",
+		"- fallback: false",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status markdown missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderStatusMarkdownMalformedProjectPolicyFallsBack(t *testing.T) {
+	base := t.TempDir()
+	workspace := t.TempDir()
+	policyDir := filepath.Join(workspace, ".tiller", "policy")
+	if err := os.MkdirAll(policyDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll policy dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(policyDir, "ambient_next_action.arb"), []byte("not valid arbiter policy"), 0o644); err != nil {
+		t.Fatalf("WriteFile malformed policy: %v", err)
+	}
+
+	st := fsstore.Open(base)
+	now := time.Date(2026, 6, 12, 18, 30, 0, 0, time.UTC)
+	runID, err := st.CreateRun(&scratch.Run{
+		ID:        "20260612-183000-malformed-policy",
+		Task:      "malformed local policy",
+		Workspace: workspace,
+		Status:    "running",
+		CreatedAt: now.Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	data, err := scratch.RenderStatusMarkdown(st, runID, scratch.StatusOptions{UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("RenderStatusMarkdown: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		"- action: proceed",
+		"- reason: policy load failed; deterministic fallback",
+		"- fallback: true",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status markdown missing %q:\n%s", want, got)

@@ -48,7 +48,11 @@ func BuildAmbientNextActionFacts(r *Run, dispatches []*Dispatch, agents []*Agent
 }
 
 func EvalAmbientNextActionForStatus(facts policy.AmbientNextActionRequest) (policy.AmbientNextActionDecision, bool) {
-	loaded, err := policy.Load("ambient_next_action", "")
+	return EvalAmbientNextActionForStatusInProject(facts, "")
+}
+
+func EvalAmbientNextActionForStatusInProject(facts policy.AmbientNextActionRequest, projectDir string) (policy.AmbientNextActionDecision, bool) {
+	loaded, err := policy.Load("ambient_next_action", projectDir)
 	if err != nil {
 		return fallbackAmbientNextAction(facts, "policy load failed"), true
 	}
@@ -141,6 +145,11 @@ func checkpointCount(candidates []CheckpointCandidate, statuses ...string) int {
 
 func checkpointHasVerification(candidates []CheckpointCandidate) bool {
 	for _, c := range candidates {
+		switch c.Status {
+		case CheckpointStatusProposed, CheckpointStatusFresh:
+		default:
+			continue
+		}
 		if len(c.Verification) > 0 {
 			return true
 		}

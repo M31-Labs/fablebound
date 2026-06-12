@@ -29,6 +29,35 @@ test "fresh verified candidate checkpoints" {
     expect strategy AmbientNextAction selected Checkpoint { action: "checkpoint", target: "checkpoint" }
 }
 
+test "proposed verified candidate checkpoints" {
+    given {
+        run.status: "running"
+        run.reason_budget_used: 0
+        run.reason_budget: 2
+        run.output_budget_band: "ok"
+        run.reasoning_budget_band: "ok"
+        work.pending_descriptor_count: 0
+        work.failed_descriptor_count: 0
+        work.pending_agent_count: 0
+        work.stale_agent_count: 0
+        work.failed_agent_count: 0
+        work.iteration_count: 1
+        distillation.available: true
+        distillation.count: 1
+        distillation.age_seconds: 120
+        distillation.status: "fresh"
+        checkpoint.fresh_count: 0
+        checkpoint.proposed_count: 1
+        checkpoint.late_count: 0
+        checkpoint.conflicting_count: 0
+        checkpoint.has_verification: true
+        risk.changed_files_count: 2
+        risk.touches_policy: false
+        risk.touches_sandbox: false
+    }
+    expect strategy AmbientNextAction selected Checkpoint { action: "checkpoint", target: "checkpoint" }
+}
+
 test "pending work waits" {
     given {
         run.status: "running"
@@ -201,6 +230,122 @@ test "risky surface reviews" {
         risk.touches_sandbox: false
     }
     expect strategy AmbientNextAction selected Review { action: "review", target: "risk" }
+}
+
+test "verified policy checkpoint reviews" {
+    given {
+        run.status: "running"
+        run.reason_budget_used: 0
+        run.reason_budget: 2
+        run.output_budget_band: "ok"
+        run.reasoning_budget_band: "ok"
+        work.pending_descriptor_count: 0
+        work.failed_descriptor_count: 0
+        work.pending_agent_count: 0
+        work.stale_agent_count: 0
+        work.failed_agent_count: 0
+        work.iteration_count: 1
+        distillation.available: false
+        distillation.count: 0
+        distillation.age_seconds: 0
+        distillation.status: ""
+        checkpoint.fresh_count: 1
+        checkpoint.proposed_count: 0
+        checkpoint.late_count: 0
+        checkpoint.conflicting_count: 0
+        checkpoint.has_verification: true
+        risk.changed_files_count: 1
+        risk.touches_policy: true
+        risk.touches_sandbox: false
+    }
+    expect strategy AmbientNextAction selected Review { action: "review", target: "risk" }
+}
+
+test "verified sandbox checkpoint reviews" {
+    given {
+        run.status: "running"
+        run.reason_budget_used: 0
+        run.reason_budget: 2
+        run.output_budget_band: "ok"
+        run.reasoning_budget_band: "ok"
+        work.pending_descriptor_count: 0
+        work.failed_descriptor_count: 0
+        work.pending_agent_count: 0
+        work.stale_agent_count: 0
+        work.failed_agent_count: 0
+        work.iteration_count: 1
+        distillation.available: false
+        distillation.count: 0
+        distillation.age_seconds: 0
+        distillation.status: ""
+        checkpoint.fresh_count: 0
+        checkpoint.proposed_count: 1
+        checkpoint.late_count: 0
+        checkpoint.conflicting_count: 0
+        checkpoint.has_verification: true
+        risk.changed_files_count: 1
+        risk.touches_policy: false
+        risk.touches_sandbox: true
+    }
+    expect strategy AmbientNextAction selected Review { action: "review", target: "risk" }
+}
+
+test "verified conflicting checkpoint reviews" {
+    given {
+        run.status: "running"
+        run.reason_budget_used: 0
+        run.reason_budget: 2
+        run.output_budget_band: "ok"
+        run.reasoning_budget_band: "ok"
+        work.pending_descriptor_count: 0
+        work.failed_descriptor_count: 0
+        work.pending_agent_count: 0
+        work.stale_agent_count: 0
+        work.failed_agent_count: 0
+        work.iteration_count: 1
+        distillation.available: false
+        distillation.count: 0
+        distillation.age_seconds: 0
+        distillation.status: ""
+        checkpoint.fresh_count: 1
+        checkpoint.proposed_count: 0
+        checkpoint.late_count: 0
+        checkpoint.conflicting_count: 1
+        checkpoint.has_verification: true
+        risk.changed_files_count: 1
+        risk.touches_policy: false
+        risk.touches_sandbox: false
+    }
+    expect strategy AmbientNextAction selected Review { action: "review", target: "risk" }
+}
+
+test "late verified checkpoint distills" {
+    given {
+        run.status: "running"
+        run.reason_budget_used: 0
+        run.reason_budget: 2
+        run.output_budget_band: "ok"
+        run.reasoning_budget_band: "ok"
+        work.pending_descriptor_count: 0
+        work.failed_descriptor_count: 0
+        work.pending_agent_count: 0
+        work.stale_agent_count: 0
+        work.failed_agent_count: 0
+        work.iteration_count: 1
+        distillation.available: false
+        distillation.count: 0
+        distillation.age_seconds: 0
+        distillation.status: ""
+        checkpoint.fresh_count: 0
+        checkpoint.proposed_count: 0
+        checkpoint.late_count: 1
+        checkpoint.conflicting_count: 0
+        checkpoint.has_verification: true
+        risk.changed_files_count: 1
+        risk.touches_policy: false
+        risk.touches_sandbox: false
+    }
+    expect strategy AmbientNextAction selected DistillStale { action: "distill", target: "distillation" }
 }
 
 test "over budget halts" {

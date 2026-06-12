@@ -146,7 +146,7 @@ rule DenyHyphaDaemons priority 14 {
 #                      honest.
 #
 #   "ambient-control" — temporary testing/control commands:
-#                      "tiller ambient disable|enable|status|next|doctor".
+#                      "tiller ambient disable|enable|status|next|step --dry-run|doctor".
 #
 #   "codex-exec"    — constrained Codex CLI delegation:
 #                      explicit gpt-5.5, explicit model_reasoning_effort,

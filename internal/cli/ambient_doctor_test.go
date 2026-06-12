@@ -24,6 +24,8 @@ func TestRunAmbientDoctorHappyPath(t *testing.T) {
 		"PASS ambient bypass: not active",
 		"PASS classifier smoke: ambient control status",
 		"PASS classifier smoke: ambient control next",
+		"PASS classifier smoke: ambient control step dry-run",
+		"PASS classifier smoke: ambient control step without dry-run denied",
 		"PASS classifier smoke: ambient control doctor",
 		"PASS classifier smoke: ambient control doctor extra-arg denied",
 		"PASS classifier smoke: git status readonly",
@@ -34,7 +36,9 @@ func TestRunAmbientDoctorHappyPath(t *testing.T) {
 		`PASS hook smoke: PreToolUse Bash "lsof -iTCP -sTCP:LISTEN -P -n" silent allow`,
 		`PASS hook smoke: PreToolUse Bash "tiller ambient status" silent allow`,
 		`PASS hook smoke: PreToolUse Bash "tiller ambient next" silent allow`,
+		`PASS hook smoke: PreToolUse Bash "tiller ambient step --dry-run" silent allow`,
 		`PASS hook smoke: PreToolUse Bash "tiller ambient doctor" silent allow`,
+		`PASS hook smoke: PreToolUse Bash "tiller ambient step" denied without dry-run`,
 		`PASS hook smoke: PreToolUse Bash "go build ./..." Codex deny guidance`,
 	} {
 		if !strings.Contains(out, want) {
@@ -72,10 +76,10 @@ func TestRunAmbientDoctorBypassMarkerWarnsWithoutFailing(t *testing.T) {
 }
 
 func TestRunAmbientUsageErrorsMentionDoctor(t *testing.T) {
-	if err := runAmbient(nil); err == nil || !strings.Contains(err.Error(), "usage: tiller ambient disable|enable|status|next|doctor") {
+	if err := runAmbient(nil); err == nil || !strings.Contains(err.Error(), "usage: tiller ambient disable|enable|status|next|step --dry-run|doctor") {
 		t.Fatalf("runAmbient(nil) err = %v", err)
 	}
-	if err := runAmbient([]string{"pause"}); err == nil || !strings.Contains(err.Error(), "disable, enable, status, next, or doctor") {
+	if err := runAmbient([]string{"pause"}); err == nil || !strings.Contains(err.Error(), "disable, enable, status, next, step --dry-run, or doctor") {
 		t.Fatalf("runAmbient(pause) err = %v", err)
 	}
 }

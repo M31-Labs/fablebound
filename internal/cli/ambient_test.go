@@ -81,6 +81,22 @@ func TestRunAmbientNextRequiresRunContext(t *testing.T) {
 	}
 }
 
+func TestRunAmbientStepRequiresDryRun(t *testing.T) {
+	if err := runAmbient([]string{"step"}); err == nil || !strings.Contains(err.Error(), "only --dry-run is supported") {
+		t.Fatalf("step error = %v, want dry-run requirement", err)
+	}
+	if err := runAmbient([]string{"step", "--force"}); err == nil || !strings.Contains(err.Error(), "usage: tiller ambient step --dry-run") {
+		t.Fatalf("step --force error = %v, want dry-run usage", err)
+	}
+}
+
+func TestRunAmbientStepDryRunRequiresRunContext(t *testing.T) {
+	t.Setenv("TILLER_RUN_DIR", "")
+	if err := runAmbient([]string{"step", "--dry-run"}); err == nil || !strings.Contains(err.Error(), "TILLER_RUN_DIR") {
+		t.Fatalf("step --dry-run error = %v, want missing TILLER_RUN_DIR", err)
+	}
+}
+
 func TestRunAmbientNextPrintsScratchDigest(t *testing.T) {
 	dir := t.TempDir()
 	withChdir(t, dir)
@@ -130,6 +146,120 @@ func TestRunAmbientNextPrintsScratchDigest(t *testing.T) {
 	for _, line := range want {
 		if !strings.Contains(out, line) {
 			t.Fatalf("next output missing %q:\n%s", line, out)
+		}
+	}
+}
+
+func TestRunAmbientStepDryRunPrintsProceedPacket(t *testing.T) {
+	dir := t.TempDir()
+	withChdir(t, dir)
+	runsBase := filepath.Join(dir, ".tiller", "runs")
+	st := fsstore.Open(runsBase)
+	now := time.Now().UTC()
+	runID, err := st.CreateRun(&scratch.Run{
+		ID:           "20260612-120000-test",
+		Task:         "step packet test",
+		Workspace:    dir,
+		Status:       "running",
+		ReasonBudget: 2,
+		CreatedAt:    now,
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.AppendLedgerEvent(runID, scratch.LedgerEvent{
+		ID:      "distill-001",
+		Kind:    "ambient.distillation",
+		Status:  "completed",
+		At:      now,
+		Summary: "Compact state for packet.",
+	}); err != nil {
+		t.Fatalf("AppendLedgerEvent: %v", err)
+	}
+	runDir := filepath.Join(runsBase, runID)
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	out := captureAmbientStdout(t, func() {
+		if err := runAmbient([]string{"step", "--dry-run"}); err != nil {
+			t.Fatalf("step --dry-run: %v", err)
+		}
+	})
+
+	want := []string{
+		"dry_run: true",
+		"run: " + runID,
+		"next_action: proceed confidence=70 risk=low budget=ok fallback=false",
+		"agent_type: orchestrator",
+		"objective: Continue orchestration using the Arbiter target: orchestrator.",
+		"context_paths:",
+		"- " + filepath.Join(runDir, "status.md"),
+		"- " + filepath.Join(runDir, "ledger.jsonl") + " (fallback/raw context)",
+		"constraints:",
+		"- command is dry-run and observational only; do not spawn, edit, commit, or mutate checkpoint state while running it",
+		"expected_output:",
+		"- Outcome",
+		"- Distillation when useful",
+		"- files inspected/changed",
+		"- verification commands and results",
+		"- caveats or residual risk",
+		"- checkpoint candidate yes/no",
+		"- recommended next action",
+		"suggested_spawn: none - root orchestrator should continue directly",
+		"read:",
+	}
+	for _, line := range want {
+		if !strings.Contains(out, line) {
+			t.Fatalf("step packet missing %q:\n%s", line, out)
+		}
+	}
+}
+
+func TestRunAmbientStepDryRunMapsReviewToReviewer(t *testing.T) {
+	dir := t.TempDir()
+	withChdir(t, dir)
+	runsBase := filepath.Join(dir, ".tiller", "runs")
+	st := fsstore.Open(runsBase)
+	now := time.Now().UTC()
+	runID, err := st.CreateRun(&scratch.Run{
+		ID:           "20260612-130000-test",
+		Task:         "step review packet test",
+		Workspace:    dir,
+		Status:       "running",
+		ReasonBudget: 2,
+		CreatedAt:    now,
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.AppendCheckpointCandidate(runID, scratch.CheckpointCandidate{
+		ID:           "cp-001",
+		Status:       scratch.CheckpointStatusFresh,
+		ReportedAt:   now,
+		ChangedFiles: []string{"policy/ambient.arb"},
+		Verification: []string{"go test ./internal/policy"},
+	}); err != nil {
+		t.Fatalf("AppendCheckpointCandidate: %v", err)
+	}
+	runDir := filepath.Join(runsBase, runID)
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	out := captureAmbientStdout(t, func() {
+		if err := runAmbient([]string{"step", "--dry-run"}); err != nil {
+			t.Fatalf("step --dry-run: %v", err)
+		}
+	})
+
+	want := []string{
+		"next_action: review confidence=84 risk=high budget=ok fallback=false",
+		"agent_type: tiller-reviewer",
+		"profile: read-only review",
+		"objective: Review policy, sandbox, or conflicting checkpoint surface and report concrete risks before mutation.",
+		"- descriptor posture: read-only sandbox; inspect status.md first and do not edit, commit, or resolve checkpoints",
+		`suggested_spawn: spawn_agent agent_type="tiller-reviewer" objective="Review policy, sandbox, or conflicting checkpoint surface and report concrete risks before mutation."`,
+	}
+	for _, line := range want {
+		if !strings.Contains(out, line) {
+			t.Fatalf("review step packet missing %q:\n%s", line, out)
 		}
 	}
 }

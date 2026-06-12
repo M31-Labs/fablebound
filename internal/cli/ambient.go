@@ -15,8 +15,8 @@ import (
 )
 
 func runAmbient(args []string) error {
-	if len(args) != 1 {
-		return fmt.Errorf("usage: tiller ambient disable|enable|status|next|doctor")
+	if len(args) < 1 {
+		return fmt.Errorf("usage: tiller ambient disable|enable|status|next|step --dry-run|doctor")
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -25,6 +25,9 @@ func runAmbient(args []string) error {
 
 	switch args[0] {
 	case "disable", "off":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: tiller ambient %s", args[0])
+		}
 		path, changed, err := ambientgate.Disable(cwd)
 		if err != nil {
 			return err
@@ -37,6 +40,9 @@ func runAmbient(args []string) error {
 		return nil
 
 	case "enable", "on":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: tiller ambient %s", args[0])
+		}
 		path, changed, err := ambientgate.Enable(cwd)
 		if err != nil {
 			return err
@@ -49,6 +55,9 @@ func runAmbient(args []string) error {
 		return nil
 
 	case "status":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: tiller ambient status")
+		}
 		path := ambientgate.DisabledPath(cwd)
 		if ambientgate.IsDisabled(cwd) {
 			fmt.Printf("tiller: ambient disabled for %s (%s)\n", cwd, path)
@@ -66,6 +75,9 @@ func runAmbient(args []string) error {
 		return nil
 
 	case "next":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: tiller ambient next")
+		}
 		digest, err := buildAmbientNextDigest(cwd, true)
 		if err != nil {
 			return err
@@ -73,11 +85,28 @@ func runAmbient(args []string) error {
 		printAmbientNextDigest(digest)
 		return nil
 
+	case "step":
+		if len(args) == 1 {
+			return fmt.Errorf("ambient step: only --dry-run is supported for now")
+		}
+		if len(args) != 2 || args[1] != "--dry-run" {
+			return fmt.Errorf("usage: tiller ambient step --dry-run")
+		}
+		digest, err := buildAmbientNextDigest(cwd, true)
+		if err != nil {
+			return err
+		}
+		printAmbientStepDryRun(digest)
+		return nil
+
 	case "doctor":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: tiller ambient doctor")
+		}
 		return runAmbientDoctor()
 
 	default:
-		return fmt.Errorf("unknown ambient command %q (want disable, enable, status, next, or doctor)", args[0])
+		return fmt.Errorf("unknown ambient command %q (want disable, enable, status, next, step --dry-run, or doctor)", args[0])
 	}
 }
 

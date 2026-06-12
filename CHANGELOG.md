@@ -43,6 +43,10 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Ambient next digest** - `tiller ambient next` now prints a compact
   run-control digest from scratch state, and `tiller ambient status` points to
   the active run's `status.md` and current Arbiter next action when available.
+- **Ambient dry-run step descriptor** - `tiller ambient step --dry-run` now
+  emits the Arbiter next action as a portable descriptor packet for
+  orchestrators, without spawning, editing, committing, or mutating checkpoint
+  state.
 - **Ambient runtime doctor** - `tiller ambient doctor` verifies the live
   executable/version, source/binary drift, bypass state, ambient command
   classifier, and hook policy smoke behavior.

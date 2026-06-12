@@ -98,6 +98,7 @@ func newerAmbientSources(cwd string, exeModUnixNano int64) []string {
 	var newer []string
 	for _, rel := range []string{
 		"internal/cli/ambient.go",
+		"internal/cli/ambient_step.go",
 		"internal/hook/cmdclass.go",
 		"internal/policy/defaults/ambient.arb",
 		"policy/ambient.arb",
@@ -130,6 +131,8 @@ func (d *ambientDoctor) checkClassifierSmoke() {
 	}{
 		{"ambient control status", hook.IsAmbientControl("tiller ambient status")},
 		{"ambient control next", hook.IsAmbientControl("tiller ambient next")},
+		{"ambient control step dry-run", hook.IsAmbientControl("tiller ambient step --dry-run")},
+		{"ambient control step without dry-run denied", !hook.IsAmbientControl("tiller ambient step")},
 		{"ambient control doctor", hook.IsAmbientControl("tiller ambient doctor")},
 		{"ambient control doctor extra-arg denied", !hook.IsAmbientControl("tiller ambient doctor --force")},
 		{"git status readonly", hook.ClassifyCommand("git status --short") == "readonly"},
@@ -172,6 +175,7 @@ func (d *ambientDoctor) checkHookSmoke() {
 		"lsof -iTCP -sTCP:LISTEN -P -n",
 		"tiller ambient status",
 		"tiller ambient next",
+		"tiller ambient step --dry-run",
 		"tiller ambient doctor",
 	} {
 		out, err := codexDoctorRunHook(smokeWorkspace, codexDoctorPreToolEvent(transcript, "Bash", map[string]any{"command": command}))
@@ -186,12 +190,28 @@ func (d *ambientDoctor) checkHookSmoke() {
 		d.pass("hook smoke: PreToolUse Bash %q silent allow", command)
 	}
 
-	out, err := codexDoctorRunHook(smokeWorkspace, codexDoctorPreToolEvent(transcript, "Bash", map[string]any{"command": "go build ./..."}))
+	out, err := codexDoctorRunHook(smokeWorkspace, codexDoctorPreToolEvent(transcript, "Bash", map[string]any{"command": "tiller ambient step"}))
+	if err != nil {
+		d.fail("hook smoke Bash %q: %v", "tiller ambient step", err)
+		return
+	}
+	reason := codexDoctorDecisionReason(out)
+	if decision := codexDoctorDecision(out); decision != "deny" {
+		d.fail("hook smoke Bash %q: expected deny, got %q", "tiller ambient step", decision)
+		return
+	}
+	if !containsAll(reason, []string{"spawn_agent", "tiller-worker"}) {
+		d.fail("hook smoke Bash %q: deny reason missing Codex delegation guidance: %q", "tiller ambient step", reason)
+		return
+	}
+	d.pass("hook smoke: PreToolUse Bash %q denied without dry-run", "tiller ambient step")
+
+	out, err = codexDoctorRunHook(smokeWorkspace, codexDoctorPreToolEvent(transcript, "Bash", map[string]any{"command": "go build ./..."}))
 	if err != nil {
 		d.fail("hook smoke Bash %q: %v", "go build ./...", err)
 		return
 	}
-	reason := codexDoctorDecisionReason(out)
+	reason = codexDoctorDecisionReason(out)
 	if decision := codexDoctorDecision(out); decision != "deny" {
 		d.fail("hook smoke Bash %q: expected deny, got %q", "go build ./...", decision)
 		return

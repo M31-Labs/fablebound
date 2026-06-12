@@ -1177,6 +1177,25 @@ test "tiller ambient next is allowed (run-control digest)" {
     expect rule AllowPermittedBash matched
 }
 
+test "tiller ambient step dry-run is allowed (descriptor packet)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "tiller ambient step --dry-run"
+        tool.command_class: "ambient-control"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule AllowPermittedBash matched
+}
+
 test "tiller ambient doctor is allowed (runtime control plane smoke)" {
     given {
         agent.role: "ambient-orchestrator"

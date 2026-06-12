@@ -50,7 +50,7 @@ import (
 //	hypha: all subcommands EXCEPT "mcp serve" and "hub serve" → other.
 //
 //	tiller: runs, poll, version subcommands only. Self-uninstall and ambient
-//	disable/enable/status escape hatches are classified separately.
+//	control escape hatches are classified separately.
 func ClassifyCommand(cmd string) string {
 	if cmd == "" {
 		return "other"
@@ -662,10 +662,11 @@ func isAllowedSelfUninstallBackend(backend string) bool {
 	}
 }
 
-// IsAmbientControl returns true if cmd is exactly "tiller ambient
-// disable|enable|status|next|doctor" with no other arguments, chaining, redirects, or
-// command substitution. This is a temporary testing escape hatch for ambient
-// hook enforcement.
+// IsAmbientControl returns true if cmd is exactly one of the permitted
+// "tiller ambient" control commands with no extra arguments, chaining,
+// redirects, or command substitution. The only multi-word control shape is
+// "tiller ambient step --dry-run"; bare "step" is intentionally denied because
+// it would imply execution semantics that do not exist yet.
 func IsAmbientControl(cmd string) bool {
 	segments, ok := splitSegmentsQuoteAware(cmd)
 	if !ok || len(segments) != 1 {
@@ -675,13 +676,19 @@ func IsAmbientControl(cmd string) bool {
 	if !ok {
 		return false
 	}
-	if len(fields) != 3 {
+	if len(fields) != 3 && len(fields) != 4 {
 		return false
 	}
 	if isVarAssignment(fields[0]) {
 		return false
 	}
 	if filepath.Base(fields[0]) != "tiller" || fields[1] != "ambient" {
+		return false
+	}
+	if fields[2] == "step" {
+		return len(fields) == 4 && fields[3] == "--dry-run"
+	}
+	if len(fields) != 3 {
 		return false
 	}
 	switch fields[2] {

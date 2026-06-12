@@ -60,6 +60,10 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **OpenCode project install** - `tiller install --backend opencode --project`
   writes `opencode.json`, `.opencode/tiller.md`, and OpenCode markdown agents
   for a `tiller-orchestrator` primary plus the `tiller-*` subagent set.
+- **Codex Spark summary routing** - Codex `tiller-summary` now uses
+  `gpt-5.3-codex-spark` with high reasoning for fast read-only
+  status/distillation/checkpoint/commit-prep work, while `tiller-scout`
+  remains on `gpt-5.4-mini` for cheap bounded reconnaissance.
 
 ---
 

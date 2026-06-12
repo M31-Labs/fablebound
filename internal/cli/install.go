@@ -1128,9 +1128,9 @@ Right-sizing matrix:
   ordinary context.
 - ` + "`tiller-scout`" + `: ` + "`gpt-5.4-mini`" + ` for cheap bounded reconnaissance,
   inventories, docs/log snippets, and simple summaries.
-- ` + "`tiller-summary`" + `: ` + "`gpt-5.4-mini`" + ` for compact status updates,
-  distilled ambient state, run ledger summaries, stale/late report triage,
-  checkpoint candidate synthesis, and Arbiter next-action bookkeeping.
+- ` + "`tiller-summary`" + `: ` + "`gpt-5.3-codex-spark`" + ` high, read-only, for compact
+  status/distillation/checkpoint/commit-prep, stale/late report triage, and
+  Arbiter next-action bookkeeping.
 - ` + "`tiller-worker`" + `: ` + "`gpt-5.5 medium`" + ` for bounded implementation, edits,
   builds, and tests.
 - ` + "`tiller-debugger`" + `: ` + "`gpt-5.5 high`" + ` for root-cause analysis plus fixes.
@@ -1143,9 +1143,10 @@ Codex delegation mechanics:
 - Use the normal Codex multi-agent tools (` + "`spawn_agent`" + `, ` + "`wait_agent`" + `,
   ` + "`send_input`" + `, ` + "`resume_agent`" + `, ` + "`close_agent`" + `) with ` + "`agent_type`" + ` set to one of
   the ` + "`tiller-*`" + ` agents.
-- Use ` + "`tiller-summary`" + ` for compact status updates, distilled ambient state,
-  run ledger summaries, stale/late report triage, checkpoint candidate
-  synthesis, and Arbiter next-action bookkeeping instead of spending root output on
+- Use ` + "`tiller-summary`" + ` for fast read-only Spark summary/checkpoint-prep:
+  compact status updates, distilled ambient state, run ledger summaries,
+  stale/late report triage, checkpoint candidate synthesis, commit/checkpoint
+  briefs, and Arbiter next-action bookkeeping instead of spending root output on
   routine status compaction.
   Prefer ` + "`status.md`" + ` first when it is present in the run directory; prioritize
   ` + "`Distillation`" + ` and ` + "`Arbiter Next Action`" + `; use ` + "`Recommended Next Actions`" + ` as
@@ -1220,7 +1221,7 @@ func codexSkillSnippet() string {
 		"",
 		"- root: direct reads/searches and routing decisions; no subagent needed for ordinary context.",
 		"- `tiller-scout`: `gpt-5.4-mini` for cheap bounded reconnaissance, inventories, docs/log snippets, and simple summaries.",
-		"- `tiller-summary`: `gpt-5.4-mini` for compact status updates, distilled ambient state, run ledger summaries, stale/late report triage, checkpoint candidate synthesis, and Arbiter next-action bookkeeping.",
+		"- `tiller-summary`: `gpt-5.3-codex-spark` high, read-only, for compact status/distillation/checkpoint/commit-prep, stale/late report triage, and Arbiter next-action bookkeeping.",
 		"- `tiller-worker`: `gpt-5.5 medium` for bounded implementation, edits, builds, and tests.",
 		"- `tiller-debugger`: `gpt-5.5 high` for root-cause analysis plus fixes.",
 		"- `tiller-investigator`/`tiller-reviewer`: `gpt-5.5 xhigh` read-only for deep tracing, adversarial review, and high-stakes verification.",
@@ -1229,7 +1230,7 @@ func codexSkillSnippet() string {
 		"## Delegation",
 		"",
 		"- Use `tiller-scout` for cheap, bounded read-only reconnaissance and simple summaries.",
-		"- Use `tiller-summary` for compact status updates, distilled ambient state, run ledger summaries, stale/late report triage, checkpoint candidate synthesis, and Arbiter next-action bookkeeping. Prefer `status.md` first when it is present in the run directory; prioritize `Distillation` and `Arbiter Next Action`; use `Recommended Next Actions` as legacy/fallback context; when `Stale/Late Work` is not `none`, triage it before raw logs; when `Spend Budget` is warn/over, recommend compact/checkpoint/proceed.",
+		"- Use `tiller-summary` for fast read-only Spark summary/checkpoint-prep: compact status updates, distilled ambient state, run ledger summaries, stale/late report triage, checkpoint candidate synthesis, commit/checkpoint briefs, and Arbiter next-action bookkeeping. Prefer `status.md` first when it is present in the run directory; prioritize `Distillation` and `Arbiter Next Action`; use `Recommended Next Actions` as legacy/fallback context; when `Stale/Late Work` is not `none`, triage it before raw logs; when `Spend Budget` is warn/over, recommend compact/checkpoint/proceed.",
 		"- Use `tiller-worker` for implementation, file edits, builds, tests, generated files, and other execution work.",
 		"- Use `tiller-debugger` for root-cause debugging plus fixes.",
 		"- Use `tiller-investigator` for deep read-only tracing or claim verification.",

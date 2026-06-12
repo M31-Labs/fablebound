@@ -24,6 +24,13 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Ambient stale/late triage** - `status.md` now renders a `## Stale/Late Work`
   section for late/stale/superseded agents and late/conflicting checkpoint
   candidates, with `none` when there is nothing to triage.
+- **Ambient result reconciliation** - governed root `PostToolUse` results now
+  append advisory `ambient.task_result` ledger facts, update best-effort agent
+  runs/checkpoint candidates from descriptor-compatible reports, and refresh
+  `status.md` without changing ambient allow/deny policy.
+- **Ambient recommended next actions** - `status.md` now renders a deterministic
+  `## Recommended Next Actions` section for stale triage, checkpoint review,
+  compaction, waiting, or proceeding.
 - **Checkpoint guidance** - ambient prompts now treat coherent verified slices
   as commit checkpoints. Agents report exact files, verification, and caveats;
   a repo-configured checkpoint tool is preferred when present, with plain

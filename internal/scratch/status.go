@@ -85,7 +85,7 @@ func RenderStatusMarkdown(st Store, runID string, opts StatusOptions) ([]byte, e
 	}
 	sb.WriteString("\n")
 
-	taskDescriptors := taskDescriptorEvents(ledger)
+	taskDescriptors := effectiveTaskDescriptorEvents(ledger)
 	sb.WriteString("## Task Descriptors\n\n")
 	sb.WriteString(fmt.Sprintf("- total: %d\n", len(taskDescriptors)))
 	writeCounts(&sb, "- by_status", ledgerStatusCounts(taskDescriptors))
@@ -152,6 +152,12 @@ func RenderStatusMarkdown(st Store, runID string, opts StatusOptions) ([]byte, e
 		}
 		sb.WriteString("\n")
 	}
+
+	sb.WriteString("## Recommended Next Actions\n\n")
+	for _, action := range recommendedNextActions(taskDescriptors, agents, candidates, opts, sumLedgerUsage(ledger), totalObservedUsage(dispatches, agents, ledger)) {
+		sb.WriteString(fmt.Sprintf("- `%s`: %s\n", action.ID, action.Rationale))
+	}
+	sb.WriteString("\n")
 
 	sb.WriteString("## Observed Token Usage\n\n")
 	dispatchUsage := sumDispatchUsage(dispatches)
@@ -352,6 +358,38 @@ func taskDescriptorEvents(events []LedgerEvent) []LedgerEvent {
 	return out
 }
 
+func effectiveTaskDescriptorEvents(events []LedgerEvent) []LedgerEvent {
+	descriptors := taskDescriptorEvents(events)
+	resultsByDescriptor := map[string]LedgerEvent{}
+	for _, ev := range events {
+		if ev.Kind != "ambient.task_result" {
+			continue
+		}
+		descriptorID := refValue(ev.Refs, "descriptor_id")
+		if descriptorID == "" {
+			continue
+		}
+		prev, ok := resultsByDescriptor[descriptorID]
+		if !ok || ev.At.After(prev.At) || ev.At.Equal(prev.At) && ev.ID > prev.ID {
+			resultsByDescriptor[descriptorID] = ev
+		}
+	}
+	for i := range descriptors {
+		descriptorID := refValue(descriptors[i].Refs, "descriptor_id")
+		result, ok := resultsByDescriptor[descriptorID]
+		if !ok {
+			continue
+		}
+		if result.Status != "" {
+			descriptors[i].Status = result.Status
+		}
+		if result.AgentRunID != "" {
+			descriptors[i].AgentRunID = result.AgentRunID
+		}
+	}
+	return descriptors
+}
+
 func attentionAgents(agents []*AgentRun) []*AgentRun {
 	out := make([]*AgentRun, 0)
 	for _, ar := range agents {
@@ -451,6 +489,141 @@ func sumLedgerUsage(events []LedgerEvent) TokenUsage {
 		total.addPtr(ev.TokenUsage)
 	}
 	return total
+}
+
+func totalObservedUsage(dispatches []*Dispatch, agents []*AgentRun, ledger []LedgerEvent) TokenUsage {
+	total := TokenUsage{}
+	total.add(sumDispatchUsage(dispatches))
+	total.add(sumAgentUsage(agents))
+	total.add(sumLedgerUsage(ledger))
+	return total
+}
+
+type recommendedAction struct {
+	ID        string
+	Rationale string
+}
+
+func recommendedNextActions(descriptors []LedgerEvent, agents []*AgentRun, candidates []CheckpointCandidate, opts StatusOptions, ledgerUsage, totalUsage TokenUsage) []recommendedAction {
+	var actions []recommendedAction
+	attentionAgents := attentionAgents(agents)
+	attentionCandidates := attentionCandidates(candidates)
+	if len(attentionAgents) > 0 || len(attentionCandidates) > 0 {
+		actions = append(actions, recommendedAction{
+			ID:        "triage_stale_work",
+			Rationale: fmt.Sprintf("attention agents=%d checkpoint_candidates=%d ids=%s", len(attentionAgents), len(attentionCandidates), compactIDs(append(agentIDs(attentionAgents), candidateIDs(attentionCandidates)...), 6)),
+		})
+	}
+	checkpointCandidates := checkpointActionCandidates(candidates)
+	if len(checkpointCandidates) > 0 {
+		actions = append(actions, recommendedAction{
+			ID:        "checkpoint_candidate",
+			Rationale: fmt.Sprintf("review checkpoint candidates=%d ids=%s", len(checkpointCandidates), compactIDs(candidateIDs(checkpointCandidates), 6)),
+		})
+	}
+	if budgetAdviceNeeded(opts, ledgerUsage, totalUsage) {
+		warnRatio := normalizedBudgetWarnRatio(opts)
+		actions = append(actions, recommendedAction{
+			ID:        "compact_status",
+			Rationale: fmt.Sprintf("spend budget band output=%s reasoning=%s", budgetBand(totalUsage.OutputTokens, opts.OutputTokenBudget, warnRatio), budgetBand(totalUsage.ReasoningTokens, opts.ReasoningTokenBudget, warnRatio)),
+		})
+	}
+	if len(actions) == 0 {
+		pendingDescriptors := pendingDescriptorEvents(descriptors)
+		pendingAgents := pendingAgents(agents)
+		if len(pendingDescriptors) > 0 || len(pendingAgents) > 0 {
+			actions = append(actions, recommendedAction{
+				ID:        "wait_for_agents",
+				Rationale: fmt.Sprintf("outstanding descriptors=%d agents=%d ids=%s", len(pendingDescriptors), len(pendingAgents), compactIDs(append(descriptorIDs(pendingDescriptors), agentIDs(pendingAgents)...), 6)),
+			})
+		}
+	}
+	if len(actions) == 0 {
+		actions = append(actions, recommendedAction{ID: "proceed", Rationale: "no stale work, checkpoint candidate, spend warning, or outstanding agent work"})
+	}
+	return actions
+}
+
+func checkpointActionCandidates(candidates []CheckpointCandidate) []CheckpointCandidate {
+	out := make([]CheckpointCandidate, 0)
+	for _, c := range candidates {
+		switch c.Status {
+		case CheckpointStatusProposed, CheckpointStatusFresh, CheckpointStatusLateValid:
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func budgetAdviceNeeded(opts StatusOptions, ledgerUsage, totalUsage TokenUsage) bool {
+	if !shouldWriteSpendBudget(opts, ledgerUsage, totalUsage) {
+		return false
+	}
+	warnRatio := normalizedBudgetWarnRatio(opts)
+	return budgetBand(totalUsage.OutputTokens, opts.OutputTokenBudget, warnRatio) != "ok" ||
+		budgetBand(totalUsage.ReasoningTokens, opts.ReasoningTokenBudget, warnRatio) != "ok"
+}
+
+func pendingDescriptorEvents(events []LedgerEvent) []LedgerEvent {
+	out := make([]LedgerEvent, 0)
+	for _, ev := range events {
+		switch ev.Status {
+		case AgentRunStatusRequested, AgentRunStatusRunning, AgentRunStatusSpawned:
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+func pendingAgents(agents []*AgentRun) []*AgentRun {
+	out := make([]*AgentRun, 0)
+	for _, ar := range agents {
+		switch ar.Status {
+		case AgentRunStatusRequested, AgentRunStatusRunning, AgentRunStatusSpawned:
+			out = append(out, ar)
+		}
+	}
+	return out
+}
+
+func agentIDs(agents []*AgentRun) []string {
+	out := make([]string, 0, len(agents))
+	for _, ar := range agents {
+		out = append(out, ar.ID)
+	}
+	return out
+}
+
+func candidateIDs(candidates []CheckpointCandidate) []string {
+	out := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		out = append(out, c.ID)
+	}
+	return out
+}
+
+func descriptorIDs(events []LedgerEvent) []string {
+	out := make([]string, 0, len(events))
+	for _, ev := range events {
+		if id := refValue(ev.Refs, "descriptor_id"); id != "" {
+			out = append(out, id)
+			continue
+		}
+		out = append(out, ev.ID)
+	}
+	return out
+}
+
+func compactIDs(ids []string, limit int) string {
+	ids = uniqueStrings(ids)
+	sort.Strings(ids)
+	if len(ids) == 0 {
+		return "none"
+	}
+	if len(ids) > limit {
+		return strings.Join(ids[:limit], ", ") + fmt.Sprintf(", +%d more", len(ids)-limit)
+	}
+	return strings.Join(ids, ", ")
 }
 
 func (u *TokenUsage) addPtr(other *TokenUsage) {

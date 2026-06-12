@@ -394,6 +394,152 @@ func TestRenderStatusMarkdownStaleLateWorkEmpty(t *testing.T) {
 	}
 }
 
+func TestRenderStatusMarkdownRecommendedNextActionsMultiAction(t *testing.T) {
+	base := t.TempDir()
+	st := fsstore.Open(base)
+	now := time.Date(2026, 6, 12, 15, 0, 0, 0, time.UTC)
+	runID, err := st.CreateRun(&scratch.Run{
+		ID:        "20260612-150000-actions",
+		Task:      "derive actions",
+		Workspace: "/workspace/tiller",
+		Status:    "running",
+		CreatedAt: now.Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.WriteAgentRun(runID, &scratch.AgentRun{
+		ID:        "agent-late",
+		Backend:   "codex",
+		Role:      "worker",
+		Status:    scratch.AgentRunStatusLate,
+		SpawnedAt: now.Add(-20 * time.Minute),
+	}); err != nil {
+		t.Fatalf("WriteAgentRun late: %v", err)
+	}
+	if err := st.WriteAgentRun(runID, &scratch.AgentRun{
+		ID:        "agent-running",
+		Backend:   "codex",
+		Role:      "worker",
+		Status:    scratch.AgentRunStatusRunning,
+		SpawnedAt: now.Add(-10 * time.Minute),
+	}); err != nil {
+		t.Fatalf("WriteAgentRun running: %v", err)
+	}
+	if err := st.AppendCheckpointCandidate(runID, scratch.CheckpointCandidate{
+		ID:         "cp-proposed",
+		AgentRunID: "agent-running",
+		Status:     scratch.CheckpointStatusProposed,
+		ReportedAt: now.Add(-5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("AppendCheckpointCandidate proposed: %v", err)
+	}
+	if err := st.AppendCheckpointCandidate(runID, scratch.CheckpointCandidate{
+		ID:         "cp-late-valid",
+		AgentRunID: "agent-late",
+		Status:     scratch.CheckpointStatusLateValid,
+		ReportedAt: now.Add(-15 * time.Minute),
+	}); err != nil {
+		t.Fatalf("AppendCheckpointCandidate late_valid: %v", err)
+	}
+	if err := st.AppendLedgerEvent(runID, scratch.LedgerEvent{
+		ID:      "usage",
+		Backend: "codex",
+		Kind:    "codex.lifecycle",
+		Status:  "observed",
+		At:      now,
+		TokenUsage: &scratch.TokenUsage{
+			OutputTokens:    90,
+			ReasoningTokens: 5,
+			TotalTokens:     95,
+		},
+	}); err != nil {
+		t.Fatalf("AppendLedgerEvent usage: %v", err)
+	}
+
+	data, err := scratch.RenderStatusMarkdown(st, runID, scratch.StatusOptions{
+		UpdatedAt:            now,
+		OutputTokenBudget:    100,
+		ReasoningTokenBudget: 50,
+		BudgetWarnRatio:      0.80,
+	})
+	if err != nil {
+		t.Fatalf("RenderStatusMarkdown: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		"## Recommended Next Actions",
+		"- `triage_stale_work`: attention agents=1 checkpoint_candidates=1 ids=agent-late, cp-late-valid",
+		"- `checkpoint_candidate`: review checkpoint candidates=2 ids=cp-late-valid, cp-proposed",
+		"- `compact_status`: spend budget band output=warn reasoning=ok",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status markdown missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "`wait_for_agents`") {
+		t.Fatalf("wait_for_agents should be absorbed by higher-priority actions:\n%s", got)
+	}
+	staleLate := strings.Index(got, "## Stale/Late Work")
+	recommended := strings.Index(got, "## Recommended Next Actions")
+	tokenUsage := strings.Index(got, "## Observed Token Usage")
+	if staleLate < 0 || recommended < 0 || tokenUsage < 0 || !(staleLate < recommended && recommended < tokenUsage) {
+		t.Fatalf("recommended actions should be between stale/late and token usage:\n%s", got)
+	}
+}
+
+func TestRenderStatusMarkdownRecommendedNextActionsProceed(t *testing.T) {
+	base := t.TempDir()
+	st := fsstore.Open(base)
+	now := time.Date(2026, 6, 12, 16, 0, 0, 0, time.UTC)
+	runID, err := st.CreateRun(&scratch.Run{
+		ID:        "20260612-160000-proceed",
+		Task:      "no action",
+		Workspace: "/workspace/tiller",
+		Status:    "running",
+		CreatedAt: now.Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.WriteAgentRun(runID, &scratch.AgentRun{
+		ID:        "agent-done",
+		Backend:   "codex",
+		Role:      "worker",
+		Status:    scratch.AgentRunStatusCompleted,
+		SpawnedAt: now.Add(-20 * time.Minute),
+	}); err != nil {
+		t.Fatalf("WriteAgentRun: %v", err)
+	}
+	if err := st.AppendCheckpointCandidate(runID, scratch.CheckpointCandidate{
+		ID:         "cp-accepted",
+		AgentRunID: "agent-done",
+		Status:     scratch.CheckpointStatusAccepted,
+		ReportedAt: now.Add(-10 * time.Minute),
+	}); err != nil {
+		t.Fatalf("AppendCheckpointCandidate: %v", err)
+	}
+
+	data, err := scratch.RenderStatusMarkdown(st, runID, scratch.StatusOptions{UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("RenderStatusMarkdown: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		"## Recommended Next Actions",
+		"- `proceed`: no stale work, checkpoint candidate, spend warning, or outstanding agent work",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status markdown missing %q:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"`triage_stale_work`", "`checkpoint_candidate`", "`compact_status`", "`wait_for_agents`"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("status markdown included unexpected action %q:\n%s", unwanted, got)
+		}
+	}
+}
+
 func formatInt64ForTest(value int64) string {
 	return strconv.FormatInt(value, 10)
 }

@@ -593,6 +593,67 @@ func runCodexAmbientHook(t *testing.T, transcriptFile, toolName string, toolInpu
 	return bytes.TrimSpace(out.Bytes())
 }
 
+func runCodexAmbientPostHook(t *testing.T, transcriptFile, toolName string, toolInput map[string]any, toolResponse map[string]any) []byte {
+	t.Helper()
+	event := map[string]any{
+		"hook_event_name": "PostToolUse",
+		"tool_name":       toolName,
+		"tool_input":      toolInput,
+		"tool_response":   toolResponse,
+		"transcript_path": transcriptFile,
+		"agent_id":        "",
+		"model":           "gpt-5.5",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("TILLER_ROLE", old)
+		}
+	})
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, "", "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	return bytes.TrimSpace(out.Bytes())
+}
+
+func runClaudeAmbientPostHook(t *testing.T, workspace, transcriptFile, toolName string, toolInput map[string]any, toolResponse map[string]any) []byte {
+	t.Helper()
+	event := map[string]any{
+		"hook_event_name": "PostToolUse",
+		"tool_name":       toolName,
+		"tool_input":      toolInput,
+		"tool_response":   toolResponse,
+		"transcript_path": transcriptFile,
+		"agent_id":        "",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("TILLER_ROLE", old)
+		}
+	})
+
+	var out bytes.Buffer
+	if err := Run(strings.NewReader(string(data)), &out, workspace); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	return bytes.TrimSpace(out.Bytes())
+}
+
 func parseAmbientDecision(t *testing.T, out []byte) string {
 	t.Helper()
 	var wrapper struct {
@@ -1061,7 +1122,7 @@ func TestCodexSessionStartAdditionalContext(t *testing.T) {
 		t.Fatalf("RunWithBackend error: %v", err)
 	}
 	ctx := parseAdditionalContext(t, bytes.TrimSpace(out.Bytes()))
-	for _, want := range []string{"Tiller ambient is active", "Root may read/search directly", ".tiller/scratch/codex/", "premium/reason-tier output", "descriptor-backed task list", "Codex, Claude Code, OpenCode, Cursor", "Descriptor fields", "budget tier/model ceiling", "Queue/background independent descriptors", "update descriptors from returned reports", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "spawn_agent", "agent_type=\"tiller-scout\"", "agent_type=\"tiller-summary\"", "status compaction", "stale/late report triage", "gpt-5.4-mini", "agent_type=\"tiller-worker\"", "gpt-5.5 medium", "gpt-5.5 high", "gpt-5.5 xhigh", "wait_agent/close_agent"} {
+	for _, want := range []string{"Tiller ambient is active", "Root may read/search directly", ".tiller/scratch/codex/", "premium/reason-tier output", "descriptor-backed task list", "Codex, Claude Code, OpenCode, Cursor", "Descriptor fields", "budget tier/model ceiling", "Stale/Late Work", "Recommended Next Actions", "Queue/background independent descriptors", "update descriptors from returned reports", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "spawn_agent", "agent_type=\"tiller-scout\"", "agent_type=\"tiller-summary\"", "status compaction", "stale/late report triage", "gpt-5.4-mini", "agent_type=\"tiller-worker\"", "gpt-5.5 medium", "gpt-5.5 high", "gpt-5.5 xhigh", "wait_agent/close_agent"} {
 		if !strings.Contains(ctx, want) {
 			t.Fatalf("SessionStart context missing %q:\n%s", want, ctx)
 		}
@@ -1123,7 +1184,7 @@ func TestCodexSubagentStartAdditionalContext(t *testing.T) {
 		{
 			name:      "summary",
 			agentType: "tiller-summary",
-			want:      []string{"Tiller summary agent", "gpt-5.4-mini", "read-only status compaction", "stale/late report triage", "checkpoint candidate synthesis", "recommended next action", "Do not edit files", "Read relevant .tiller/scratch/codex/ notes first", "descriptor-compatible report contract", "checkpoint candidate yes/no", "update task status and checkpoint decisions", "checkpointable wins", "configured checkpoint tool or Git"},
+			want:      []string{"Tiller summary agent", "gpt-5.4-mini", "read-only status compaction", "stale/late report triage", "checkpoint candidate synthesis", "recommended next action", "Recommended Next Actions", "Do not edit files", "Read relevant .tiller/scratch/codex/ notes first", "descriptor-compatible report contract", "checkpoint candidate yes/no", "update task status and checkpoint decisions", "checkpointable wins", "configured checkpoint tool or Git"},
 		},
 	}
 
@@ -1476,6 +1537,169 @@ func TestClaudeAmbientTaskAppendsTaskDescriptor(t *testing.T) {
 	for _, want := range []string{"tiller-worker: Patch the renderer", "tool:Task", "agent_type:tiller-worker", "descriptor_id:", "objective_hash:"} {
 		if !ledgerEventContains(*descriptor, want) {
 			t.Fatalf("descriptor missing %q: %#v", want, descriptor)
+		}
+	}
+}
+
+func TestClaudeAmbientTaskPostToolUseReconcilesReport(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_ROLE", "")
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := fableTranscript(t)
+	toolInput := map[string]any{
+		"subagent_type": "tiller-worker",
+		"description":   "Patch the renderer",
+		"prompt":        "Patch the renderer and run tests.",
+	}
+	pre := map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "Task",
+		"tool_input":      toolInput,
+		"transcript_path": p,
+		"agent_id":        "",
+	}
+	preData, err := json.Marshal(pre)
+	if err != nil {
+		t.Fatalf("marshal pre event: %v", err)
+	}
+	var preOut bytes.Buffer
+	if err := Run(strings.NewReader(string(preData)), &preOut, workspace); err != nil {
+		t.Fatalf("Run pre error: %v", err)
+	}
+	if decision := parseAmbientDecision(t, bytes.TrimSpace(preOut.Bytes())); decision != "allow" {
+		t.Fatalf("expected allow, got %q", decision)
+	}
+
+	report := strings.Join([]string{
+		"## Outcome",
+		"Renderer patched and verified.",
+		"## Files Changed",
+		"- internal/scratch/status.go",
+		"- README.md",
+		"## Verification Commands and Results",
+		"- go test ./internal/scratch: pass",
+		"## Caveats or Residual Risk",
+		"- no full integration run",
+		"## Checkpoint Candidate",
+		"yes",
+		"## Recommended Next Action",
+		"checkpoint_candidate",
+	}, "\n")
+	out := runClaudeAmbientPostHook(t, workspace, p, "Task", toolInput, map[string]any{
+		"is_error": false,
+		"output":   report,
+	})
+	if len(out) != 0 {
+		t.Fatalf("PostToolUse should stay silent, got %s", out)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	result := findLedgerEventKind(events, "ambient.task_result")
+	if result == nil || result.Status != scratch.AgentRunStatusCompleted || result.AgentRunID == "" {
+		t.Fatalf("missing completed result event: %#v", events)
+	}
+	for _, want := range []string{"Renderer patched and verified.", "tool:Task", "agent_type:tiller-worker", "descriptor_id:", "objective_hash:"} {
+		if !ledgerEventContains(*result, want) {
+			t.Fatalf("result missing %q: %#v", want, result)
+		}
+	}
+	agents, err := st.ListAgentRuns(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListAgentRuns: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("agent run count=%d want 1: %#v", len(agents), agents)
+	}
+	if agents[0].Status != scratch.AgentRunStatusCompleted || agents[0].Summary != "Renderer patched and verified." {
+		t.Fatalf("unexpected agent run: %#v", agents[0])
+	}
+	if strings.Join(agents[0].ChangedFiles, ",") != "README.md,internal/scratch/status.go" {
+		t.Fatalf("changed files not parsed/sorted: %#v", agents[0].ChangedFiles)
+	}
+	candidates, err := st.ListCheckpointCandidates(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListCheckpointCandidates: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].Status != scratch.CheckpointStatusProposed || candidates[0].AgentRunID != agents[0].ID {
+		t.Fatalf("unexpected checkpoint candidates: %#v", candidates)
+	}
+	status, err := os.ReadFile(filepath.Join(runDir, "status.md"))
+	if err != nil {
+		t.Fatalf("read status.md: %v", err)
+	}
+	got := string(status)
+	for _, want := range []string{
+		"## Task Descriptors",
+		"- by_status: completed=1",
+		"## Recommended Next Actions",
+		"- `checkpoint_candidate`: review checkpoint candidates=1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status.md missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestCodexAmbientPostToolUseReconcilesStableBackendAgent(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := codexTranscript(t, "xhigh")
+	toolInput := map[string]any{
+		"agent_type": "tiller-worker",
+		"prompt":     "Implement descriptor-backed task list.",
+	}
+	if out := runCodexAmbientHook(t, p, "functions.spawn_agent", toolInput); len(out) != 0 {
+		t.Fatalf("Codex allowed spawn_agent should stay silent, got %s", out)
+	}
+	out := runCodexAmbientPostHook(t, p, "functions.spawn_agent", toolInput, map[string]any{
+		"is_error": false,
+		"agent_id": "backend-agent-456",
+		"output":   "## Outcome\nAgent requested.\n## Recommended Next Action\nwait_for_agents",
+	})
+	if len(out) != 0 {
+		t.Fatalf("PostToolUse should stay silent, got %s", out)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	result := findLedgerEventKind(events, "ambient.task_result")
+	if result == nil || result.Status != scratch.AgentRunStatusRequested || result.AgentRunID == "" {
+		t.Fatalf("missing requested result event: %#v", events)
+	}
+	agents, err := st.ListAgentRuns(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListAgentRuns: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("agent run count=%d want 1: %#v", len(agents), agents)
+	}
+	if agents[0].BackendAgentID != "backend-agent-456" || agents[0].Status != scratch.AgentRunStatusRequested || agents[0].Role != "worker" {
+		t.Fatalf("unexpected agent run: %#v", agents[0])
+	}
+	status, err := os.ReadFile(filepath.Join(runDir, "status.md"))
+	if err != nil {
+		t.Fatalf("read status.md: %v", err)
+	}
+	got := string(status)
+	for _, want := range []string{
+		"## Task Descriptors",
+		"- by_status: requested=1",
+		"## Recommended Next Actions",
+		"- `wait_for_agents`: outstanding descriptors=1 agents=1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status.md missing %q:\n%s", want, got)
 		}
 	}
 }

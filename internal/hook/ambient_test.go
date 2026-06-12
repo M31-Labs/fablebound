@@ -615,6 +615,14 @@ func TestCodexAmbientReadAllowedSilent(t *testing.T) {
 	}
 }
 
+func TestCodexAmbientNamespacedViewImageAllowedSilent(t *testing.T) {
+	p := codexTranscript(t, "xhigh")
+	out := runCodexAmbientHook(t, p, "functions.view_image", map[string]any{"path": "/workspace/screenshot.png"})
+	if len(out) != 0 {
+		t.Fatalf("Codex allow for functions.view_image should produce no stdout, got %s", out)
+	}
+}
+
 func TestCodexAmbientNamespacedMultiAgentLifecycleAllowedSilent(t *testing.T) {
 	p := codexTranscript(t, "xhigh")
 	for _, toolName := range []string{

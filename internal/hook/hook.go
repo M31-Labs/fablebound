@@ -56,6 +56,7 @@ type ToolInput struct {
 
 	// File tools (Read, Write, Edit, Glob, Grep, NotebookEdit)
 	FilePath string `json:"file_path"`
+	Path     string `json:"path"`
 
 	// Write: new file content.
 	Content string `json:"content"`
@@ -255,8 +256,13 @@ func HandlePreToolUse(id Identity, event HookEvent, workspaceDir string) ([]byte
 		}
 	}
 
+	filePath := input.FilePath
+	if filePath == "" {
+		filePath = input.Path
+	}
+
 	// Compute path containment facts in Go (never in policy).
-	inScratch, inWorkspace := computePathFacts(input.FilePath, id.RunDir, workspaceDir)
+	inScratch, inWorkspace := computePathFacts(filePath, id.RunDir, workspaceDir)
 
 	req := policy.ToolCallRequest{
 		Role:        id.Role,
@@ -264,7 +270,7 @@ func HandlePreToolUse(id Identity, event HookEvent, workspaceDir string) ([]byte
 		DispatchID:  id.DispatchID,
 		Tool:        event.ToolName,
 		Command:     input.Command,
-		FilePath:    input.FilePath,
+		FilePath:    filePath,
 		InScratch:   inScratch,
 		InWorkspace: inWorkspace,
 		RunID:       id.RunID,
@@ -419,6 +425,9 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer, ambient *tier.Am
 		req.Command = input.Cmd
 	}
 	req.FilePath = input.FilePath
+	if req.FilePath == "" {
+		req.FilePath = input.Path
+	}
 
 	// Populate CommandClass for Bash calls (used by AllowPermittedBash rule,
 	// which covers readonly and explicit escape-hatch classes).
@@ -863,6 +872,9 @@ func inputSummary(toolName string, input ToolInput) string {
 		}
 	default:
 		s = input.FilePath
+		if s == "" {
+			s = input.Path
+		}
 	}
 	if len(s) > 256 {
 		s = s[:256]
@@ -880,8 +892,8 @@ func toolStatus(resp ToolResponse) string {
 
 // isReadTool returns true for tools that produce context reads.
 func isReadTool(toolName string) bool {
-	switch toolName {
-	case "Read", "Glob", "Grep":
+	switch normalizeAmbientToolName(toolName) {
+	case "Read", "Glob", "Grep", "view_image":
 		return true
 	}
 	return false

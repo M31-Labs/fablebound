@@ -322,6 +322,36 @@ test "orchestrator Grep tool is allowed (OrchestratorRead)" {
     expect rule OrchestratorRead matched
 }
 
+test "orchestrator view_image tool is allowed (OrchestratorRead)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "view_image"
+        tool.command: ""
+        tool.file_path: "/home/user/project/screenshot.png"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorRead matched
+}
+
+test "orchestrator functions.view_image tool is allowed (OrchestratorRead)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "functions.view_image"
+        tool.command: ""
+        tool.file_path: "/home/user/project/screenshot.png"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorRead matched
+}
+
 # ── OrchestratorEffector ──────────────────────────────────────────────────────
 
 test "orchestrator running tiller dispatch is allowed (OrchestratorEffector)" {
@@ -749,6 +779,21 @@ test "reviewer Glob is allowed (ReadTools)" {
         tool.name: "Glob"
         tool.command: ""
         tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        run.id: "20260101-000000-0001"
+    }
+    expect rule ReadTools matched
+}
+
+test "investigator functions.view_image is allowed (ReadTools)" {
+    given {
+        agent.role: "investigator"
+        agent.depth: 1
+        agent.dispatch_id: "d01"
+        tool.name: "functions.view_image"
+        tool.command: ""
+        tool.file_path: "/home/user/project/screenshot.png"
         tool.path_in_scratch: false
         tool.path_in_workspace: true
         run.id: "20260101-000000-0001"

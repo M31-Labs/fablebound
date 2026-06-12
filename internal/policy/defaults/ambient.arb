@@ -15,7 +15,7 @@ rule HaltAmbient priority 0 {
 }
 
 rule AllowRead priority 10 {
-    when { tool.name in ["Read", "Glob", "Grep"] }
+    when { tool.name in ["Read", "Glob", "Grep", "view_image"] }
     then Allow { reason: "reading is permitted for the ambient orchestrator" }
 }
 

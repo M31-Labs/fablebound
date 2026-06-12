@@ -65,6 +65,24 @@ test "Grep is allowed in ambient mode" {
     expect rule DenyExecution not matched
 }
 
+test "view_image is allowed in ambient mode" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "view_image"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: "/home/user/project/screenshot.png"
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowRead matched
+    expect rule DenyExecution not matched
+}
+
 # ── AllowAgent ───────────────────────────────────────────────────────────────
 
 test "Agent (Task dispatch) is allowed in ambient mode" {

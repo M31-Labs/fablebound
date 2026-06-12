@@ -39,7 +39,7 @@ rule DenyTerminalDispatch priority 2 {
 }
 
 rule OrchestratorRead priority 10 {
-    when segment orchestrator { tool.name in ["Read", "Glob", "Grep"] }
+    when segment orchestrator { tool.name in ["Read", "Glob", "Grep", "view_image", "functions.view_image"] }
     then Allow { reason: "orchestrator reads" }
 }
 rule OrchestratorEffector priority 10 {
@@ -77,7 +77,7 @@ rule ReadOnlyBash priority 12 {
     then Allow { reason: "read-only command" }
 }
 rule ReadTools priority 12 {
-    when { tool.name in ["Read", "Glob", "Grep"] }
+    when { tool.name in ["Read", "Glob", "Grep", "view_image", "functions.view_image"] }
     then Allow { reason: "reading is universal" }
 }
 

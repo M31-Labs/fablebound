@@ -36,6 +36,10 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   compressed state before raw logs/transcripts. This is the foundation for the
   recursive ambient loop: distilled state -> next action/refinement ->
   checkpoint, continue, or escalate.
+- **Arbiter ambient next action** - `status.md` now renders
+  `## Arbiter Next Action` from the new `ambient_next_action` policy, emitting
+  one advisory action with confidence, risk, reason, target, and budget
+  posture while keeping `Recommended Next Actions` as legacy/fallback context.
 - **Ambient recommended next actions** - `status.md` now renders a deterministic
   `## Recommended Next Actions` section for stale triage, checkpoint review,
   compaction, waiting, or proceeding.

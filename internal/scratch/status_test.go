@@ -132,6 +132,13 @@ func TestRenderStatusMarkdown(t *testing.T) {
 		"refs: tool:spawn_agent, descriptor_id:abc123, attempt_id:attempt789",
 		"## Checkpoint Candidates",
 		"- `cp-001` fresh agent-001 2026-06-12T09:55:00Z",
+		"## Arbiter Next Action",
+		"- action: wait",
+		"- confidence: 82",
+		"- risk: low",
+		"- target: agents",
+		"- budget_posture: ok",
+		"- fallback: false",
 		"## Observed Token Usage",
 		"- combined_observed: input=140 output=42 cache_create=0 cache_read=0 reasoning=0 total=182",
 		"## Recent Ledger Events",
@@ -547,6 +554,9 @@ func TestRenderStatusMarkdownRecommendedNextActionsMultiAction(t *testing.T) {
 	}
 	got := string(data)
 	for _, want := range []string{
+		"## Arbiter Next Action",
+		"- action: distill",
+		"- target: distillation",
 		"## Recommended Next Actions",
 		"- `triage_stale_work`: attention agents=1 checkpoint_candidates=1 ids=agent-late, cp-late-valid",
 		"- `checkpoint_candidate`: review checkpoint candidates=2 ids=cp-late-valid, cp-proposed",
@@ -560,10 +570,11 @@ func TestRenderStatusMarkdownRecommendedNextActionsMultiAction(t *testing.T) {
 		t.Fatalf("wait_for_agents should be absorbed by higher-priority actions:\n%s", got)
 	}
 	staleLate := strings.Index(got, "## Stale/Late Work")
+	arbiter := strings.Index(got, "## Arbiter Next Action")
 	recommended := strings.Index(got, "## Recommended Next Actions")
 	tokenUsage := strings.Index(got, "## Observed Token Usage")
-	if staleLate < 0 || recommended < 0 || tokenUsage < 0 || !(staleLate < recommended && recommended < tokenUsage) {
-		t.Fatalf("recommended actions should be between stale/late and token usage:\n%s", got)
+	if staleLate < 0 || arbiter < 0 || recommended < 0 || tokenUsage < 0 || !(staleLate < arbiter && arbiter < recommended && recommended < tokenUsage) {
+		t.Fatalf("arbiter and recommended actions should be between stale/late and token usage:\n%s", got)
 	}
 }
 
@@ -615,6 +626,51 @@ func TestRenderStatusMarkdownRecommendedNextActionsProceed(t *testing.T) {
 	for _, unwanted := range []string{"`triage_stale_work`", "`checkpoint_candidate`", "`compact_status`", "`wait_for_agents`"} {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("status markdown included unexpected action %q:\n%s", unwanted, got)
+		}
+	}
+}
+
+func TestRenderStatusMarkdownArbiterNextActionCheckpoint(t *testing.T) {
+	base := t.TempDir()
+	st := fsstore.Open(base)
+	now := time.Date(2026, 6, 12, 17, 0, 0, 0, time.UTC)
+	runID, err := st.CreateRun(&scratch.Run{
+		ID:        "20260612-170000-arbiter",
+		Task:      "checkpoint action",
+		Workspace: "/workspace/tiller",
+		Status:    "running",
+		CreatedAt: now.Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.AppendCheckpointCandidate(runID, scratch.CheckpointCandidate{
+		ID:           "cp-fresh",
+		Status:       scratch.CheckpointStatusFresh,
+		ReportedAt:   now.Add(-2 * time.Minute),
+		ChangedFiles: []string{"internal/scratch/status.go"},
+		Verification: []string{"go test ./internal/scratch"},
+	}); err != nil {
+		t.Fatalf("AppendCheckpointCandidate: %v", err)
+	}
+
+	data, err := scratch.RenderStatusMarkdown(st, runID, scratch.StatusOptions{UpdatedAt: now})
+	if err != nil {
+		t.Fatalf("RenderStatusMarkdown: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		"## Arbiter Next Action",
+		"- action: checkpoint",
+		"- confidence: 90",
+		"- risk: low",
+		"- reason: fresh verified checkpoint candidate is ready",
+		"- target: checkpoint",
+		"- budget_posture: ok",
+		"- fallback: false",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status markdown missing %q:\n%s", want, got)
 		}
 	}
 }

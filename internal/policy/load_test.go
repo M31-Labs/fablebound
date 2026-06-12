@@ -9,7 +9,7 @@ import (
 // TestDefaultsCompile verifies that all embedded default policies compile
 // with schema typecheck successfully.
 func TestDefaultsCompile(t *testing.T) {
-	for _, kind := range []string{"dispatch", "toolgate", "ambient"} {
+	for _, kind := range []string{"dispatch", "toolgate", "ambient", "ambient_next_action"} {
 		t.Run(kind, func(t *testing.T) {
 			loaded, err := Load(kind, "")
 			if err != nil {

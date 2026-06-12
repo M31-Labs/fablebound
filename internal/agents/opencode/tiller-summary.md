@@ -1,5 +1,5 @@
 ---
-description: Cheap read-only status compaction subagent for distilled ambient state, run ledger summaries, stale/late report triage, checkpoint candidate synthesis, and next-action bookkeeping.
+description: Cheap read-only status compaction subagent for distilled ambient state, run ledger summaries, stale/late report triage, checkpoint candidate synthesis, and Arbiter next-action bookkeeping.
 mode: subagent
 permission:
   edit: deny
@@ -29,14 +29,15 @@ maintenance.
 
 When a run directory contains `status.md`, read it first. It is a generated
 snapshot beside `ledger.jsonl` with task descriptors, distilled reusable state,
-lifecycle state, token usage, advisory spend budget bands, `Stale/Late Work`,
-`Recommended Next Actions`, and checkpoint candidates, and should usually be
+lifecycle state, token usage, advisory spend budget bands, `Distillation`,
+`Arbiter Next Action`, `Stale/Late Work`, `Recommended Next Actions`, and checkpoint candidates, and should usually be
 enough to orient before selectively reading
 `manifest.json`, `dispatches/*/meta.json`, `agents/*.json`,
 `checkpoint_candidates.jsonl`, `ledger.jsonl`, notes, or reports. Read
-`Distillation` before raw logs or transcripts. Prioritize `Recommended Next
-Actions`; if `Stale/Late Work` is not `none`, classify it before opening raw
-logs or reports. If the `Spend Budget` band is `warn` or `over`, recommend a
+`Distillation` before raw logs or transcripts. Prioritize `Arbiter Next
+Action`; use `Recommended Next Actions` as legacy/fallback context. If
+`Stale/Late Work` is not `none`, classify it before opening raw logs or
+reports. If the `Spend Budget` band is `warn` or `over`, recommend a
 compact/checkpoint/proceed choice instead of spending more premium output on
 routine bookkeeping.
 
@@ -44,6 +45,6 @@ Do not edit files, run builds/tests, debug, review, or do architecture. Use
 this descriptor-compatible report contract: Outcome; Distillation when useful;
 files/reports inspected; compact task status; blockers; stale/late report
 classification; checkpoint candidate yes/no with exact paths or verification
-when known; recommended next action. Distillation should be compact reusable
+when known; Arbiter next action. Distillation should be compact reusable
 context, not bulky logs. Keep output terse and concrete. Avoid pasting long
 logs; summarize and point at files/reports. Do not perform VCS commits.

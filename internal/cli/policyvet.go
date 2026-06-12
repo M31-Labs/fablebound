@@ -15,7 +15,7 @@ import (
 // vendorStrayRe matches vendor model tokens that should not appear in default policies.
 var vendorStrayRe = regexp.MustCompile(`\b(fable|opus|sonnet|haiku)\b`)
 
-var policyKinds = []string{"dispatch", "toolgate", "ambient"}
+var policyKinds = []string{"dispatch", "toolgate", "ambient", "ambient_next_action"}
 
 // runPolicy implements `tiller policy <subcommand>`.
 func runPolicy(args []string) error {
@@ -100,9 +100,10 @@ func policyVet() error {
 
 	// Run `arbiter check <arb> --go <schemas.go> --type <T>` for each policy.
 	typeNames := map[string]string{
-		"dispatch": "DispatchRequest",
-		"toolgate": "ToolCallRequest",
-		"ambient":  "ToolCallRequest",
+		"dispatch":            "DispatchRequest",
+		"toolgate":            "ToolCallRequest",
+		"ambient":             "ToolCallRequest",
+		"ambient_next_action": "AmbientNextActionRequest",
 	}
 	for _, kind := range policyKinds {
 		arbFile, ok := arbFiles[kind]

@@ -9,6 +9,7 @@ import (
 // dispatchLoaded caches the loaded dispatch policy for tests.
 var dispatchLoaded *Loaded
 var toolgateLoaded *Loaded
+var ambientNextActionLoaded *Loaded
 
 func init() {
 	var err error
@@ -19,6 +20,10 @@ func init() {
 	toolgateLoaded, err = Load("toolgate", "")
 	if err != nil {
 		panic("load toolgate policy: " + err.Error())
+	}
+	ambientNextActionLoaded, err = Load("ambient_next_action", "")
+	if err != nil {
+		panic("load ambient_next_action policy: " + err.Error())
 	}
 }
 
@@ -393,5 +398,110 @@ func TestToolCall_ReviewerWrite_ScratchTrue_Allow(t *testing.T) {
 	}
 	if res.Verdict != VerdictAllow {
 		t.Errorf("verdict = %s, want Allow (rule=%s reason=%s)", res.Verdict, res.Rule, res.Reason)
+	}
+}
+
+func TestAmbientNextActionDecisions(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*AmbientNextActionRequest)
+		want   string
+	}{
+		{
+			name: "checkpoint",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.DistillationAvailable = true
+				req.DistillationCount = 1
+				req.DistillationAgeSeconds = 120
+				req.DistillationStatus = "fresh"
+				req.CheckpointFreshCount = 1
+				req.CheckpointHasVerification = true
+				req.RiskChangedFilesCount = 2
+			},
+			want: "checkpoint",
+		},
+		{
+			name: "wait",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.WorkPendingDescriptorCount = 1
+				req.WorkPendingAgentCount = 1
+			},
+			want: "wait",
+		},
+		{
+			name: "distill stale",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.WorkStaleAgentCount = 1
+				req.DistillationStatus = "stale"
+			},
+			want: "distill",
+		},
+		{
+			name: "distill spend warn",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.RunOutputBudgetBand = "warn"
+			},
+			want: "distill",
+		},
+		{
+			name: "debug",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.WorkFailedAgentCount = 1
+			},
+			want: "debug",
+		},
+		{
+			name: "retry",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.WorkFailedDescriptorCount = 1
+			},
+			want: "retry",
+		},
+		{
+			name: "review",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.RiskTouchesPolicy = true
+				req.RiskChangedFilesCount = 1
+			},
+			want: "review",
+		},
+		{
+			name: "halt",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.RunOutputBudgetBand = "over"
+				req.WorkPendingAgentCount = 1
+			},
+			want: "halt",
+		},
+		{
+			name:   "proceed",
+			mutate: func(req *AmbientNextActionRequest) {},
+			want:   "proceed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := baselineAmbientNextActionRequest()
+			tt.mutate(&req)
+			res, err := EvalAmbientNextAction(ambientNextActionLoaded, req)
+			if err != nil {
+				t.Fatalf("EvalAmbientNextAction: %v", err)
+			}
+			if res.Decision.Action != tt.want {
+				t.Fatalf("action = %q, want %q; decision=%+v", res.Decision.Action, tt.want, res.Decision)
+			}
+			if res.Decision.Confidence == 0 || res.Decision.Risk == "" || res.Decision.Reason == "" || res.Decision.Target == "" || res.Decision.BudgetPosture == "" {
+				t.Fatalf("decision missing required fields: %+v", res.Decision)
+			}
+		})
+	}
+}
+
+func baselineAmbientNextActionRequest() AmbientNextActionRequest {
+	return AmbientNextActionRequest{
+		RunStatus:              "running",
+		RunReasonBudget:        2,
+		RunOutputBudgetBand:    "ok",
+		RunReasoningBudgetBand: "ok",
 	}
 }

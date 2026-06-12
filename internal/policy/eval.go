@@ -35,6 +35,23 @@ type ToolCallResult struct {
 	Arbitrace *govern.Arbitrace
 }
 
+// AmbientNextActionDecision is the routing outcome from the
+// AmbientNextAction strategy.
+type AmbientNextActionDecision struct {
+	Action        string
+	Confidence    int
+	Risk          string
+	Reason        string
+	Target        string
+	BudgetPosture string
+}
+
+// AmbientNextActionResult is the full result of evaluating an
+// AmbientNextActionRequest.
+type AmbientNextActionResult struct {
+	Decision AmbientNextActionDecision
+}
+
 // EvalDispatch evaluates a DispatchRequest against the loaded dispatch policy.
 // On Allow it also evaluates the DispatchRoute strategy to obtain routing.
 // On Allow, if req.Model is non-empty and represents a cost downgrade vs the
@@ -104,6 +121,30 @@ func EvalToolCall(loaded *Loaded, req ToolCallRequest) (ToolCallResult, error) {
 		Reason:    reason,
 		Matched:   matched,
 		Arbitrace: trace,
+	}, nil
+}
+
+// EvalAmbientNextAction evaluates an AmbientNextActionRequest against the
+// loaded ambient_next_action policy strategy.
+func EvalAmbientNextAction(loaded *Loaded, req AmbientNextActionRequest) (AmbientNextActionResult, error) {
+	prog := loaded.Prog
+	ctx := ContextMap(req)
+
+	stratRes, err := prog.Strategies.Evaluate("AmbientNextAction", ctx)
+	if err != nil {
+		return AmbientNextActionResult{}, fmt.Errorf("AmbientNextAction strategy: %w", err)
+	}
+
+	p := stratRes.Params
+	return AmbientNextActionResult{
+		Decision: AmbientNextActionDecision{
+			Action:        stringParam(p, "action"),
+			Confidence:    intParam(p, "confidence"),
+			Risk:          stringParam(p, "risk"),
+			Reason:        stringParam(p, "reason"),
+			Target:        stringParam(p, "target"),
+			BudgetPosture: stringParam(p, "budget_posture"),
+		},
 	}, nil
 }
 

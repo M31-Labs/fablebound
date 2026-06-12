@@ -38,3 +38,34 @@ type ToolCallRequest struct {
 	AgentModelTier string `arb:"tool.agent_model_tier"` // Task/Agent: "reason"|"scrutiny"|"execute"|"other"|""; computed via ambient backend config
 	RunID          string `arb:"run.id"`
 }
+
+// AmbientNextActionRequest is the input schema for ambient_next_action.arb.
+type AmbientNextActionRequest struct {
+	RunStatus              string `arb:"run.status"`
+	RunReasonBudgetUsed    int    `arb:"run.reason_budget_used"`
+	RunReasonBudget        int    `arb:"run.reason_budget"`
+	RunOutputBudgetBand    string `arb:"run.output_budget_band"`
+	RunReasoningBudgetBand string `arb:"run.reasoning_budget_band"`
+
+	WorkPendingDescriptorCount int `arb:"work.pending_descriptor_count"`
+	WorkFailedDescriptorCount  int `arb:"work.failed_descriptor_count"`
+	WorkPendingAgentCount      int `arb:"work.pending_agent_count"`
+	WorkStaleAgentCount        int `arb:"work.stale_agent_count"`
+	WorkFailedAgentCount       int `arb:"work.failed_agent_count"`
+	WorkIterationCount         int `arb:"work.iteration_count"`
+
+	DistillationAvailable  bool   `arb:"distillation.available"`
+	DistillationCount      int    `arb:"distillation.count"`
+	DistillationAgeSeconds int    `arb:"distillation.age_seconds"`
+	DistillationStatus     string `arb:"distillation.status"`
+
+	CheckpointFreshCount       int  `arb:"checkpoint.fresh_count"`
+	CheckpointProposedCount    int  `arb:"checkpoint.proposed_count"`
+	CheckpointLateCount        int  `arb:"checkpoint.late_count"`
+	CheckpointConflictingCount int  `arb:"checkpoint.conflicting_count"`
+	CheckpointHasVerification  bool `arb:"checkpoint.has_verification"`
+
+	RiskChangedFilesCount int  `arb:"risk.changed_files_count"`
+	RiskTouchesPolicy     bool `arb:"risk.touches_policy"`
+	RiskTouchesSandbox    bool `arb:"risk.touches_sandbox"`
+}

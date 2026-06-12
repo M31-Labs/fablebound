@@ -350,7 +350,7 @@ func TestInstallCodexSkill(t *testing.T) {
 			name:    "using-tiller",
 			path:    filepath.Join(t.TempDir(), ".codex", "skills", "using-tiller", "SKILL.md"),
 			content: codexSkillSnippet(),
-			want:    []string{"name: using-tiller", "Root Workflow", "Right-Sizing Matrix", "hypha recall", "tiller-scout", "tiller-summary", "gpt-5.4-mini", "gpt-5.5 medium", "gpt-5.5 high", "gpt-5.5 xhigh", "tiller-worker", "using-sirena", "terse, direct, explicit", "Recommended Next Actions", "configured checkpoint tool", "checkpoint candidate"},
+			want:    []string{"name: using-tiller", "Root Workflow", "Right-Sizing Matrix", "hypha recall", "tiller-scout", "tiller-summary", "gpt-5.4-mini", "gpt-5.5 medium", "gpt-5.5 high", "gpt-5.5 xhigh", "tiller-worker", "using-sirena", "terse, direct, explicit", "Arbiter Next Action", "Recommended Next Actions", "configured checkpoint tool", "checkpoint candidate"},
 		},
 		{
 			name:    "using-sirena",
@@ -594,7 +594,7 @@ func TestInstallAgents_ContentCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tiller-summary.md not found: %v", err)
 	}
-	for _, want := range []string{"model: haiku", "status compaction", "distilled ambient state", "Distillation", "Stale/Late Work", "Recommended Next Actions", "not `none`", "stale/late report classification", "checkpoint candidate"} {
+	for _, want := range []string{"model: haiku", "status compaction", "distilled ambient state", "Distillation", "Arbiter Next Action", "Stale/Late Work", "Recommended Next Actions", "legacy/fallback context", "not `none`", "stale/late report classification", "checkpoint candidate"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("tiller-summary.md missing %q; content:\n%s", want, string(data))
 		}
@@ -693,7 +693,7 @@ func TestInstallCodexAgents_FreshDir(t *testing.T) {
 		t.Fatalf("read tiller-summary.toml: %v", err)
 	}
 	content = string(data)
-	for _, want := range []string{`model = "gpt-5.4-mini"`, `model_reasoning_effort = "medium"`, `sandbox_mode = "read-only"`, "status compaction", "distilled ambient state", "Distillation", "Stale/Late Work", "Recommended Next Actions", "not `none`", "stale/late", "classification", "checkpoint candidate"} {
+	for _, want := range []string{`model = "gpt-5.4-mini"`, `model_reasoning_effort = "medium"`, `sandbox_mode = "read-only"`, "status compaction", "distilled ambient state", "Distillation", "Arbiter Next Action", "Stale/Late Work", "Recommended Next Actions", "legacy/fallback context", "not `none`", "stale/late", "classification", "checkpoint candidate"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("Codex summary missing %q:\n%s", want, content)
 		}
@@ -755,7 +755,7 @@ func TestInstallOpenCodeAgents_FreshDir(t *testing.T) {
 		t.Fatalf("read tiller-summary.md: %v", err)
 	}
 	content = string(data)
-	for _, want := range []string{"mode: subagent", "edit: deny", "status compaction", "distilled ambient state", "Distillation", "Stale/Late Work", "Recommended Next Actions", "not `none`", "stale/late", "classification", "checkpoint candidate"} {
+	for _, want := range []string{"mode: subagent", "edit: deny", "status compaction", "distilled ambient state", "Distillation", "Arbiter Next Action", "Stale/Late Work", "Recommended Next Actions", "legacy/fallback context", "not `none`", "stale/late", "classification", "checkpoint candidate"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("OpenCode summary missing %q:\n%s", want, content)
 		}
@@ -934,7 +934,7 @@ func TestRunInstallCodexProject(t *testing.T) {
 		t.Fatalf("read AGENTS.md: %v", err)
 	}
 	notes := string(notesData)
-	for _, want := range []string{tillerCodexNotesBegin, "SessionStart adds this context", ".tiller/scratch/codex/", "premium/reason-tier output", "distilled ambient state", "descriptor-backed task list", "Codex, Claude Code", "OpenCode, Cursor", "Descriptor fields", "budget tier/model", "Distillation", "Recommended Next Actions", "Queue/background independent descriptors", "returned reports", "descriptor-compatible subagent reports", "update task status", "distilled state", "checkpoint decisions", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "Do not run implementation shell commands", "Right-sizing matrix", "`tiller-scout`", "`tiller-summary`", "stale/late report triage", "`gpt-5.4-mini`", "`gpt-5.5 medium`", "`gpt-5.5 high`", "`gpt-5.5 xhigh`", "agent_type", "wait_agent", "using-sirena", "terse, direct, explicit"} {
+	for _, want := range []string{tillerCodexNotesBegin, "SessionStart adds this context", ".tiller/scratch/codex/", "premium/reason-tier output", "distilled ambient state", "descriptor-backed task list", "Codex, Claude Code", "OpenCode, Cursor", "Descriptor fields", "budget tier/model", "Distillation", "Arbiter Next Action", "Recommended Next Actions", "legacy/fallback context", "Queue/background independent descriptors", "returned reports", "descriptor-compatible subagent reports", "update task status", "distilled state", "checkpoint decisions", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "Do not run implementation shell commands", "Right-sizing matrix", "`tiller-scout`", "`tiller-summary`", "stale/late report triage", "`gpt-5.4-mini`", "`gpt-5.5 medium`", "`gpt-5.5 high`", "`gpt-5.5 xhigh`", "agent_type", "wait_agent", "using-sirena", "terse, direct, explicit"} {
 		if !strings.Contains(notes, want) {
 			t.Fatalf("Codex operating notes missing %q:\n%s", want, notes)
 		}
@@ -945,7 +945,7 @@ func TestRunInstallCodexProject(t *testing.T) {
 		t.Fatalf("read Codex Tiller skill: %v", err)
 	}
 	skill := string(skillData)
-	for _, want := range []string{"name: using-tiller", "SessionStart makes this visible", ".tiller/scratch/codex/", "premium/reason-tier output", "distilled ambient state", "descriptor-backed task list", "Codex, Claude Code, OpenCode, Cursor", "Descriptor fields", "budget tier/model ceiling", "Distillation", "Recommended Next Actions", "Queue/background independent descriptors", "returned reports", "descriptor-compatible subagent reports", "update task status", "distilled state", "checkpoint decisions", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "Root Workflow", "Right-Sizing Matrix", "hypha recall", "tiller-scout", "tiller-summary", "stale/late report triage", "gpt-5.4-mini", "gpt-5.5 medium", "gpt-5.5 high", "gpt-5.5 xhigh", "tiller-worker", "wait_agent", "using-sirena", "terse, direct, explicit"} {
+	for _, want := range []string{"name: using-tiller", "SessionStart makes this visible", ".tiller/scratch/codex/", "premium/reason-tier output", "distilled ambient state", "descriptor-backed task list", "Codex, Claude Code, OpenCode, Cursor", "Descriptor fields", "budget tier/model ceiling", "Distillation", "Arbiter Next Action", "Recommended Next Actions", "legacy/fallback context", "Queue/background independent descriptors", "returned reports", "descriptor-compatible subagent reports", "update task status", "distilled state", "checkpoint decisions", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "Root Workflow", "Right-Sizing Matrix", "hypha recall", "tiller-scout", "tiller-summary", "stale/late report triage", "gpt-5.4-mini", "gpt-5.5 medium", "gpt-5.5 high", "gpt-5.5 xhigh", "tiller-worker", "wait_agent", "using-sirena", "terse, direct, explicit"} {
 		if !strings.Contains(skill, want) {
 			t.Fatalf("Codex Tiller skill missing %q:\n%s", want, skill)
 		}
@@ -995,7 +995,7 @@ func TestRunInstallOpenCodeProject(t *testing.T) {
 		t.Fatalf("read OpenCode notes: %v", err)
 	}
 	notes := string(notesData)
-	for _, want := range []string{tillerOpenCodeNotesBegin, "tiller-orchestrator", ".tiller/scratch/opencode/", "premium/reason-tier output", "distilled ambient state", "descriptor-backed task list", "Codex, Claude Code", "OpenCode, Cursor", "Descriptor fields", "budget tier/model", "Distillation", "Queue/background independent descriptors", "returned reports", "descriptor-compatible subagent reports", "update task status", "distilled state", "checkpoint decisions", "Git/GitHub for VCS", "Graft", "checkpoint tool", "Right-sizing matrix", "`tiller-summary`", "stale/late", "report triage", "`tiller-worker`"} {
+	for _, want := range []string{tillerOpenCodeNotesBegin, "tiller-orchestrator", ".tiller/scratch/opencode/", "premium/reason-tier output", "distilled ambient state", "descriptor-backed task list", "Codex, Claude Code", "OpenCode, Cursor", "Descriptor fields", "budget tier/model", "Distillation", "Arbiter Next Action", "Recommended Next Actions", "legacy/fallback context", "Queue/background independent descriptors", "returned reports", "descriptor-compatible subagent reports", "update task status", "distilled state", "checkpoint decisions", "Git/GitHub for VCS", "Graft", "checkpoint tool", "Right-sizing matrix", "`tiller-summary`", "stale/late", "report triage", "`tiller-worker`"} {
 		if !strings.Contains(notes, want) {
 			t.Fatalf("OpenCode notes missing %q:\n%s", want, notes)
 		}
@@ -1005,7 +1005,7 @@ func TestRunInstallOpenCodeProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read OpenCode orchestrator: %v", err)
 	}
-	for _, want := range []string{"mode: primary", "permission:", "task:", "tiller-*", "tiller-summary", "descriptor-backed task list", "Cursor", "Descriptor fields", "Distillation", "descriptor-compatible subagent reports"} {
+	for _, want := range []string{"mode: primary", "permission:", "task:", "tiller-*", "tiller-summary", "descriptor-backed task list", "Cursor", "Descriptor fields", "Distillation", "Arbiter Next Action", "legacy/fallback context", "descriptor-compatible subagent reports"} {
 		if !strings.Contains(string(orchestrator), want) {
 			t.Fatalf("OpenCode orchestrator missing %q:\n%s", want, string(orchestrator))
 		}

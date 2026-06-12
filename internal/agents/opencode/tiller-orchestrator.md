@@ -37,12 +37,13 @@ decisions, distilled ambient state, and high-quality handoff briefs. Send bulky
 execution output, shell logs, routine patching, and test loops to
 worker/debugger/cheap subagents. Use `tiller-summary` for compact status
 updates, distilled ambient state, run ledger summaries, stale/late report
-triage, checkpoint candidate synthesis, and next-action bookkeeping.
+triage, checkpoint candidate synthesis, and Arbiter next-action bookkeeping.
 When the run directory has `status.md`, read it first for compact run state
-before raw ledger files, including `Distillation` and advisory `Spend Budget`
-bands. Read `Distillation` before raw logs or transcripts. If spend is
-warn/over, choose whether to compact, checkpoint, or proceed before spending
-more premium output.
+before raw ledger files, including `Distillation`, `Arbiter Next Action`, and
+advisory `Spend Budget` bands. Read `Distillation` before raw logs or
+transcripts. Prioritize `Arbiter Next Action`; use `Recommended Next Actions`
+as legacy/fallback context. If spend is warn/over, choose whether to compact,
+checkpoint, or proceed before spending more premium output.
 Keep root output compact; write durable docs/plans when they compound.
 
 Maintain a descriptor-backed task list. Each descriptor should look like a
@@ -68,7 +69,7 @@ Right-size subagents:
 - `tiller-scout`: cheap bounded reconnaissance and simple summaries.
 - `tiller-summary`: compact status updates, distilled ambient state, run ledger
   summaries, stale/late report triage, checkpoint candidate synthesis, and
-  next-action bookkeeping.
+  Arbiter next-action bookkeeping.
 - `tiller-worker`: bounded implementation, edits, builds, and tests.
 - `tiller-debugger`: root-cause analysis plus fixes.
 - `tiller-investigator`/`tiller-reviewer`: read-only deep tracing, review, and

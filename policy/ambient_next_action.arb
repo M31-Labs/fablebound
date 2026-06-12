@@ -1,0 +1,114 @@
+# tiller ambient next-action policy. Input schema: AmbientNextActionRequest.
+#
+# This strategy is advisory: it selects exactly one next action for status.md
+# from compact scratch facts. Enforcement remains in ambient/toolgate policies.
+
+outcome AmbientDecision {
+    action: string
+    confidence: number
+    risk: string
+    reason: string
+    target: string
+    budget_posture: string
+}
+
+strategy AmbientNextAction returns AmbientDecision {
+    when { run.output_budget_band == "over" or run.reasoning_budget_band == "over" }
+        then Halt {
+            action: "halt",
+            confidence: 95,
+            risk: "high",
+            reason: "observed token use is over an ambient budget",
+            target: "budget",
+            budget_posture: "over",
+        }
+    when { run.status == "failed" or run.status == "halted" }
+        then Escalate {
+            action: "escalate",
+            confidence: 90,
+            risk: "high",
+            reason: "run status is terminal or blocked",
+            target: "run",
+            budget_posture: "ok",
+        }
+    when { work.stale_agent_count > 0 or checkpoint.late_count > 0 or distillation.status == "stale" }
+        then DistillStale {
+            action: "distill",
+            confidence: 88,
+            risk: "medium",
+            reason: "stale, late, or noisy ambient work needs compact reconciliation",
+            target: "distillation",
+            budget_posture: "ok",
+        }
+    when { run.output_budget_band == "warn" or run.reasoning_budget_band == "warn" }
+        then DistillSpend {
+            action: "distill",
+            confidence: 86,
+            risk: "medium",
+            reason: "observed token use is near an ambient budget",
+            target: "budget",
+            budget_posture: "warn",
+        }
+    when { work.pending_descriptor_count > 0 or work.pending_agent_count > 0 }
+        then Wait {
+            action: "wait",
+            confidence: 82,
+            risk: "low",
+            reason: "descriptor or agent work is still pending",
+            target: "agents",
+            budget_posture: "ok",
+        }
+    when { checkpoint.fresh_count > 0 and checkpoint.has_verification and work.pending_agent_count == 0 and work.failed_agent_count == 0 }
+        then Checkpoint {
+            action: "checkpoint",
+            confidence: 90,
+            risk: "low",
+            reason: "fresh verified checkpoint candidate is ready",
+            target: "checkpoint",
+            budget_posture: "ok",
+        }
+    when { work.failed_agent_count > 0 }
+        then Debug {
+            action: "debug",
+            confidence: 84,
+            risk: "medium",
+            reason: "failed agent work needs root-cause debugging",
+            target: "failed_agent",
+            budget_posture: "ok",
+        }
+    when { work.failed_descriptor_count > 0 }
+        then Retry {
+            action: "retry",
+            confidence: 76,
+            risk: "medium",
+            reason: "failed descriptor work can be retried with a tighter packet",
+            target: "descriptor",
+            budget_posture: "ok",
+        }
+    when { risk.touches_policy or risk.touches_sandbox or checkpoint.conflicting_count > 0 }
+        then Review {
+            action: "review",
+            confidence: 84,
+            risk: "high",
+            reason: "policy, sandbox, or conflicting checkpoint surface needs scrutiny",
+            target: "risk",
+            budget_posture: "ok",
+        }
+    when { run.reason_budget > 0 and run.reason_budget_used >= run.reason_budget }
+        then AskUser {
+            action: "ask_user",
+            confidence: 72,
+            risk: "medium",
+            reason: "reason-tier dispatch budget is exhausted but token budget is not over",
+            target: "reason_budget",
+            budget_posture: "ok",
+        }
+    else Proceed {
+        action: "proceed",
+        confidence: 70,
+        risk: "low",
+        reason: "no blocker, pending work, checkpoint, risk, or spend pressure matched",
+        target: "orchestrator",
+        budget_posture: "ok",
+    }
+}

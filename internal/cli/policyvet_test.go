@@ -138,3 +138,16 @@ func TestMaterializePolicyFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestPolicyKindsIncludeAmbientNextAction(t *testing.T) {
+	found := false
+	for _, kind := range policyKinds {
+		if kind == "ambient_next_action" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("policyKinds = %v, want ambient_next_action", policyKinds)
+	}
+}

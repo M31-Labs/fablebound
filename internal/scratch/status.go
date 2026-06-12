@@ -173,6 +173,22 @@ func RenderStatusMarkdown(st Store, runID string, opts StatusOptions) ([]byte, e
 		sb.WriteString("\n")
 	}
 
+	facts := BuildAmbientNextActionFacts(r, dispatches, agents, candidates, ledger, opts)
+	decision, fallback := EvalAmbientNextActionForStatus(facts)
+	sb.WriteString("## Arbiter Next Action\n\n")
+	writeKV(&sb, "action", decision.Action)
+	writeKV(&sb, "confidence", fmt.Sprint(decision.Confidence))
+	writeKV(&sb, "risk", decision.Risk)
+	writeKV(&sb, "reason", decision.Reason)
+	writeKV(&sb, "target", decision.Target)
+	writeKV(&sb, "budget_posture", decision.BudgetPosture)
+	if fallback {
+		writeKV(&sb, "fallback", "true")
+	} else {
+		writeKV(&sb, "fallback", "false")
+	}
+	sb.WriteString("\n")
+
 	sb.WriteString("## Recommended Next Actions\n\n")
 	for _, action := range recommendedNextActions(taskDescriptors, agents, candidates, opts, sumLedgerUsage(ledger), totalObservedUsage(dispatches, agents, ledger)) {
 		sb.WriteString(fmt.Sprintf("- `%s`: %s\n", action.ID, action.Rationale))

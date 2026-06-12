@@ -662,7 +662,12 @@ func (fs *FS) BuildRunSummaryJSON(runID string) ([]byte, error) {
 
 // WriteStatusMarkdown renders and atomically writes status.md beside ledger.jsonl.
 func (fs *FS) WriteStatusMarkdown(runID string, updatedAt time.Time) error {
-	data, err := scratch.RenderStatusMarkdown(fs, runID, scratch.StatusOptions{UpdatedAt: updatedAt})
+	return fs.WriteStatusMarkdownWithOptions(runID, scratch.StatusOptions{UpdatedAt: updatedAt})
+}
+
+// WriteStatusMarkdownWithOptions renders and atomically writes status.md beside ledger.jsonl.
+func (fs *FS) WriteStatusMarkdownWithOptions(runID string, opts scratch.StatusOptions) error {
+	data, err := scratch.RenderStatusMarkdown(fs, runID, opts)
 	if err != nil {
 		return fmt.Errorf("fsstore.WriteStatusMarkdown %s: %w", runID, err)
 	}

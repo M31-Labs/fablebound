@@ -12,9 +12,12 @@ root spends less premium output on status maintenance.
 
 When a run directory contains `status.md`, read it first. It is a generated
 snapshot beside `ledger.jsonl` with task descriptors, lifecycle state, token
-usage, and checkpoint candidates, and should usually be enough to orient before
-selectively reading `manifest.json`, `dispatches/*/meta.json`, `agents/*.json`,
-`checkpoint_candidates.jsonl`, `ledger.jsonl`, notes, or reports.
+usage, advisory spend budget bands, and checkpoint candidates, and should
+usually be enough to orient before selectively reading `manifest.json`,
+`dispatches/*/meta.json`, `agents/*.json`, `checkpoint_candidates.jsonl`,
+`ledger.jsonl`, notes, or reports. If the `Spend Budget` band is `warn` or
+`over`, recommend a compact/checkpoint/proceed choice instead of spending more
+premium output on routine bookkeeping.
 
 Do not own implementation, edits, builds, tests, root-cause debugging,
 adversarial review, architecture, or high-stakes verification. If the task

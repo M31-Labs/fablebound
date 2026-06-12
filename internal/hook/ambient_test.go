@@ -696,6 +696,9 @@ func TestClaudeAmbientGovernedPreToolUseAppendsUsageLedger(t *testing.T) {
 	runDir := makeAmbientLifecycleRunDir(t, workspace)
 	t.Setenv("TILLER_ROLE", "")
 	t.Setenv("TILLER_RUN_DIR", runDir)
+	t.Setenv("TILLER_AMBIENT_OUTPUT_TOKEN_BUDGET", "40")
+	t.Setenv("TILLER_AMBIENT_REASONING_TOKEN_BUDGET", "10")
+	t.Setenv("TILLER_AMBIENT_BUDGET_WARN_RATIO", "0.75")
 
 	p := fableTranscriptWithUsage(t, 12, 34)
 	event := map[string]any{
@@ -754,8 +757,20 @@ func TestClaudeAmbientGovernedPreToolUseAppendsUsageLedger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read status.md: %v", err)
 	}
-	if got := string(status); !strings.Contains(got, "claude.ambient_usage") || !strings.Contains(got, "- ledger: input=12 output=34") {
-		t.Fatalf("status.md missing Claude usage content:\n%s", got)
+	got := string(status)
+	for _, want := range []string{
+		"claude.ambient_usage",
+		"- ledger: input=12 output=34",
+		"## Spend Budget",
+		"- ledger_observed_output: 34",
+		"- combined_observed_output: 34",
+		"- budget_warn_ratio: 0.75",
+		"- output_budget: configured=40 percent_used=85.00% band=warn",
+		"- reasoning_budget: configured=10 percent_used=0.00% band=ok",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status.md missing %q:\n%s", want, got)
+		}
 	}
 }
 

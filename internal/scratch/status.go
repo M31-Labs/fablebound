@@ -9,8 +9,11 @@ import (
 
 // StatusOptions controls deterministic status.md rendering.
 type StatusOptions struct {
-	UpdatedAt   time.Time
-	RecentLimit int
+	UpdatedAt            time.Time
+	RecentLimit          int
+	OutputTokenBudget    int64
+	ReasoningTokenBudget int64
+	BudgetWarnRatio      float64
 }
 
 // RenderStatusMarkdown builds a derived ambient run status snapshot from the
@@ -120,15 +123,32 @@ func RenderStatusMarkdown(st Store, runID string, opts StatusOptions) ([]byte, e
 	sb.WriteString("\n")
 
 	sb.WriteString("## Observed Token Usage\n\n")
-	writeUsage(&sb, "- dispatches", sumDispatchUsage(dispatches))
-	writeUsage(&sb, "- agents", sumAgentUsage(agents))
-	writeUsage(&sb, "- ledger", sumLedgerUsage(ledger))
+	dispatchUsage := sumDispatchUsage(dispatches)
+	agentUsage := sumAgentUsage(agents)
+	ledgerUsage := sumLedgerUsage(ledger)
+	writeUsage(&sb, "- dispatches", dispatchUsage)
+	writeUsage(&sb, "- agents", agentUsage)
+	writeUsage(&sb, "- ledger", ledgerUsage)
 	total := TokenUsage{}
-	total.add(sumDispatchUsage(dispatches))
-	total.add(sumAgentUsage(agents))
-	total.add(sumLedgerUsage(ledger))
+	total.add(dispatchUsage)
+	total.add(agentUsage)
+	total.add(ledgerUsage)
 	writeUsage(&sb, "- combined_observed", total)
 	sb.WriteString("\n")
+
+	if shouldWriteSpendBudget(opts, ledgerUsage, total) {
+		sb.WriteString("## Spend Budget\n\n")
+		sb.WriteString("Advisory only: bands use observed token metadata from scratch records and may be incomplete; they do not enforce policy.\n\n")
+		writeKV(&sb, "ledger_observed_output", fmt.Sprint(ledgerUsage.OutputTokens))
+		writeKV(&sb, "ledger_observed_reasoning", fmt.Sprint(ledgerUsage.ReasoningTokens))
+		writeKV(&sb, "combined_observed_output", fmt.Sprint(total.OutputTokens))
+		writeKV(&sb, "combined_observed_reasoning", fmt.Sprint(total.ReasoningTokens))
+		warnRatio := normalizedBudgetWarnRatio(opts)
+		writeKV(&sb, "budget_warn_ratio", formatRatio(warnRatio))
+		writeBudgetLine(&sb, "output", total.OutputTokens, opts.OutputTokenBudget, warnRatio)
+		writeBudgetLine(&sb, "reasoning", total.ReasoningTokens, opts.ReasoningTokenBudget, warnRatio)
+		sb.WriteString("\n")
+	}
 
 	sb.WriteString("## Recent Ledger Events\n\n")
 	recentLedger := tailLedger(ledger, opts.RecentLimit)
@@ -178,6 +198,53 @@ func writeCounts(sb *strings.Builder, label string, counts map[string]int) {
 func writeUsage(sb *strings.Builder, label string, u TokenUsage) {
 	sb.WriteString(fmt.Sprintf("%s: input=%d output=%d cache_create=%d cache_read=%d reasoning=%d total=%d\n",
 		label, u.InputTokens, u.OutputTokens, u.CacheCreationInputTokens, u.CacheReadInputTokens, u.ReasoningTokens, u.TotalTokens))
+}
+
+func shouldWriteSpendBudget(opts StatusOptions, ledgerUsage, combinedUsage TokenUsage) bool {
+	return opts.OutputTokenBudget > 0 ||
+		opts.ReasoningTokenBudget > 0 ||
+		!ledgerUsage.Empty() ||
+		!combinedUsage.Empty()
+}
+
+func normalizedBudgetWarnRatio(opts StatusOptions) float64 {
+	if opts.BudgetWarnRatio > 0 && opts.BudgetWarnRatio <= 1 {
+		return opts.BudgetWarnRatio
+	}
+	return 0.80
+}
+
+func writeBudgetLine(sb *strings.Builder, name string, observed, budget int64, warnRatio float64) {
+	if budget <= 0 {
+		sb.WriteString(fmt.Sprintf("- %s_budget: unconfigured observed=%d band=ok\n", name, observed))
+		return
+	}
+	sb.WriteString(fmt.Sprintf("- %s_budget: configured=%d percent_used=%s band=%s\n",
+		name, budget, formatPercent(observed, budget), budgetBand(observed, budget, warnRatio)))
+}
+
+func budgetBand(observed, budget int64, warnRatio float64) string {
+	if budget <= 0 {
+		return "ok"
+	}
+	if observed >= budget {
+		return "over"
+	}
+	if float64(observed) >= float64(budget)*warnRatio {
+		return "warn"
+	}
+	return "ok"
+}
+
+func formatPercent(observed, budget int64) string {
+	if budget <= 0 {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.2f%%", float64(observed)*100/float64(budget))
+}
+
+func formatRatio(ratio float64) string {
+	return fmt.Sprintf("%.2f", ratio)
 }
 
 func dispatchStatusCounts(dispatches []*Dispatch) map[string]int {

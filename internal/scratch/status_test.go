@@ -1,6 +1,7 @@
 package scratch_test
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -126,4 +127,96 @@ func TestRenderStatusMarkdown(t *testing.T) {
 			t.Fatalf("status markdown missing %q:\n%s", want, got)
 		}
 	}
+}
+
+func TestRenderStatusMarkdownSpendBudgetBands(t *testing.T) {
+	cases := []struct {
+		name            string
+		outputTokens    int64
+		reasoningTokens int64
+		wantOutput      string
+		wantReasoning   string
+	}{
+		{
+			name:            "ok",
+			outputTokens:    40,
+			reasoningTokens: 10,
+			wantOutput:      "- output_budget: configured=100 percent_used=40.00% band=ok",
+			wantReasoning:   "- reasoning_budget: configured=50 percent_used=20.00% band=ok",
+		},
+		{
+			name:            "warn",
+			outputTokens:    80,
+			reasoningTokens: 40,
+			wantOutput:      "- output_budget: configured=100 percent_used=80.00% band=warn",
+			wantReasoning:   "- reasoning_budget: configured=50 percent_used=80.00% band=warn",
+		},
+		{
+			name:            "over",
+			outputTokens:    100,
+			reasoningTokens: 50,
+			wantOutput:      "- output_budget: configured=100 percent_used=100.00% band=over",
+			wantReasoning:   "- reasoning_budget: configured=50 percent_used=100.00% band=over",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			base := t.TempDir()
+			st := fsstore.Open(base)
+			now := time.Date(2026, 6, 12, 12, 0, 0, 0, time.UTC)
+			runID, err := st.CreateRun(&scratch.Run{
+				ID:        "20260612-120000-" + tc.name,
+				Task:      "budget band",
+				Workspace: "/workspace/tiller",
+				Status:    "running",
+				CreatedAt: now,
+			})
+			if err != nil {
+				t.Fatalf("CreateRun: %v", err)
+			}
+			if err := st.AppendLedgerEvent(runID, scratch.LedgerEvent{
+				ID:      "ledger-usage-" + tc.name,
+				Backend: "codex",
+				Kind:    "codex.lifecycle",
+				Status:  "observed",
+				At:      now,
+				TokenUsage: &scratch.TokenUsage{
+					OutputTokens:    tc.outputTokens,
+					ReasoningTokens: tc.reasoningTokens,
+					TotalTokens:     tc.outputTokens + tc.reasoningTokens,
+				},
+			}); err != nil {
+				t.Fatalf("AppendLedgerEvent: %v", err)
+			}
+
+			data, err := scratch.RenderStatusMarkdown(st, runID, scratch.StatusOptions{
+				UpdatedAt:            now,
+				OutputTokenBudget:    100,
+				ReasoningTokenBudget: 50,
+				BudgetWarnRatio:      0.80,
+			})
+			if err != nil {
+				t.Fatalf("RenderStatusMarkdown: %v", err)
+			}
+			got := string(data)
+			for _, want := range []string{
+				"## Spend Budget",
+				"Advisory only: bands use observed token metadata",
+				"- ledger_observed_output: " + formatInt64ForTest(tc.outputTokens),
+				"- combined_observed_output: " + formatInt64ForTest(tc.outputTokens),
+				"- budget_warn_ratio: 0.80",
+				tc.wantOutput,
+				tc.wantReasoning,
+			} {
+				if !strings.Contains(got, want) {
+					t.Fatalf("status markdown missing %q:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
+func formatInt64ForTest(value int64) string {
+	return strconv.FormatInt(value, 10)
 }

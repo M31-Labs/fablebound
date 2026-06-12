@@ -14,6 +14,10 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Ambient status snapshot** - ambient ledger writes now refresh a generated
   `status.md` beside `ledger.jsonl`, summarizing manifest, dispatch, agent,
   checkpoint, token usage, and recent ledger state for cheap summary agents.
+- **Ambient spend budget visibility** - `status.md` can show advisory output
+  and reasoning token budget bands from `TILLER_AMBIENT_OUTPUT_TOKEN_BUDGET`,
+  `TILLER_AMBIENT_REASONING_TOKEN_BUDGET`, and
+  `TILLER_AMBIENT_BUDGET_WARN_RATIO` without changing hook allow/deny policy.
 - **Ambient task descriptors** - governed root `Task`/`Agent` and Codex
   `spawn_agent` requests now append descriptor-shaped ledger events and render
   a `## Task Descriptors` section in `status.md`.

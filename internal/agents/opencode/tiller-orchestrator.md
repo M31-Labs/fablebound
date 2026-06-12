@@ -38,7 +38,9 @@ logs, routine patching, and test loops to worker/debugger/cheap subagents. Use
 `tiller-summary` for compact status updates, run ledger summaries, stale/late
 report triage, checkpoint candidate synthesis, and next-action bookkeeping.
 When the run directory has `status.md`, read it first for compact run state
-before raw ledger files.
+before raw ledger files, including advisory `Spend Budget` bands. If spend is
+warn/over, choose whether to compact, checkpoint, or proceed before spending
+more premium output.
 Keep root output compact; write durable docs/plans when they compound.
 
 Maintain a descriptor-backed task list. Each descriptor should look like a

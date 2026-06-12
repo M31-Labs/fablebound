@@ -1,11 +1,17 @@
 package cli
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"m31labs.dev/tiller/internal/ambientgate"
+	"m31labs.dev/tiller/internal/scratch"
+	"m31labs.dev/tiller/internal/scratch/fsstore"
 )
 
 func TestRunAmbientDisableEnable(t *testing.T) {
@@ -47,4 +53,159 @@ func TestRunAmbientRejectsUnknownCommand(t *testing.T) {
 	if err := runAmbient([]string{"pause"}); err == nil {
 		t.Fatal("expected unknown ambient command to fail")
 	}
+}
+
+func TestRunAmbientStatusWithoutRunContextSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	withChdir(t, dir)
+	t.Setenv("TILLER_RUN_DIR", "")
+
+	out := captureAmbientStdout(t, func() {
+		if err := runAmbient([]string{"status"}); err != nil {
+			t.Fatalf("status: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "tiller: ambient enabled for "+dir) {
+		t.Fatalf("status output missing ambient marker: %q", out)
+	}
+	if strings.Contains(out, "run:") {
+		t.Fatalf("status without run context should not print run digest: %q", out)
+	}
+}
+
+func TestRunAmbientNextRequiresRunContext(t *testing.T) {
+	t.Setenv("TILLER_RUN_DIR", "")
+	if err := runAmbient([]string{"next"}); err == nil || !strings.Contains(err.Error(), "TILLER_RUN_DIR") {
+		t.Fatalf("next error = %v, want missing TILLER_RUN_DIR", err)
+	}
+}
+
+func TestRunAmbientNextPrintsScratchDigest(t *testing.T) {
+	dir := t.TempDir()
+	withChdir(t, dir)
+	runsBase := filepath.Join(dir, ".tiller", "runs")
+	st := fsstore.Open(runsBase)
+	now := time.Now().UTC()
+	runID, err := st.CreateRun(&scratch.Run{
+		ID:           "20260612-100000-test",
+		Task:         "digest test",
+		Workspace:    dir,
+		Status:       "running",
+		ReasonBudget: 2,
+		CreatedAt:    now,
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.AppendLedgerEvent(runID, scratch.LedgerEvent{
+		ID:      "distill-001",
+		Kind:    "ambient.distillation",
+		Status:  "completed",
+		At:      now,
+		Summary: "Latest compact state.\nContinue with tests.",
+	}); err != nil {
+		t.Fatalf("AppendLedgerEvent: %v", err)
+	}
+	runDir := filepath.Join(runsBase, runID)
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	out := captureAmbientStdout(t, func() {
+		if err := runAmbient([]string{"next"}); err != nil {
+			t.Fatalf("next: %v", err)
+		}
+	})
+
+	want := []string{
+		"tiller ambient: enabled for " + dir,
+		"run: " + runID,
+		"status: running",
+		"next_action: proceed confidence=70 risk=low budget=ok fallback=false",
+		"target: orchestrator",
+		"reason: no blocker, pending work, checkpoint, risk, or spend pressure matched",
+		"distillation: Latest compact state. Continue with tests.",
+		"suggested_move: continue orchestration",
+		"read: " + filepath.Join(runDir, "status.md"),
+	}
+	for _, line := range want {
+		if !strings.Contains(out, line) {
+			t.Fatalf("next output missing %q:\n%s", line, out)
+		}
+	}
+}
+
+func TestRunAmbientStatusAppendsRunPointer(t *testing.T) {
+	dir := t.TempDir()
+	withChdir(t, dir)
+	runsBase := filepath.Join(dir, ".tiller", "runs")
+	st := fsstore.Open(runsBase)
+	now := time.Now().UTC()
+	runID, err := st.CreateRun(&scratch.Run{
+		ID:           "20260612-110000-test",
+		Task:         "status pointer test",
+		Workspace:    dir,
+		Status:       "running",
+		ReasonBudget: 2,
+		CreatedAt:    now,
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	runDir := filepath.Join(runsBase, runID)
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	out := captureAmbientStdout(t, func() {
+		if err := runAmbient([]string{"status"}); err != nil {
+			t.Fatalf("status: %v", err)
+		}
+	})
+
+	want := []string{
+		"tiller: ambient enabled for " + dir,
+		"run: " + runID,
+		"status: running",
+		"next_action: proceed confidence=70 risk=low budget=ok fallback=false",
+		"read: " + filepath.Join(runDir, "status.md"),
+	}
+	for _, line := range want {
+		if !strings.Contains(out, line) {
+			t.Fatalf("status output missing %q:\n%s", line, out)
+		}
+	}
+}
+
+func withChdir(t *testing.T, dir string) {
+	t.Helper()
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldwd)
+	})
+}
+
+func captureAmbientStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = old
+	}()
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdout pipe: %v", err)
+	}
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	return buf.String()
 }

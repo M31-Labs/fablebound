@@ -40,6 +40,9 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `## Arbiter Next Action` from the new `ambient_next_action` policy, emitting
   one advisory action with confidence, risk, reason, target, and budget
   posture while keeping `Recommended Next Actions` as legacy/fallback context.
+- **Ambient next digest** - `tiller ambient next` now prints a compact
+  run-control digest from scratch state, and `tiller ambient status` points to
+  the active run's `status.md` and current Arbiter next action when available.
 - **Ambient recommended next actions** - `status.md` now renders a deterministic
   `## Recommended Next Actions` section for stale triage, checkpoint review,
   compaction, waiting, or proceeding.

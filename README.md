@@ -40,6 +40,7 @@ tiller uninstall --backend codex --project --print
 # Temporarily bypass ambient enforcement while testing
 tiller ambient disable
 tiller ambient enable
+tiller ambient next
 ```
 
 **Trialing is safe.** `tiller uninstall --backend <name> --project` reverts the matching project install in one shot. For Codex that includes hooks, managed tiller-* personas, managed agent defaults, and generated Codex skills when they have not been locally edited. It works even from inside a gated fable session (the hook explicitly allows it). Your run history (`.tiller/` dirs in your projects) is never touched. Use `tiller uninstall --backend <name> --project --print` to preview exactly what would be removed before committing.
@@ -50,7 +51,7 @@ For Codex, the project install writes `PreToolUse`, `PostToolUse`, `SessionStart
 
 For OpenCode, the project install writes `opencode.json` with a managed instruction reference, `.opencode/tiller.md` operating notes, and OpenCode markdown agents under `.opencode/agents/`. Use the `tiller-orchestrator` primary agent for the root orchestration path and the `tiller-*` subagents for execution, debugging, investigation, review, and synthesis.
 
-`tiller ambient disable` creates `.tiller/ambient.disabled` in the current project. While that marker exists, ambient hooks pass through silently. `tiller ambient enable` removes it. `TILLER_AMBIENT_DISABLED=1` is also honored as a process-local bypass.
+`tiller ambient disable` creates `.tiller/ambient.disabled` in the current project. While that marker exists, ambient hooks pass through silently. `tiller ambient enable` removes it. `tiller ambient status` reports the marker and, inside a run, points to the current `status.md` and next action. `tiller ambient next` prints a compact run-control digest from scratch state. `TILLER_AMBIENT_DISABLED=1` is also honored as a process-local bypass.
 
 For Claude Code, then in any `claude` session:
 

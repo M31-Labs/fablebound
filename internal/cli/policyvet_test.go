@@ -22,7 +22,7 @@ func TestPolicyVet_DefaultPoliciesCompile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// policyVet must succeed (embedded defaults compile) and print two hashes.
+	// policyVet must succeed (embedded defaults compile) and print policy hashes.
 	if err := policyVet(); err != nil {
 		t.Fatalf("policyVet() returned error: %v", err)
 	}
@@ -108,8 +108,8 @@ func TestMaterializePolicyFiles(t *testing.T) {
 		t.Error("schemas.go does not contain DispatchRequest")
 	}
 
-	// arb files must exist for both kinds.
-	for _, kind := range []string{"dispatch", "toolgate"} {
+	// arb files must exist for all kinds.
+	for _, kind := range policyKinds {
 		f, ok := arbFiles[kind]
 		if !ok || f == "" {
 			t.Errorf("arbFiles[%s] is empty", kind)
@@ -120,8 +120,8 @@ func TestMaterializePolicyFiles(t *testing.T) {
 		}
 	}
 
-	// test.arb files must exist for both kinds.
-	for _, kind := range []string{"dispatch", "toolgate"} {
+	// test.arb files must exist for all kinds.
+	for _, kind := range policyKinds {
 		f, ok := testFiles[kind]
 		if !ok || f == "" {
 			t.Errorf("testFiles[%s] is empty", kind)

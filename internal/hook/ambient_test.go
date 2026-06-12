@@ -339,6 +339,66 @@ func TestAmbientFableAllowRead(t *testing.T) {
 	}
 }
 
+func TestAmbientUsesProjectPolicyOverride(t *testing.T) {
+	workspace := t.TempDir()
+	policyDir := filepath.Join(workspace, ".tiller", "policy")
+	if err := os.MkdirAll(policyDir, 0o755); err != nil {
+		t.Fatalf("mkdir policy dir: %v", err)
+	}
+	const distinctiveReason = "project ambient override denied root Read"
+	override := `
+rule DenyProjectRead priority 1 {
+    when { tool.name == "Read" }
+    then Deny { reason: "` + distinctiveReason + `" }
+}
+`
+	if err := os.WriteFile(filepath.Join(policyDir, "ambient.arb"), []byte(override), 0o644); err != nil {
+		t.Fatalf("write ambient override: %v", err)
+	}
+
+	transcript := filepath.Join(workspace, "t.jsonl")
+	line := `{"type":"assistant","isSidechain":false,"message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(line), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	event := map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "Read",
+		"tool_input":      map[string]any{"file_path": filepath.Join(workspace, "foo.go")},
+		"transcript_path": transcript,
+		"agent_id":        "",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("TILLER_ROLE", old)
+		}
+	})
+
+	var out bytes.Buffer
+	if err := Run(strings.NewReader(string(data)), &out, workspace); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	outBytes := bytes.TrimSpace(out.Bytes())
+	if len(outBytes) == 0 {
+		t.Fatal("expected ambient policy decision, got passthrough")
+	}
+	if decision := parseAmbientDecision(t, outBytes); decision != "deny" {
+		t.Fatalf("decision = %q, want deny; raw output: %s", decision, outBytes)
+	}
+	reason := parseDecisionReason(t, outBytes)
+	if !strings.Contains(reason, "DenyProjectRead") || !strings.Contains(reason, distinctiveReason) {
+		t.Fatalf("override reason not used; got %q", reason)
+	}
+}
+
 // ─── Ambient deny reason: no vendor tokens, correct persona list ──────────────
 
 // runAmbientHookWithTranscriptFull returns the full decoded output including
@@ -689,6 +749,61 @@ func TestClaudeAmbientGovernedPreToolUseAppendsUsageLedger(t *testing.T) {
 	}
 	if !hasUsageRef {
 		t.Fatalf("ledger event missing stable usage ref: %#v", events[0].Refs)
+	}
+}
+
+func TestClaudeAmbientGovernedPreToolUseWritesAuditLine(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_ROLE", "")
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := fableTranscript(t)
+	event := map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "Edit",
+		"tool_input":      map[string]any{"file_path": filepath.Join(workspace, "foo.go")},
+		"transcript_path": p,
+		"agent_id":        "",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := Run(strings.NewReader(string(data)), &out, workspace); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if decision := parseAmbientDecision(t, bytes.TrimSpace(out.Bytes())); decision != "deny" {
+		t.Fatalf("expected deny, got %q", decision)
+	}
+
+	auditPath := filepath.Join(runDir, "audit", "toolgate.jsonl")
+	raw, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatalf("read audit file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 1 || lines[0] == "" {
+		t.Fatalf("audit line count=%d want 1; raw=%q", len(lines), raw)
+	}
+
+	var ev map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &ev); err != nil {
+		t.Fatalf("invalid audit JSON: %v", err)
+	}
+	if requestID, _ := ev["request_id"].(string); !strings.HasPrefix(requestID, "ambient-root-") {
+		t.Fatalf("request_id = %q, want ambient-root-*", requestID)
+	}
+	if ctx, ok := ev["context"].(map[string]any); !ok || len(ctx) == 0 {
+		t.Fatalf("context is empty or missing: %#v", ev["context"])
+	}
+	if rules, ok := ev["rules"].([]any); !ok || len(rules) == 0 {
+		t.Fatalf("rules is empty or missing: %#v", ev["rules"])
+	}
+	if arbitrace, ok := ev["arbitrace"].([]any); !ok || len(arbitrace) == 0 {
+		t.Fatalf("arbitrace is empty or missing: %#v", ev["arbitrace"])
 	}
 }
 

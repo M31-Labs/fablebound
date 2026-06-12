@@ -519,6 +519,40 @@ test "Codex exec_command rg is allowed (readonly shell)" {
     expect rule AllowPermittedBash matched
 }
 
+test "Codex exec_command ps is allowed (readonly process diagnostic)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "exec_command"
+        tool.command: "ps aux"
+        tool.command_class: "readonly"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowPermittedBash matched
+}
+
+test "Bash ss listening ports is allowed (readonly port diagnostic)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "ss -ltnp"
+        tool.command_class: "readonly"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowPermittedBash matched
+}
+
 test "gts callgraph piped to wc is allowed (readonly bash)" {
     given {
         agent.role: "ambient-orchestrator"
@@ -597,6 +631,24 @@ test "echo with command substitution is denied (other bash)" {
         agent.dispatch_id: ""
         tool.name: "Bash"
         tool.command: "echo $(whoami)"
+        tool.command_class: "other"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowPermittedBash not matched
+    expect rule DenyExecution matched
+}
+
+test "Codex exec_command ss kill is denied (other port diagnostic)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "exec_command"
+        tool.command: "ss -K dst 127.0.0.1"
         tool.command_class: "other"
         tool.file_path: ""
         tool.path_in_scratch: false

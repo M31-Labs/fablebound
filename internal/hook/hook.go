@@ -410,7 +410,7 @@ type HookEventFull struct {
 // handleAmbientPreToolUse evaluates the ambient policy for a governed ambient
 // root session.
 // Returns output JSON to write to stdout, or an error.
-func handleAmbientPreToolUse(event HookEvent, stdout io.Writer, ambient *tier.AmbientConfig, outputProtocol ambientOutputProtocol) error {
+func handleAmbientPreToolUse(event HookEvent, stdout io.Writer, workspaceDir string, ambient *tier.AmbientConfig, outputProtocol ambientOutputProtocol) error {
 	toolName := normalizeAmbientToolName(event.ToolName)
 	req := policy.ToolCallRequest{
 		Role:  "ambient-orchestrator",
@@ -429,6 +429,10 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer, ambient *tier.Am
 	req.FilePath = input.FilePath
 	if req.FilePath == "" {
 		req.FilePath = input.Path
+	}
+	runDir := os.Getenv("TILLER_RUN_DIR")
+	if runDir != "" {
+		req.RunID = filepath.Base(runDir)
 	}
 
 	// Populate CommandClass for Bash calls (used by AllowPermittedBash rule,
@@ -457,7 +461,7 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer, ambient *tier.Am
 		req.AgentModelTier = ambient.ModelTier(input.Model)
 	}
 
-	loaded, err := policy.Load("ambient", "")
+	loaded, err := policy.Load("ambient", workspaceDir)
 	if err != nil {
 		return fmt.Errorf("load ambient policy: %w", err)
 	}
@@ -465,6 +469,12 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer, ambient *tier.Am
 	result, err := policy.EvalToolCall(loaded, req)
 	if err != nil {
 		return fmt.Errorf("eval ambient policy: %w", err)
+	}
+	if runDir != "" {
+		requestID := fmt.Sprintf("ambient-root-%d", time.Now().UnixNano())
+		if auditErr := writeAuditEvent(runDir, requestID, loaded, req, result.Matched, result.Arbitrace); auditErr != nil {
+			fmt.Fprintf(os.Stderr, "tiller hook: ambient audit write error: %v\n", auditErr)
+		}
 	}
 
 	decision := "deny"
@@ -757,7 +767,7 @@ func runAmbient(stdin io.Reader, stdout io.Writer, workspaceDir, backend string)
 		ToolInput:     full.ToolInput,
 		ToolResponse:  full.ToolResponse,
 	}
-	return handleAmbientPreToolUse(event, stdout, ambient, outputProtocol)
+	return handleAmbientPreToolUse(event, stdout, workspaceDir, ambient, outputProtocol)
 }
 
 func codexModelEvidence(full HookEventFull) harness.ModelEvidence {

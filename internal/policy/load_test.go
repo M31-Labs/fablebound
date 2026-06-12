@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// TestDefaultsCompile verifies that both embedded default policies compile
+// TestDefaultsCompile verifies that all embedded default policies compile
 // with schema typecheck successfully.
 func TestDefaultsCompile(t *testing.T) {
-	for _, kind := range []string{"dispatch", "toolgate"} {
+	for _, kind := range []string{"dispatch", "toolgate", "ambient"} {
 		t.Run(kind, func(t *testing.T) {
 			loaded, err := Load(kind, "")
 			if err != nil {

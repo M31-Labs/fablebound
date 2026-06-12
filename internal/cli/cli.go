@@ -143,7 +143,7 @@ Subcommands:
   note add [-|"text"]    append a timestamped note
   runs list|show <id>    list or inspect runs
   promote <run-id>       distill run into a hyphae spore
-  policy vet             compile+typecheck both policies
+  policy vet             compile+typecheck all policies
   store init|status      bootstrap or inspect the PostgreSQL scratch store
   hook [--backend b]     internal: backend hook gate (stdin JSON)
   ambient disable|enable|status

@@ -31,6 +31,7 @@ type ToolCallResult struct {
 	Verdict   Verdict
 	Rule      string
 	Reason    string
+	Matched   []vm.MatchedRule
 	Arbitrace *govern.Arbitrace
 }
 
@@ -101,6 +102,7 @@ func EvalToolCall(loaded *Loaded, req ToolCallRequest) (ToolCallResult, error) {
 		Verdict:   verdict,
 		Rule:      rule,
 		Reason:    reason,
+		Matched:   matched,
 		Arbitrace: trace,
 	}, nil
 }

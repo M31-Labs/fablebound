@@ -15,6 +15,8 @@ import (
 // vendorStrayRe matches vendor model tokens that should not appear in default policies.
 var vendorStrayRe = regexp.MustCompile(`\b(fable|opus|sonnet|haiku)\b`)
 
+var policyKinds = []string{"dispatch", "toolgate", "ambient"}
+
 // runPolicy implements `tiller policy <subcommand>`.
 func runPolicy(args []string) error {
 	if len(args) == 0 {
@@ -28,7 +30,7 @@ func runPolicy(args []string) error {
 	}
 }
 
-// policyVet compiles and schema-typechecks both policies, printing their
+// policyVet compiles and schema-typechecks all policies, printing their
 // sha256 hashes on success. When the `arbiter` CLI is present on PATH it
 // additionally runs `arbiter test` on the .test.arb suites and
 // `arbiter check --go <schemas.go> --type <T>` for each policy.
@@ -41,7 +43,7 @@ func policyVet() error {
 	}
 
 	allOK := true
-	for _, kind := range []string{"dispatch", "toolgate", "ambient"} {
+	for _, kind := range policyKinds {
 		loaded, err := policy.Load(kind, projectDir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "policy vet: %v\n", err)
@@ -83,7 +85,7 @@ func policyVet() error {
 	defer cleanup()
 
 	// Run `arbiter test <kind.test.arb> --coverage --threshold 90` for each policy.
-	for _, kind := range []string{"dispatch", "toolgate"} {
+	for _, kind := range policyKinds {
 		testFile, ok := testFiles[kind]
 		if !ok || testFile == "" {
 			fmt.Fprintf(os.Stderr, "policy vet: no .test.arb for %s — skipping arbiter test\n", kind)
@@ -100,8 +102,9 @@ func policyVet() error {
 	typeNames := map[string]string{
 		"dispatch": "DispatchRequest",
 		"toolgate": "ToolCallRequest",
+		"ambient":  "ToolCallRequest",
 	}
-	for _, kind := range []string{"dispatch", "toolgate"} {
+	for _, kind := range policyKinds {
 		arbFile, ok := arbFiles[kind]
 		if !ok || arbFile == "" {
 			continue
@@ -144,7 +147,7 @@ func runArbiterCheck(arbiterPath, schemaFile, typeName, arbFile string) error {
 	return nil
 }
 
-// materializePolicyFiles resolves arb, test.arb, and schemas.go for both
+// materializePolicyFiles resolves arb, test.arb, and schemas.go for all
 // policies into a single temp directory. Project-local files under
 // .tiller/policy/ take precedence; embedded defaults are copied otherwise.
 // Returns (tmpDir, schemaFile, arbFiles, testFiles, cleanup, error).
@@ -179,7 +182,7 @@ func materializePolicyFiles(projectDir string) (
 
 	defaults := policy.EmbeddedDefaults()
 
-	for _, kind := range []string{"dispatch", "toolgate"} {
+	for _, kind := range policyKinds {
 		// arb file: prefer project-local, fall back to embedded.
 		localArb := filepath.Join(projectDir, ".tiller", "policy", kind+".arb")
 		if data, readErr := os.ReadFile(localArb); readErr == nil {

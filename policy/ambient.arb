@@ -15,8 +15,23 @@ rule HaltAmbient priority 0 {
 }
 
 rule AllowRead priority 10 {
-    when { tool.name in ["Read", "Glob", "Grep", "view_image"] }
-    then Allow { reason: "reading is permitted for the ambient orchestrator" }
+    when {
+        tool.name in [
+            "Read",
+            "Glob",
+            "Grep",
+            "view_image",
+            "WebFetch",
+            "WebSearch",
+            "ToolSearch",
+            "tool_search_tool",
+            "list_mcp_resources",
+            "list_mcp_resource_templates",
+            "read_mcp_resource",
+            "get_goal"
+        ]
+    }
+    then Allow { reason: "read/context gathering is permitted for the ambient orchestrator" }
 }
 
 rule AllowAgent priority 10 {
@@ -29,14 +44,8 @@ rule AllowTodoWrite priority 10 {
     then Allow { reason: "todo management is permitted for planning" }
 }
 
-rule AllowWebFetch priority 10 {
-    when { tool.name == "WebFetch" }
-    then Allow { reason: "web reading is permitted for the ambient orchestrator" }
-}
-
 # Gap 1: orchestration tools that the ambient orchestrator needs.
-# ToolSearch loads deferred tool schemas — without it the orchestrator cannot
-# invoke any deferred tool at all.  Skill, AskUserQuestion, EnterPlanMode,
+# Skill, AskUserQuestion, EnterPlanMode,
 # ExitPlanMode are orchestration-shaped and must be allowed at the same tier.
 # The Task-tracking family (TaskCreate / TaskGet / TaskList / TaskUpdate /
 # TaskOutput / TaskStop) lets the orchestrator manage in-flight work items;
@@ -46,7 +55,6 @@ rule AllowWebFetch priority 10 {
 rule AllowOrchestrationTools priority 10 {
     when {
         tool.name in [
-            "ToolSearch",
             "Skill",
             "AskUserQuestion",
             "EnterPlanMode",
@@ -71,7 +79,6 @@ rule AllowOrchestrationTools priority 10 {
             "multi_agent_v1close_agent",
             "update_plan",
             "request_user_input",
-            "get_goal",
             "create_goal",
             "update_goal"
         ]

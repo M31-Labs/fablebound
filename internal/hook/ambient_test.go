@@ -623,6 +623,33 @@ func TestCodexAmbientNamespacedViewImageAllowedSilent(t *testing.T) {
 	}
 }
 
+func TestCodexAmbientNamespacedToolSearchAllowedSilent(t *testing.T) {
+	p := codexTranscript(t, "xhigh")
+	out := runCodexAmbientHook(t, p, "tool_search.tool_search_tool", map[string]any{"query": "github"})
+	if len(out) != 0 {
+		t.Fatalf("Codex allow for tool_search.tool_search_tool should produce no stdout, got %s", out)
+	}
+}
+
+func TestCodexAmbientNamespacedDiagnosticAllowedSilent(t *testing.T) {
+	p := codexTranscript(t, "xhigh")
+	out := runCodexAmbientHook(t, p, "functions.list_mcp_resources", map[string]any{})
+	if len(out) != 0 {
+		t.Fatalf("Codex allow for functions.list_mcp_resources should produce no stdout, got %s", out)
+	}
+}
+
+func TestCodexAmbientWebRunWrapperDenied(t *testing.T) {
+	p := codexTranscript(t, "xhigh")
+	out := runCodexAmbientHook(t, p, "web.run", map[string]any{})
+	if len(out) == 0 {
+		t.Fatal("expected Codex deny output for generic web.run wrapper")
+	}
+	if decision := parseAmbientDecision(t, out); decision != "deny" {
+		t.Fatalf("expected deny, got %q", decision)
+	}
+}
+
 func TestCodexAmbientNamespacedMultiAgentLifecycleAllowedSilent(t *testing.T) {
 	p := codexTranscript(t, "xhigh")
 	for _, toolName := range []string{

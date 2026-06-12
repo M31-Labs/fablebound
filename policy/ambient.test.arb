@@ -1,11 +1,12 @@
 # Tests for ambient.arb — tiller ambient orchestrator-only gate.
 # Applied when TILLER_ROLE is unset and the session model is in the reason tier.
 # Denied: Edit, Write, NotebookEdit, Bash, apply_patch.
-# Allowed: Read, Glob, Grep, Agent, TodoWrite, WebFetch.
+# Allowed read/context: Read, Glob, Grep, view_image, WebFetch, WebSearch,
+# ToolSearch/tool_search_tool, MCP resource reads, get_goal.
 # No match → deny (combinator default).
 #
 # Coverage targets: HaltAmbient (kill_switch), AllowRead, AllowAgent,
-# AllowTodoWrite, AllowWebFetch, DenyHyphaDaemons, AllowPermittedBash
+# AllowTodoWrite, DenyHyphaDaemons, AllowPermittedBash
 # (covers readonly + self-uninstall classes), AllowMarkdownAuthoring,
 # DenyExecution.
 
@@ -83,6 +84,132 @@ test "view_image is allowed in ambient mode" {
     expect rule DenyExecution not matched
 }
 
+test "WebFetch is allowed as ambient read/context" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "WebFetch"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowRead matched
+    expect rule DenyExecution not matched
+}
+
+test "WebSearch is allowed as ambient read/context" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "WebSearch"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowRead matched
+    expect rule DenyExecution not matched
+}
+
+test "Codex tool_search_tool is allowed as ambient read/context" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "tool_search_tool"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowRead matched
+    expect rule DenyExecution not matched
+}
+
+test "list_mcp_resources is allowed as ambient read/context" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "list_mcp_resources"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowRead matched
+    expect rule DenyExecution not matched
+}
+
+test "list_mcp_resource_templates is allowed as ambient read/context" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "list_mcp_resource_templates"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowRead matched
+    expect rule DenyExecution not matched
+}
+
+test "read_mcp_resource is allowed as ambient read/context" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "read_mcp_resource"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowRead matched
+    expect rule DenyExecution not matched
+}
+
+test "get_goal is allowed as ambient read/context" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "get_goal"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowRead matched
+    expect rule DenyExecution not matched
+}
+
 # ── AllowAgent ───────────────────────────────────────────────────────────────
 
 test "Agent (Task dispatch) is allowed in ambient mode" {
@@ -120,26 +247,6 @@ test "TodoWrite is allowed in ambient mode" {
         run.id: ""
     }
     expect rule AllowTodoWrite matched
-    expect rule DenyExecution not matched
-}
-
-# ── AllowWebFetch ─────────────────────────────────────────────────────────────
-
-test "WebFetch is allowed in ambient mode" {
-    given {
-        agent.role: "ambient-orchestrator"
-        agent.depth: 0
-        agent.dispatch_id: ""
-        tool.name: "WebFetch"
-        tool.command: ""
-        tool.command_class: ""
-        tool.file_path: ""
-        tool.path_in_scratch: false
-        tool.path_in_workspace: false
-        tool.write_class: ""
-        run.id: ""
-    }
-    expect rule AllowWebFetch matched
     expect rule DenyExecution not matched
 }
 
@@ -635,7 +742,6 @@ test "unknown tool is denied by default (no rule matches)" {
     expect rule AllowRead not matched
     expect rule AllowAgent not matched
     expect rule AllowTodoWrite not matched
-    expect rule AllowWebFetch not matched
     expect rule DenyExecution not matched
 }
 
@@ -657,7 +763,7 @@ test "ToolSearch is allowed in ambient mode" {
         tool.agent_model_tier: ""
         run.id: ""
     }
-    expect rule AllowOrchestrationTools matched
+    expect rule AllowRead matched
     expect rule DenyExecution not matched
 }
 

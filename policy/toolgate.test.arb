@@ -352,6 +352,66 @@ test "orchestrator functions.view_image tool is allowed (OrchestratorRead)" {
     expect rule OrchestratorRead matched
 }
 
+test "orchestrator WebSearch tool is allowed (OrchestratorRead)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "WebSearch"
+        tool.command: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorRead matched
+}
+
+test "orchestrator namespaced tool_search_tool is allowed (OrchestratorRead)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "tool_search.tool_search_tool"
+        tool.command: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorRead matched
+}
+
+test "orchestrator namespaced list_mcp_resources is allowed (OrchestratorRead)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "functions.list_mcp_resources"
+        tool.command: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorRead matched
+}
+
+test "orchestrator read_mcp_resource is allowed (OrchestratorRead)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "read_mcp_resource"
+        tool.command: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorRead matched
+}
+
 # ── OrchestratorEffector ──────────────────────────────────────────────────────
 
 test "orchestrator running tiller dispatch is allowed (OrchestratorEffector)" {
@@ -473,6 +533,22 @@ test "orchestrator running git log is denied (orchestrator bash not in tiller/hy
         tool.path_in_workspace: false
         run.id: "20260101-000000-0001"
     }
+    expect rule OrchestratorDenyRest matched
+}
+
+test "orchestrator generic web.run wrapper is denied (OrchestratorDenyRest)" {
+    given {
+        agent.role: "orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: "root"
+        tool.name: "web.run"
+        tool.command: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        run.id: "20260101-000000-0001"
+    }
+    expect rule OrchestratorRead not matched
     expect rule OrchestratorDenyRest matched
 }
 

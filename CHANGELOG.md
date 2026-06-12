@@ -29,6 +29,13 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   append advisory `ambient.task_result` ledger facts, update best-effort agent
   runs/checkpoint candidates from descriptor-compatible reports, and refresh
   `status.md` without changing ambient allow/deny policy.
+- **Ambient distillation ledger** - descriptor-compatible reports may include
+  `Distillation`, `Distilled State`, or `Reusable Context`; governed
+  `PostToolUse` reconciliation appends idempotent `ambient.distillation`
+  ledger facts and `status.md` renders a `## Distillation` section for reusable
+  compressed state before raw logs/transcripts. This is the foundation for the
+  recursive ambient loop: distilled state -> next action/refinement ->
+  checkpoint, continue, or escalate.
 - **Ambient recommended next actions** - `status.md` now renders a deterministic
   `## Recommended Next Actions` section for stale triage, checkpoint review,
   compaction, waiting, or proceeding.
@@ -56,8 +63,9 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Codex scout persona** - `tiller-scout` uses `gpt-5.4-mini` for cheap bounded
   read-only reconnaissance, inventories, docs/log snippets, and simple summaries.
 - **Ambient summary persona** - `tiller-summary` uses cheap read-only models for
-  compact status updates, run ledger summaries, stale/late report triage, and
-  checkpoint candidate synthesis across Claude Code, Codex, and OpenCode installs.
+  compact status updates, distilled ambient state, run ledger summaries,
+  stale/late report triage, and checkpoint candidate synthesis across Claude
+  Code, Codex, and OpenCode installs.
 - **Codex lifecycle context** - Codex installs `SessionStart`, `SubagentStart`,
   and `PostToolUse` hooks alongside `PreToolUse`. `SessionStart` emits startup context only when
   the root session is proven governed, such as `gpt-5.5 xhigh`; subagent

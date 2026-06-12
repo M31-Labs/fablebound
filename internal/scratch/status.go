@@ -104,6 +104,26 @@ func RenderStatusMarkdown(st Store, runID string, opts StatusOptions) ([]byte, e
 	}
 	sb.WriteString("\n")
 
+	distillations := distillationLedgerEvents(ledger)
+	sb.WriteString("## Distillation\n\n")
+	sb.WriteString("Reusable compressed state for the orchestrator; read these entries before raw logs or transcripts.\n\n")
+	sb.WriteString(fmt.Sprintf("- total: %d\n", len(distillations)))
+	writeCounts(&sb, "- by_status", ledgerStatusCounts(distillations))
+	sb.WriteString("- recent:\n")
+	for _, ev := range recentLedgerEvents(distillations, opts.RecentLimit) {
+		sb.WriteString(fmt.Sprintf("  - `%s` %s %s\n", valueOr(ev.Backend, "unknown"), valueOr(ev.Status, "unknown"), formatTime(ev.At)))
+		if ev.Summary != "" {
+			sb.WriteString(fmt.Sprintf("    summary: %s\n", truncateStatusText(oneLine(ev.Summary), 360)))
+		}
+		if len(ev.Refs) > 0 {
+			sb.WriteString(fmt.Sprintf("    refs: %s\n", truncateStatusText(strings.Join(ev.Refs, ", "), 240)))
+		}
+	}
+	if len(distillations) == 0 {
+		sb.WriteString("  - none\n")
+	}
+	sb.WriteString("\n")
+
 	sb.WriteString("## Checkpoint Candidates\n\n")
 	sb.WriteString(fmt.Sprintf("- total: %d\n", len(candidates)))
 	writeCounts(&sb, "- by_status", checkpointStatusCounts(candidates))
@@ -352,6 +372,16 @@ func taskDescriptorEvents(events []LedgerEvent) []LedgerEvent {
 	out := make([]LedgerEvent, 0)
 	for _, ev := range events {
 		if ev.Kind == "ambient.task_descriptor" {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+func distillationLedgerEvents(events []LedgerEvent) []LedgerEvent {
+	out := make([]LedgerEvent, 0)
+	for _, ev := range events {
+		if ev.Kind == "ambient.distillation" {
 			out = append(out, ev)
 		}
 	}

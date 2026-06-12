@@ -88,6 +88,18 @@ func TestRenderStatusMarkdown(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AppendLedgerEvent descriptor: %v", err)
 	}
+	if err := st.AppendLedgerEvent(runID, scratch.LedgerEvent{
+		ID:         "ambient-distillation-001",
+		AgentRunID: "agent-001",
+		Backend:    "codex",
+		Kind:       "ambient.distillation",
+		Status:     scratch.AgentRunStatusCompleted,
+		At:         now.Add(-4 * time.Minute),
+		Summary:    "Renderer status is implemented; read status.md distillation before opening raw ledger logs.",
+		Refs:       []string{"tool:spawn_agent", "descriptor_id:abc123", "attempt_id:attempt789"},
+	}); err != nil {
+		t.Fatalf("AppendLedgerEvent distillation: %v", err)
+	}
 
 	data, err := scratch.RenderStatusMarkdown(st, runID, scratch.StatusOptions{UpdatedAt: now, RecentLimit: 3})
 	if err != nil {
@@ -112,6 +124,12 @@ func TestRenderStatusMarkdown(t *testing.T) {
 		"- `tiller-worker` codex requested 2026-06-12T09:50:00Z",
 		"summary: tiller-worker: implement descriptor capture",
 		"refs: tool:spawn_agent, agent_type:tiller-worker, descriptor_id:abc123, objective_hash:def456",
+		"## Distillation",
+		"Reusable compressed state for the orchestrator; read these entries before raw logs or transcripts.",
+		"- by_status: completed=1",
+		"- `codex` completed 2026-06-12T09:56:00Z",
+		"summary: Renderer status is implemented; read status.md distillation before opening raw ledger logs.",
+		"refs: tool:spawn_agent, descriptor_id:abc123, attempt_id:attempt789",
 		"## Checkpoint Candidates",
 		"- `cp-001` fresh agent-001 2026-06-12T09:55:00Z",
 		"## Observed Token Usage",

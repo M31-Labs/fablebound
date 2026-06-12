@@ -1653,6 +1653,8 @@ func TestClaudeAmbientTaskPostToolUseReconcilesReport(t *testing.T) {
 	report := strings.Join([]string{
 		"## Outcome",
 		"Renderer patched and verified.",
+		"## Distilled State",
+		"Renderer status rendering now includes compact task state and checkpoint advice.",
 		"## Files Changed",
 		"- internal/scratch/status.go",
 		"- README.md",
@@ -1672,6 +1674,13 @@ func TestClaudeAmbientTaskPostToolUseReconcilesReport(t *testing.T) {
 	if len(out) != 0 {
 		t.Fatalf("PostToolUse should stay silent, got %s", out)
 	}
+	out = runClaudeAmbientPostHook(t, workspace, p, "Task", toolInput, map[string]any{
+		"is_error": false,
+		"output":   report,
+	})
+	if len(out) != 0 {
+		t.Fatalf("second PostToolUse should stay silent, got %s", out)
+	}
 
 	st := fsstore.Open(filepath.Dir(runDir))
 	events, err := st.ListLedgerEvents(filepath.Base(runDir))
@@ -1685,6 +1694,19 @@ func TestClaudeAmbientTaskPostToolUseReconcilesReport(t *testing.T) {
 	for _, want := range []string{"Renderer patched and verified.", "tool:Task", "agent_type:tiller-worker", "descriptor_id:", "objective_hash:", "attempt_id:"} {
 		if !ledgerEventContains(*result, want) {
 			t.Fatalf("result missing %q: %#v", want, result)
+		}
+	}
+	distillations := findLedgerEventsKind(events, "ambient.distillation")
+	if len(distillations) != 1 {
+		t.Fatalf("distillation count=%d want 1: %#v", len(distillations), events)
+	}
+	distillation := distillations[0]
+	if distillation.Status != scratch.AgentRunStatusCompleted || distillation.AgentRunID != result.AgentRunID {
+		t.Fatalf("unexpected distillation event: %#v", distillation)
+	}
+	for _, want := range []string{"Renderer status rendering now includes compact task state", "tool:Task", "descriptor_id:", "attempt_id:"} {
+		if !ledgerEventContains(distillation, want) {
+			t.Fatalf("distillation missing %q: %#v", want, distillation)
 		}
 	}
 	agents, err := st.ListAgentRuns(filepath.Base(runDir))
@@ -1715,12 +1737,30 @@ func TestClaudeAmbientTaskPostToolUseReconcilesReport(t *testing.T) {
 	for _, want := range []string{
 		"## Task Descriptors",
 		"- by_status: completed=1",
+		"## Distillation",
+		"Reusable compressed state for the orchestrator",
+		"summary: Renderer status rendering now includes compact task state and checkpoint advice.",
 		"## Recommended Next Actions",
 		"- `checkpoint_candidate`: review checkpoint candidates=1",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status.md missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestParseAmbientReportRecognizesDistillationAliases(t *testing.T) {
+	cases := []string{"Distillation", "Distilled State", "Reusable Context"}
+	for _, heading := range cases {
+		t.Run(heading, func(t *testing.T) {
+			report := parseAmbientReport("## Outcome\nDone.\n## " + heading + "\nKeep descriptor rollups in status.md; raw ledger reads are fallback only.\n")
+			if report.Summary != "Done." {
+				t.Fatalf("summary=%q want Done.", report.Summary)
+			}
+			if report.Distillation != "Keep descriptor rollups in status.md; raw ledger reads are fallback only." {
+				t.Fatalf("distillation=%q", report.Distillation)
+			}
+		})
 	}
 }
 

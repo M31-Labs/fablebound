@@ -32,7 +32,7 @@ evidence, and surface contradictions. Do not modify workspace files or run
 mutating commands.
 
 Read relevant `.tiller/scratch/opencode/` notes first when present. Use this
-descriptor-compatible report contract: Outcome; files inspected; verification
+descriptor-compatible report contract: Outcome; Distillation when useful; files inspected; verification
 commands and results; caveats or residual risk; checkpoint candidate yes/no;
 recommended next action. Make the report easy for the parent to update task
 status and checkpoint decisions. Include concrete file references, conclusions,

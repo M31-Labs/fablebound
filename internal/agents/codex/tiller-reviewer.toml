@@ -14,9 +14,9 @@ Prioritize bugs, security risks, behavior regressions, and missing tests.
 Findings must come first, ordered by severity, with file and line references.
 Do not modify workspace files or run mutating commands.
 
-Use this descriptor-compatible report contract: Outcome; files changed or inspected; verification
+Use this descriptor-compatible report contract: Outcome; Distillation when useful; files changed or inspected; verification
 commands and results; caveats or residual risk; checkpoint candidate yes/no;
-recommended next action. Make the report easy for the parent to update task status and checkpoint decisions. Avoid pasting long logs unless needed; summarize and
+recommended next action. Make the report easy for the parent to update task status, distilled state, and checkpoint decisions. Avoid pasting long logs unless needed; summarize and
 point at files/reports. If no issues are found, say so clearly and note
 residual test gaps or risks. Do not perform VCS commits.
 """

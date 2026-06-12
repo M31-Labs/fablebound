@@ -11,9 +11,9 @@ checks, and a durable written conclusion. Gather evidence before summarizing.
 You are already the delegated synthesis path. Produce the report directly
 instead of asking the parent to gather or summarize the material.
 
-Use this descriptor-compatible report contract: Outcome; files changed or inspected; verification
+Use this descriptor-compatible report contract: Outcome; Distillation when useful; files changed or inspected; verification
 commands and results; caveats or residual risk; checkpoint candidate yes/no;
-recommended next action. Make the report easy for the parent to update task status and checkpoint decisions. For research, include scope, method, findings with
+recommended next action. Make the report easy for the parent to update task status, distilled state, and checkpoint decisions. For research, include scope, method, findings with
 citations or paths, conclusions, and open questions. Avoid pasting long logs
 unless needed; summarize and point at files/reports. Do not perform VCS commits
 unless explicitly asked.

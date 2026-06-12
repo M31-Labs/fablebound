@@ -1093,7 +1093,8 @@ Root Codex session:
   inspect ordinary context.
 - Spend premium/reason-tier output on durable judgment artifacts: specs, plans,
   architecture notes, implementation docs, reviews, policy rationale,
-  checkpoint decisions, and high-quality handoff briefs.
+  checkpoint decisions, distilled ambient state, and high-quality handoff
+  briefs.
 - Maintain a descriptor-backed task list. Each descriptor should look like a
   portable subagent/task packet that can be mapped to Codex, Claude Code,
   OpenCode, Cursor, or future harnesses.
@@ -1104,11 +1105,12 @@ Root Codex session:
 - Send bulky execution output, shell logs, routine patching, and test loops to
   worker/debugger/cheap subagents.
 - When the current run has ` + "`status.md`" + ` beside ` + "`ledger.jsonl`" + `, read ` + "`status.md`" + ` first for
-  compact run state before raw ledger files, including ` + "`Stale/Late Work`" + `,
-  ` + "`Recommended Next Actions`" + `, checkpoint candidates, and advisory
-  ` + "`Spend Budget`" + ` bands. Prioritize ` + "`Recommended Next Actions`" + ` before raw
-  ledger reads. If spend is warn/over, choose whether to compact, checkpoint,
-  or proceed before spending more premium output.
+  compact run state before raw ledger files, including ` + "`Distillation`" + `,
+  ` + "`Stale/Late Work`" + `, ` + "`Recommended Next Actions`" + `, checkpoint candidates, and
+  advisory ` + "`Spend Budget`" + ` bands. Read ` + "`Distillation`" + ` before raw logs or
+  transcripts. Prioritize ` + "`Recommended Next Actions`" + ` before raw ledger reads.
+  If spend is warn/over, choose whether to compact, checkpoint, or proceed
+  before spending more premium output.
 - Keep root output compact; write durable docs/plans when they compound.
 - Queue/background independent descriptors and continue useful orchestration.
   Wait only for descriptors that block the next integration decision. Update
@@ -1125,9 +1127,9 @@ Right-sizing matrix:
   ordinary context.
 - ` + "`tiller-scout`" + `: ` + "`gpt-5.4-mini`" + ` for cheap bounded reconnaissance,
   inventories, docs/log snippets, and simple summaries.
-- ` + "`tiller-summary`" + `: ` + "`gpt-5.4-mini`" + ` for compact status updates, run
-  ledger summaries, stale/late report triage, checkpoint candidate synthesis,
-  and next-action bookkeeping.
+- ` + "`tiller-summary`" + `: ` + "`gpt-5.4-mini`" + ` for compact status updates,
+  distilled ambient state, run ledger summaries, stale/late report triage,
+  checkpoint candidate synthesis, and next-action bookkeeping.
 - ` + "`tiller-worker`" + `: ` + "`gpt-5.5 medium`" + ` for bounded implementation, edits,
   builds, and tests.
 - ` + "`tiller-debugger`" + `: ` + "`gpt-5.5 high`" + ` for root-cause analysis plus fixes.
@@ -1140,23 +1142,24 @@ Codex delegation mechanics:
 - Use the normal Codex multi-agent tools (` + "`spawn_agent`" + `, ` + "`wait_agent`" + `,
   ` + "`send_input`" + `, ` + "`resume_agent`" + `, ` + "`close_agent`" + `) with ` + "`agent_type`" + ` set to one of
   the ` + "`tiller-*`" + ` agents.
-- Use ` + "`tiller-summary`" + ` for compact status updates, run ledger summaries,
-  stale/late report triage, checkpoint candidate synthesis, and next-action
-  bookkeeping instead of spending root output on routine status compaction.
+- Use ` + "`tiller-summary`" + ` for compact status updates, distilled ambient state,
+  run ledger summaries, stale/late report triage, checkpoint candidate
+  synthesis, and next-action bookkeeping instead of spending root output on
+  routine status compaction.
   Prefer ` + "`status.md`" + ` first when it is present in the run directory; prioritize
-  ` + "`Recommended Next Actions`" + `; when ` + "`Stale/Late Work`" + ` is not ` + "`none`" + `, triage it
-  before raw logs; when ` + "`Spend Budget`" + ` is warn/over, recommend
-  compact/checkpoint/proceed.
+  ` + "`Distillation`" + ` and ` + "`Recommended Next Actions`" + `; when ` + "`Stale/Late Work`" + ` is not
+  ` + "`none`" + `, triage it before raw logs; when ` + "`Spend Budget`" + ` is warn/over,
+  recommend compact/checkpoint/proceed.
 - Keep delegated prompts bounded. Include the concrete task, relevant paths,
   expected output, and verification target when known.
 - Continue useful orchestration while agents run. When a result returns, review
   it, integrate it, and close the agent.
-- Require descriptor-compatible subagent reports to cover: Outcome; files
-  changed or inspected; verification commands and results; caveats or residual
-  risk; checkpoint candidate yes/no; recommended next action. Use returned
-  reports to update task status and checkpoint decisions. Ask subagents to
-  summarize long logs and point at files/reports instead of pasting bulky
-  output.
+- Require descriptor-compatible subagent reports to cover: Outcome;
+  Distillation when useful; files changed or inspected; verification commands
+  and results; caveats or residual risk; checkpoint candidate yes/no;
+  recommended next action. Use returned reports to update task status,
+  distilled state, and checkpoint decisions. Ask subagents to summarize long
+  logs and point at files/reports instead of pasting bulky output.
 - Treat coherent verified slices as checkpoint candidates. Ask execution agents
   to report exact changed files, verification, and caveats so the checkpoint can
   be committed cleanly with the configured checkpoint tool or normal Git/GitHub.
@@ -1197,11 +1200,11 @@ func codexSkillSnippet() string {
 		"",
 		"- Read files, search the tree, inspect git state, use Hyphae recall/pulse, and load relevant skills directly from the root.",
 		"- Use read-only shell commands for inspection: `rg`, `cat`, `sed -n`, `nl`, `git status`, `git diff`, `git show`, `hypha recall`, `hypha pulse`, `canopy search`, `canopy graph`, and similar non-mutating commands.",
-		"- Spend premium/reason-tier output on durable judgment artifacts: specs, plans, architecture notes, implementation docs, reviews, policy rationale, checkpoint decisions, and high-quality handoff briefs.",
+		"- Spend premium/reason-tier output on durable judgment artifacts: specs, plans, architecture notes, implementation docs, reviews, policy rationale, checkpoint decisions, distilled ambient state, and high-quality handoff briefs.",
 		"- Maintain a descriptor-backed task list. Each descriptor should look like a portable subagent/task packet that can be mapped to Codex, Claude Code, OpenCode, Cursor, or future harnesses.",
 		"- Descriptor fields: id/title, role/profile, objective, context paths, constraints, expected outputs, verification target, budget tier/model ceiling, sandbox/permission needs, dependencies/blockers, checkpoint criteria, and report contract.",
 		"- Send bulky execution output, shell logs, routine patching, and test loops to worker/debugger/cheap subagents.",
-		"- When the current run has `status.md` beside `ledger.jsonl`, read `status.md` first for compact run state before raw ledger files, including `Stale/Late Work`, `Recommended Next Actions`, checkpoint candidates, and advisory `Spend Budget` bands. Prioritize `Recommended Next Actions` before raw ledger reads. If spend is warn/over, choose whether to compact, checkpoint, or proceed before spending more premium output.",
+		"- When the current run has `status.md` beside `ledger.jsonl`, read `status.md` first for compact run state before raw ledger files, including `Distillation`, `Stale/Late Work`, `Recommended Next Actions`, checkpoint candidates, and advisory `Spend Budget` bands. Read `Distillation` before raw logs or transcripts. Prioritize `Recommended Next Actions` before raw ledger reads. If spend is warn/over, choose whether to compact, checkpoint, or proceed before spending more premium output.",
 		"- Keep root output compact; write durable docs/plans when they compound.",
 		"- Queue/background independent descriptors and continue useful orchestration. Wait only for descriptors that block the next integration decision. Update descriptors from returned reports.",
 		"- Prefer terse, direct, explicit technical artifacts and documentation: concrete paths, commands, diagnostics, decisions, and next actions over broad prose.",
@@ -1215,7 +1218,7 @@ func codexSkillSnippet() string {
 		"",
 		"- root: direct reads/searches and routing decisions; no subagent needed for ordinary context.",
 		"- `tiller-scout`: `gpt-5.4-mini` for cheap bounded reconnaissance, inventories, docs/log snippets, and simple summaries.",
-		"- `tiller-summary`: `gpt-5.4-mini` for compact status updates, run ledger summaries, stale/late report triage, checkpoint candidate synthesis, and next-action bookkeeping.",
+		"- `tiller-summary`: `gpt-5.4-mini` for compact status updates, distilled ambient state, run ledger summaries, stale/late report triage, checkpoint candidate synthesis, and next-action bookkeeping.",
 		"- `tiller-worker`: `gpt-5.5 medium` for bounded implementation, edits, builds, and tests.",
 		"- `tiller-debugger`: `gpt-5.5 high` for root-cause analysis plus fixes.",
 		"- `tiller-investigator`/`tiller-reviewer`: `gpt-5.5 xhigh` read-only for deep tracing, adversarial review, and high-stakes verification.",
@@ -1224,14 +1227,14 @@ func codexSkillSnippet() string {
 		"## Delegation",
 		"",
 		"- Use `tiller-scout` for cheap, bounded read-only reconnaissance and simple summaries.",
-		"- Use `tiller-summary` for compact status updates, run ledger summaries, stale/late report triage, checkpoint candidate synthesis, and next-action bookkeeping. Prefer `status.md` first when it is present in the run directory; prioritize `Recommended Next Actions`; when `Stale/Late Work` is not `none`, triage it before raw logs; when `Spend Budget` is warn/over, recommend compact/checkpoint/proceed.",
+		"- Use `tiller-summary` for compact status updates, distilled ambient state, run ledger summaries, stale/late report triage, checkpoint candidate synthesis, and next-action bookkeeping. Prefer `status.md` first when it is present in the run directory; prioritize `Distillation` and `Recommended Next Actions`; when `Stale/Late Work` is not `none`, triage it before raw logs; when `Spend Budget` is warn/over, recommend compact/checkpoint/proceed.",
 		"- Use `tiller-worker` for implementation, file edits, builds, tests, generated files, and other execution work.",
 		"- Use `tiller-debugger` for root-cause debugging plus fixes.",
 		"- Use `tiller-investigator` for deep read-only tracing or claim verification.",
 		"- Use `tiller-reviewer` for adversarial review.",
 		"- Use `tiller-architect` and `tiller-deep-report` only for architecture, technical design, research synthesis, and high-consequence trade-off analysis.",
-		"- Require descriptor-compatible subagent reports to cover: Outcome; files changed or inspected; verification commands and results; caveats or residual risk; checkpoint candidate yes/no; recommended next action.",
-		"- Use returned reports to update task status and checkpoint decisions. Ask subagents to summarize long logs and point at files/reports instead of pasting bulky output.",
+		"- Require descriptor-compatible subagent reports to cover: Outcome; Distillation when useful; files changed or inspected; verification commands and results; caveats or residual risk; checkpoint candidate yes/no; recommended next action.",
+		"- Use returned reports to update task status, distilled state, and checkpoint decisions. Ask subagents to summarize long logs and point at files/reports instead of pasting bulky output.",
 		"- Tell execution subagents not to own VCS commits unless explicitly asked; they should report checkpointable wins with changed files, verification, and caveats.",
 		"",
 		"Use normal Codex multi-agent tools: `spawn_agent`, `wait_agent`, `send_input`, `resume_agent`, and `close_agent`.",
@@ -1280,7 +1283,8 @@ Root OpenCode session:
   inspect ordinary context.
 - Spend premium/reason-tier output on durable judgment artifacts: specs, plans,
   architecture notes, implementation docs, reviews, policy rationale,
-  checkpoint decisions, and high-quality handoff briefs.
+  checkpoint decisions, distilled ambient state, and high-quality handoff
+  briefs.
 - Maintain a descriptor-backed task list. Each descriptor should look like a
   portable subagent/task packet that can be mapped to Codex, Claude Code,
   OpenCode, Cursor, or future harnesses.
@@ -1291,11 +1295,12 @@ Root OpenCode session:
 - Send bulky execution output, shell logs, routine patching, and test loops to
   worker/debugger/cheap subagents.
 - When the current run has ` + "`status.md`" + ` beside ` + "`ledger.jsonl`" + `, read ` + "`status.md`" + ` first for
-  compact run state before raw ledger files, including ` + "`Stale/Late Work`" + `,
-  ` + "`Recommended Next Actions`" + `, checkpoint candidates, and advisory
-  ` + "`Spend Budget`" + ` bands. Prioritize ` + "`Recommended Next Actions`" + ` before raw
-  ledger reads. If spend is warn/over, choose whether to compact, checkpoint,
-  or proceed before spending more premium output.
+  compact run state before raw ledger files, including ` + "`Distillation`" + `,
+  ` + "`Stale/Late Work`" + `, ` + "`Recommended Next Actions`" + `, checkpoint candidates, and
+  advisory ` + "`Spend Budget`" + ` bands. Read ` + "`Distillation`" + ` before raw logs or
+  transcripts. Prioritize ` + "`Recommended Next Actions`" + ` before raw ledger reads.
+  If spend is warn/over, choose whether to compact, checkpoint, or proceed
+  before spending more premium output.
 - Keep root output compact; write durable docs/plans when they compound.
 - Queue/background independent descriptors and continue useful orchestration.
   Wait only for descriptors that block the next integration decision. Update
@@ -1310,8 +1315,9 @@ Root OpenCode session:
 Right-sizing matrix:
 - ` + "`tiller-scout`" + `: cheap bounded reconnaissance, inventories, docs/log
   snippets, and simple summaries.
-- ` + "`tiller-summary`" + `: compact status updates, run ledger summaries, stale/late
-  report triage, checkpoint candidate synthesis, and next-action bookkeeping.
+- ` + "`tiller-summary`" + `: compact status updates, distilled ambient state, run
+  ledger summaries, stale/late report triage, checkpoint candidate synthesis,
+  and next-action bookkeeping.
 - ` + "`tiller-worker`" + `: bounded implementation, edits, builds, and tests.
 - ` + "`tiller-debugger`" + `: root-cause analysis plus fixes.
 - ` + "`tiller-investigator`" + `/` + "`tiller-reviewer`" + `: read-only deep tracing,
@@ -1319,11 +1325,12 @@ Right-sizing matrix:
 - ` + "`tiller-architect`" + `/` + "`tiller-deep-report`" + `: architecture, research
   synthesis, and high-consequence tradeoffs.
 
-Require descriptor-compatible subagent reports to cover: Outcome; files changed
-or inspected; verification commands and results; caveats or residual risk;
-checkpoint candidate yes/no; recommended next action. Use returned reports to
-update task status and checkpoint decisions. Ask subagents to summarize long
-logs and point at files/reports instead of pasting bulky output.
+Require descriptor-compatible subagent reports to cover: Outcome; Distillation
+when useful; files changed or inspected; verification commands and results;
+caveats or residual risk; checkpoint candidate yes/no; recommended next action.
+Use returned reports to update task status, distilled state, and checkpoint
+decisions. Ask subagents to summarize long logs and point at files/reports
+instead of pasting bulky output.
 
 Prefer terse, direct, explicit technical artifacts and documentation: concrete
 paths, commands, diagnostics, decisions, and next actions over broad prose.

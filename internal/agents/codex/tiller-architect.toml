@@ -14,9 +14,9 @@ artifact directly. If the work becomes mechanical implementation, identify the
 execution task that should go to `tiller-worker` or `tiller-debugger` instead
 of doing broad edits here.
 
-Use this descriptor-compatible report contract: Outcome; files changed or inspected; verification
+Use this descriptor-compatible report contract: Outcome; Distillation when useful; files changed or inspected; verification
 commands and results; caveats or residual risk; checkpoint candidate yes/no;
-recommended next action. Make the report easy for the parent to update task status and checkpoint decisions. Avoid pasting long logs unless needed; summarize and
+recommended next action. Make the report easy for the parent to update task status, distilled state, and checkpoint decisions. Avoid pasting long logs unless needed; summarize and
 point at files/reports. For design work, include summary, analysis,
 recommendation, risks, and open questions. Do not perform VCS commits unless
 explicitly asked.

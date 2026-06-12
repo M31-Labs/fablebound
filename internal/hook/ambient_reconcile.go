@@ -18,7 +18,10 @@ import (
 	"m31labs.dev/tiller/internal/scratch/fsstore"
 )
 
-const ambientTaskResultKind = "ambient.task_result"
+const (
+	ambientTaskResultKind   = "ambient.task_result"
+	ambientDistillationKind = "ambient.distillation"
+)
 
 func reconcileAmbientPostToolUse(full HookEventFull, workspaceDir, backend string) {
 	if full.AgentID != "" || ambientgate.IsDisabled(workspaceDir) {
@@ -97,6 +100,9 @@ func reconcileAmbientTaskResult(full HookEventFull, backend, runDir string) {
 	if report.CheckpointCandidate {
 		appendAmbientCheckpointCandidate(st, runID, agentRunID, backend, ev.AgentType, ev.DescriptorID, ev.AttemptID, now, report, refs)
 	}
+	if report.Distillation != "" {
+		appendAmbientDistillationEvent(st, runID, agentRunID, backend, status, now, ev, report, refs)
+	}
 	refreshAmbientStatusSnapshot(runDir, now)
 }
 
@@ -151,6 +157,7 @@ func collectTextValues(v any, out []string) []string {
 
 type ambientReport struct {
 	Summary             string
+	Distillation        string
 	ChangedFiles        []string
 	Verification        []string
 	Caveats             []string
@@ -179,6 +186,7 @@ func parseAmbientReport(text string) ambientReport {
 	report.ChangedFiles = uniqueSortedReportValues(report.ChangedFiles)
 	report.Verification = uniqueReportValues(report.Verification)
 	report.Caveats = uniqueReportValues(report.Caveats)
+	report.Distillation = compactReportText(report.Distillation)
 	return report
 }
 
@@ -200,6 +208,8 @@ func ambientReportHeading(line string) (section, rest string, ok bool) {
 	switch key {
 	case "outcome", "summary":
 		return "summary", rest, true
+	case "distillation", "distilled state", "reusable context":
+		return "distillation", rest, true
 	case "files changed", "changed files", "files changed or inspected":
 		return "changed_files", rest, true
 	case "verification", "verification commands and results":
@@ -225,6 +235,8 @@ func applyAmbientReportLine(report *ambientReport, section, line string) {
 		if report.Summary == "" {
 			report.Summary = value
 		}
+	case "distillation":
+		report.Distillation = appendReportText(report.Distillation, value)
 	case "changed_files":
 		report.ChangedFiles = append(report.ChangedFiles, splitReportValues(value)...)
 	case "verification":
@@ -241,6 +253,23 @@ func applyAmbientReportLine(report *ambientReport, section, line string) {
 			report.RecommendedNext = value
 		}
 	}
+}
+
+func appendReportText(existing, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return existing
+	}
+	if existing == "" {
+		return value
+	}
+	return existing + " " + value
+}
+
+func compactReportText(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Join(strings.Fields(value), " ")
+	return value
 }
 
 func cleanReportListValue(line string) string {
@@ -335,6 +364,36 @@ func appendAmbientCheckpointCandidate(st *fsstore.FS, runID, agentRunID, backend
 		Summary:      report.Summary,
 		Refs:         refs,
 	})
+}
+
+func appendAmbientDistillationEvent(st *fsstore.FS, runID, agentRunID, backend, status string, at time.Time, ev ambientEvent, report ambientReport, refs []string) {
+	id := ambientDistillationEventID(ev, report.Distillation)
+	if ledgerEventExists(st, runID, id) {
+		return
+	}
+	_ = st.AppendLedgerEvent(runID, scratch.LedgerEvent{
+		ID:         id,
+		AgentRunID: agentRunID,
+		Backend:    backend,
+		Kind:       ambientDistillationKind,
+		Status:     distillationStatus(status),
+		At:         at,
+		Summary:    report.Distillation,
+		Refs:       refs,
+	})
+}
+
+func distillationStatus(resultStatus string) string {
+	switch resultStatus {
+	case scratch.AgentRunStatusCompleted, scratch.AgentRunStatusClosed:
+		return scratch.AgentRunStatusCompleted
+	default:
+		return "observed"
+	}
+}
+
+func ambientDistillationEventID(ev ambientEvent, distillation string) string {
+	return "ambient-distillation-" + hashShort(strings.Join([]string{ev.Backend, ev.DescriptorID, ev.AttemptID, hashShort(distillation)}, "\x00"))
 }
 
 func upsertAmbientAgentRun(st *fsstore.FS, runID, agentRunID, backend, backendAgentID, agentType, status string, at time.Time, report ambientReport, refs []string) {

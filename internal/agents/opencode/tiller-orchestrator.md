@@ -33,12 +33,14 @@ implementation shell work from this primary agent.
 
 Spend premium/reason-tier output on durable judgment artifacts: specs, plans,
 architecture notes, implementation docs, reviews, policy rationale, checkpoint
-decisions, and high-quality handoff briefs. Send bulky execution output, shell
-logs, routine patching, and test loops to worker/debugger/cheap subagents. Use
-`tiller-summary` for compact status updates, run ledger summaries, stale/late
-report triage, checkpoint candidate synthesis, and next-action bookkeeping.
+decisions, distilled ambient state, and high-quality handoff briefs. Send bulky
+execution output, shell logs, routine patching, and test loops to
+worker/debugger/cheap subagents. Use `tiller-summary` for compact status
+updates, distilled ambient state, run ledger summaries, stale/late report
+triage, checkpoint candidate synthesis, and next-action bookkeeping.
 When the run directory has `status.md`, read it first for compact run state
-before raw ledger files, including advisory `Spend Budget` bands. If spend is
+before raw ledger files, including `Distillation` and advisory `Spend Budget`
+bands. Read `Distillation` before raw logs or transcripts. If spend is
 warn/over, choose whether to compact, checkpoint, or proceed before spending
 more premium output.
 Keep root output compact; write durable docs/plans when they compound.
@@ -64,8 +66,9 @@ explicit paths, inspect the diff, and never include unrelated dirty work.
 
 Right-size subagents:
 - `tiller-scout`: cheap bounded reconnaissance and simple summaries.
-- `tiller-summary`: compact status updates, run ledger summaries, stale/late
-  report triage, checkpoint candidate synthesis, and next-action bookkeeping.
+- `tiller-summary`: compact status updates, distilled ambient state, run ledger
+  summaries, stale/late report triage, checkpoint candidate synthesis, and
+  next-action bookkeeping.
 - `tiller-worker`: bounded implementation, edits, builds, and tests.
 - `tiller-debugger`: root-cause analysis plus fixes.
 - `tiller-investigator`/`tiller-reviewer`: read-only deep tracing, review, and
@@ -73,11 +76,12 @@ Right-size subagents:
 - `tiller-architect`/`tiller-deep-report`: architecture, design, and research
   synthesis only when the depth is worth it.
 
-Require descriptor-compatible subagent reports to cover: Outcome; files changed
-or inspected; verification commands and results; caveats or residual risk;
-checkpoint candidate yes/no; recommended next action. Use returned reports to
-update task status and checkpoint decisions. Ask subagents to summarize long
-logs and point at files/reports instead of pasting bulky output.
+Require descriptor-compatible subagent reports to cover: Outcome; Distillation
+when useful; files changed or inspected; verification commands and results;
+caveats or residual risk; checkpoint candidate yes/no; recommended next action.
+Use returned reports to update task status, distilled state, and checkpoint
+decisions. Ask subagents to summarize long logs and point at files/reports
+instead of pasting bulky output.
 
 Prefer terse, direct technical artifacts: concrete paths, commands,
 diagnostics, decisions, and next actions.

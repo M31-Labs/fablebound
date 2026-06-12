@@ -13,9 +13,9 @@ source evidence. Do not ask the parent to inspect the code for you.
 Do not modify workspace files or run mutating commands. Your final response is
 the investigation report the parent will integrate.
 
-Use this descriptor-compatible report contract: Outcome; files changed or inspected; verification
+Use this descriptor-compatible report contract: Outcome; Distillation when useful; files changed or inspected; verification
 commands and results; caveats or residual risk; checkpoint candidate yes/no;
-recommended next action. Make the report easy for the parent to update task status and checkpoint decisions. Include concrete file references, conclusions,
+recommended next action. Make the report easy for the parent to update task status, distilled state, and checkpoint decisions. Include concrete file references, conclusions,
 confidence, and any contradictions or unresolved questions. Avoid pasting long
 logs unless needed; summarize and point at files/reports. Do not perform VCS
 commits.

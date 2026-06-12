@@ -1474,7 +1474,7 @@ func TestCodexAmbientSpawnAgentAppendsTaskDescriptorAndStatus(t *testing.T) {
 	if descriptor.Backend != "codex" || descriptor.Status != scratch.AgentRunStatusRequested {
 		t.Fatalf("unexpected descriptor event: %#v", descriptor)
 	}
-	for _, want := range []string{"tiller-worker: Implement descriptor-backed task list.", "tool:spawn_agent", "agent_type:tiller-worker", "descriptor_id:", "objective_hash:"} {
+	for _, want := range []string{"tiller-worker: Implement descriptor-backed task list.", "tool:spawn_agent", "agent_type:tiller-worker", "descriptor_id:", "objective_hash:", "attempt_id:"} {
 		if !ledgerEventContains(*descriptor, want) {
 			t.Fatalf("descriptor missing %q: %#v", want, descriptor)
 		}
@@ -1484,7 +1484,85 @@ func TestCodexAmbientSpawnAgentAppendsTaskDescriptorAndStatus(t *testing.T) {
 		t.Fatalf("read status.md: %v", err)
 	}
 	got := string(status)
-	for _, want := range []string{"## Task Descriptors", "- total: 1", "- by_status: requested=1", "tiller-worker: Implement descriptor-backed task list.", "refs: tool:spawn_agent, agent_type:tiller-worker"} {
+	for _, want := range []string{"## Task Descriptors", "- total: 1", "- by_status: requested=1", "tiller-worker: Implement descriptor-backed task list.", "refs: tool:spawn_agent, agent_type:tiller-worker", "attempt_id:"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status.md missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestCodexAmbientRepeatedSpawnAgentAppendsAttemptsAndRollsUpStatus(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := codexTranscript(t, "xhigh")
+	toolInput := map[string]any{
+		"agent_type": "tiller-worker",
+		"prompt":     "Implement descriptor-backed task list.",
+	}
+	if out := runCodexAmbientHook(t, p, "functions.spawn_agent", toolInput); len(out) != 0 {
+		t.Fatalf("first spawn_agent should stay silent, got %s", out)
+	}
+	if out := runCodexAmbientHook(t, p, "functions.spawn_agent", toolInput); len(out) != 0 {
+		t.Fatalf("second spawn_agent should stay silent, got %s", out)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	descriptors := findLedgerEventsKind(events, "ambient.task_descriptor")
+	if len(descriptors) != 2 {
+		t.Fatalf("descriptor count=%d want 2: %#v", len(descriptors), events)
+	}
+	firstDescriptorID := ambientRefValue(descriptors[0].Refs, "descriptor_id")
+	if firstDescriptorID == "" || ambientRefValue(descriptors[1].Refs, "descriptor_id") != firstDescriptorID {
+		t.Fatalf("descriptor_id should be stable across attempts: %#v", descriptors)
+	}
+	firstAttemptID := ambientRefValue(descriptors[0].Refs, "attempt_id")
+	secondAttemptID := ambientRefValue(descriptors[1].Refs, "attempt_id")
+	if firstAttemptID == "" || secondAttemptID == "" || firstAttemptID == secondAttemptID {
+		t.Fatalf("attempt_id should be populated and distinct: %#v", descriptors)
+	}
+
+	out := runCodexAmbientPostHook(t, p, "functions.spawn_agent", toolInput, map[string]any{
+		"is_error": false,
+		"agent_id": "backend-agent-789",
+		"output":   "## Outcome\nSecond attempt requested.\n## Recommended Next Action\nwait_for_agents",
+	})
+	if len(out) != 0 {
+		t.Fatalf("PostToolUse should stay silent, got %s", out)
+	}
+
+	events, err = st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents after result: %v", err)
+	}
+	result := findLedgerEventKind(events, "ambient.task_result")
+	if result == nil {
+		t.Fatalf("result ledger event missing: %#v", events)
+	}
+	if got := ambientRefValue(result.Refs, "descriptor_id"); got != firstDescriptorID {
+		t.Fatalf("result descriptor_id=%q want %q: %#v", got, firstDescriptorID, result)
+	}
+	if got := ambientRefValue(result.Refs, "attempt_id"); got != secondAttemptID {
+		t.Fatalf("result attempt_id=%q want latest attempt %q: %#v", got, secondAttemptID, result)
+	}
+
+	status, err := os.ReadFile(filepath.Join(runDir, "status.md"))
+	if err != nil {
+		t.Fatalf("read status.md: %v", err)
+	}
+	got := string(status)
+	for _, want := range []string{
+		"## Task Descriptors",
+		"- total: 1",
+		"- by_status: requested=1",
+		"attempt_id:" + firstAttemptID,
+		"attempt_id:" + secondAttemptID,
+	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("status.md missing %q:\n%s", want, got)
 		}
@@ -1534,7 +1612,7 @@ func TestClaudeAmbientTaskAppendsTaskDescriptor(t *testing.T) {
 	if descriptor.Backend != "claude-code" || descriptor.Status != scratch.AgentRunStatusRequested {
 		t.Fatalf("unexpected descriptor event: %#v", descriptor)
 	}
-	for _, want := range []string{"tiller-worker: Patch the renderer", "tool:Task", "agent_type:tiller-worker", "descriptor_id:", "objective_hash:"} {
+	for _, want := range []string{"tiller-worker: Patch the renderer", "tool:Task", "agent_type:tiller-worker", "descriptor_id:", "objective_hash:", "attempt_id:"} {
 		if !ledgerEventContains(*descriptor, want) {
 			t.Fatalf("descriptor missing %q: %#v", want, descriptor)
 		}
@@ -1604,7 +1682,7 @@ func TestClaudeAmbientTaskPostToolUseReconcilesReport(t *testing.T) {
 	if result == nil || result.Status != scratch.AgentRunStatusCompleted || result.AgentRunID == "" {
 		t.Fatalf("missing completed result event: %#v", events)
 	}
-	for _, want := range []string{"Renderer patched and verified.", "tool:Task", "agent_type:tiller-worker", "descriptor_id:", "objective_hash:"} {
+	for _, want := range []string{"Renderer patched and verified.", "tool:Task", "agent_type:tiller-worker", "descriptor_id:", "objective_hash:", "attempt_id:"} {
 		if !ledgerEventContains(*result, want) {
 			t.Fatalf("result missing %q: %#v", want, result)
 		}
@@ -1735,6 +1813,16 @@ func findLedgerEventKind(events []scratch.LedgerEvent, kind string) *scratch.Led
 		}
 	}
 	return nil
+}
+
+func findLedgerEventsKind(events []scratch.LedgerEvent, kind string) []scratch.LedgerEvent {
+	var out []scratch.LedgerEvent
+	for _, ev := range events {
+		if ev.Kind == kind {
+			out = append(out, ev)
+		}
+	}
+	return out
 }
 
 func ledgerEventContains(ev scratch.LedgerEvent, value string) bool {

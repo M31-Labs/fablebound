@@ -3,7 +3,6 @@ package hook
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,34 +24,25 @@ func appendAmbientTaskDescriptor(full HookEventFull, backend string) {
 		return
 	}
 
-	var input ToolInput
-	if len(full.ToolInput) > 0 {
-		_ = json.Unmarshal(full.ToolInput, &input)
-	}
-	agentType := descriptorAgentType(input)
-	objective := descriptorObjective(input)
-	if objective == "" {
-		objective = full.ToolName
-	}
-
-	descriptorID, descriptorRef, objectiveRef := ambientTaskDescriptorID(backend, normalizeAmbientToolName(full.ToolName), agentType, objective)
 	runID := filepath.Base(runDir)
 	st := fsstore.Open(filepath.Dir(runDir))
-	if ledgerEventExists(st, runID, descriptorID) {
+	ev := newAmbientEvent(full, backend, st, runID, ambientAttemptNext)
+	eventID := ambientDescriptorEventID(ev)
+	if ledgerEventExists(st, runID, eventID) {
 		return
 	}
 
 	now := time.Now().UTC()
-	ev := scratch.LedgerEvent{
-		ID:      descriptorID,
-		Backend: backend,
+	ledger := scratch.LedgerEvent{
+		ID:      eventID,
+		Backend: ev.Backend,
 		Kind:    ambientTaskDescriptorKind,
 		Status:  scratch.AgentRunStatusRequested,
 		At:      now,
-		Summary: descriptorSummary(agentType, objective),
-		Refs:    descriptorRefs(full.ToolName, agentType, descriptorRef, objectiveRef),
+		Summary: descriptorSummary(ev.AgentType, ev.Objective),
+		Refs:    ambientEventRefs(ev),
 	}
-	_ = st.AppendLedgerEvent(runID, ev)
+	_ = st.AppendLedgerEvent(runID, ledger)
 	refreshAmbientStatusSnapshot(runDir, now)
 }
 
@@ -98,18 +88,6 @@ func descriptorSummary(agentType, objective string) string {
 		first = "task descriptor requested"
 	}
 	return fmt.Sprintf("%s: %s", agentType, truncateDescriptorText(first, 140))
-}
-
-func descriptorRefs(toolName, agentType, descriptorRef, objectiveRef string) []string {
-	refs := []string{}
-	if toolName != "" {
-		refs = append(refs, "tool:"+normalizeAmbientToolName(toolName))
-	}
-	if agentType != "" {
-		refs = append(refs, "agent_type:"+agentType)
-	}
-	refs = append(refs, descriptorRef, objectiveRef)
-	return refs
 }
 
 func ambientTaskDescriptorID(backend, toolName, agentType, objective string) (eventID, descriptorRef, objectiveRef string) {

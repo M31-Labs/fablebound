@@ -63,18 +63,8 @@ func reconcileAmbientTaskResult(full HookEventFull, backend, runDir string) {
 	runID := filepath.Base(runDir)
 	st := fsstore.Open(filepath.Dir(runDir))
 
-	var input ToolInput
-	if len(full.ToolInput) > 0 {
-		_ = json.Unmarshal(full.ToolInput, &input)
-	}
-	agentType := descriptorAgentType(input)
-	objective := descriptorObjective(input)
-	if objective == "" {
-		objective = full.ToolName
-	}
-	_, descriptorRef, objectiveRef := ambientTaskDescriptorID(backend, normalizeAmbientToolName(full.ToolName), agentType, objective)
-	descriptorID := strings.TrimPrefix(descriptorRef, "descriptor_id:")
-	refs := descriptorRefs(full.ToolName, agentType, descriptorRef, objectiveRef)
+	ev := newAmbientEvent(full, backend, st, runID, ambientAttemptLatest)
+	refs := ambientEventRefs(ev)
 
 	resp := parseAmbientToolResponse(full.ToolResponse)
 	report := parseAmbientReport(resp.Text)
@@ -82,16 +72,16 @@ func reconcileAmbientTaskResult(full HookEventFull, backend, runDir string) {
 	now := time.Now().UTC()
 	agentRunID := ""
 	if backend == "claude-code" {
-		agentRunID = syntheticAmbientAgentRunID(backend, descriptorID)
-		upsertAmbientAgentRun(st, runID, agentRunID, backend, "", agentType, status, now, report, refs)
+		agentRunID = syntheticAmbientAgentRunID(backend, ev.DescriptorID, ev.AttemptID)
+		upsertAmbientAgentRun(st, runID, agentRunID, backend, "", ev.AgentType, status, now, report, refs)
 	} else if backend == "codex" {
-		if backendAgentID := codexBackendAgentID(full.ToolResponse); backendAgentID != "" {
-			agentRunID = codexAgentRunID(backendAgentID)
-			upsertAmbientAgentRun(st, runID, agentRunID, backend, backendAgentID, agentType, status, now, report, refs)
+		if ev.BackendAgentID != "" {
+			agentRunID = codexAgentRunID(ev.BackendAgentID)
+			upsertAmbientAgentRun(st, runID, agentRunID, backend, ev.BackendAgentID, ev.AgentType, status, now, report, refs)
 		}
 	}
 
-	eventID := ambientResultEventID(backend, full.ToolName, descriptorID, status, resp.Text)
+	eventID := ambientResultEventID(ev, status, resp.Text)
 	if !ledgerEventExists(st, runID, eventID) {
 		_ = st.AppendLedgerEvent(runID, scratch.LedgerEvent{
 			ID:         eventID,
@@ -105,7 +95,7 @@ func reconcileAmbientTaskResult(full HookEventFull, backend, runDir string) {
 		})
 	}
 	if report.CheckpointCandidate {
-		appendAmbientCheckpointCandidate(st, runID, agentRunID, backend, agentType, descriptorID, now, report, refs)
+		appendAmbientCheckpointCandidate(st, runID, agentRunID, backend, ev.AgentType, ev.DescriptorID, ev.AttemptID, now, report, refs)
 	}
 	refreshAmbientStatusSnapshot(runDir, now)
 }
@@ -313,16 +303,16 @@ func ambientResultStatus(toolName, backend string, isError bool) string {
 	return scratch.AgentRunStatusCompleted
 }
 
-func syntheticAmbientAgentRunID(backend, descriptorID string) string {
-	return "ambient-agent-" + hashShort(backend+"\x00"+descriptorID)
+func syntheticAmbientAgentRunID(backend, descriptorID, attemptID string) string {
+	return "ambient-agent-" + hashShort(backend+"\x00"+descriptorID+"\x00"+attemptID)
 }
 
-func ambientResultEventID(backend, toolName, descriptorID, status, text string) string {
-	return "ambient-result-" + hashShort(strings.Join([]string{backend, normalizeAmbientToolName(toolName), descriptorID, status, hashShort(text)}, "\x00"))
+func ambientResultEventID(ev ambientEvent, status, text string) string {
+	return "ambient-result-" + hashShort(strings.Join([]string{ev.Backend, ev.NormalizedToolName, ev.DescriptorID, ev.AttemptID, status, hashShort(text)}, "\x00"))
 }
 
-func appendAmbientCheckpointCandidate(st *fsstore.FS, runID, agentRunID, backend, agentType, descriptorID string, at time.Time, report ambientReport, refs []string) {
-	id := "ambient-checkpoint-" + hashShort(backend+"\x00"+descriptorID)
+func appendAmbientCheckpointCandidate(st *fsstore.FS, runID, agentRunID, backend, agentType, descriptorID, attemptID string, at time.Time, report ambientReport, refs []string) {
+	id := "ambient-checkpoint-" + hashShort(backend+"\x00"+descriptorID+"\x00"+attemptID)
 	existing, err := st.ListCheckpointCandidates(runID)
 	if err == nil {
 		for _, c := range existing {

@@ -359,7 +359,7 @@ func taskDescriptorEvents(events []LedgerEvent) []LedgerEvent {
 }
 
 func effectiveTaskDescriptorEvents(events []LedgerEvent) []LedgerEvent {
-	descriptors := taskDescriptorEvents(events)
+	descriptors := effectiveDescriptorGroups(taskDescriptorEvents(events))
 	resultsByDescriptor := map[string]LedgerEvent{}
 	for _, ev := range events {
 		if ev.Kind != "ambient.task_result" {
@@ -386,8 +386,32 @@ func effectiveTaskDescriptorEvents(events []LedgerEvent) []LedgerEvent {
 		if result.AgentRunID != "" {
 			descriptors[i].AgentRunID = result.AgentRunID
 		}
+		descriptors[i].Refs = uniqueStrings(append(descriptors[i].Refs, result.Refs...))
 	}
 	return descriptors
+}
+
+func effectiveDescriptorGroups(events []LedgerEvent) []LedgerEvent {
+	byDescriptor := map[string]LedgerEvent{}
+	for _, ev := range events {
+		descriptorID := refValue(ev.Refs, "descriptor_id")
+		if descriptorID == "" {
+			descriptorID = ev.ID
+		}
+		prev, ok := byDescriptor[descriptorID]
+		if !ok || ev.At.After(prev.At) || ev.At.Equal(prev.At) && ev.ID > prev.ID {
+			ev.Refs = uniqueStrings(append(prev.Refs, ev.Refs...))
+			byDescriptor[descriptorID] = ev
+			continue
+		}
+		prev.Refs = uniqueStrings(append(prev.Refs, ev.Refs...))
+		byDescriptor[descriptorID] = prev
+	}
+	out := make([]LedgerEvent, 0, len(byDescriptor))
+	for _, ev := range byDescriptor {
+		out = append(out, ev)
+	}
+	return out
 }
 
 func attentionAgents(agents []*AgentRun) []*AgentRun {

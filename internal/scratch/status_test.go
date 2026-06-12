@@ -217,6 +217,67 @@ func TestRenderStatusMarkdownSpendBudgetBands(t *testing.T) {
 	}
 }
 
+func TestRenderStatusMarkdownTaskDescriptorsRollUpAttempts(t *testing.T) {
+	base := t.TempDir()
+	st := fsstore.Open(base)
+	now := time.Date(2026, 6, 12, 11, 0, 0, 0, time.UTC)
+	runID, err := st.CreateRun(&scratch.Run{
+		ID:        "20260612-110000-attempts",
+		Task:      "roll up attempts",
+		Workspace: "/workspace/tiller",
+		Status:    "running",
+		CreatedAt: now.Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	for i, attempt := range []string{"attempt-a", "attempt-b"} {
+		if err := st.AppendLedgerEvent(runID, scratch.LedgerEvent{
+			ID:      "ambient-task-" + attempt,
+			Backend: "codex",
+			Kind:    "ambient.task_descriptor",
+			Status:  scratch.AgentRunStatusRequested,
+			At:      now.Add(time.Duration(i) * time.Minute),
+			Summary: "tiller-worker: retry same work",
+			Refs:    []string{"tool:spawn_agent", "agent_type:tiller-worker", "descriptor_id:abc123", "objective_hash:def456", "attempt_id:" + attempt},
+		}); err != nil {
+			t.Fatalf("AppendLedgerEvent descriptor %s: %v", attempt, err)
+		}
+	}
+	if err := st.AppendLedgerEvent(runID, scratch.LedgerEvent{
+		ID:         "ambient-result-attempt-b",
+		AgentRunID: "codex-agent-1",
+		Backend:    "codex",
+		Kind:       "ambient.task_result",
+		Status:     scratch.AgentRunStatusCompleted,
+		At:         now.Add(2 * time.Minute),
+		Summary:    "retry completed",
+		Refs:       []string{"tool:spawn_agent", "agent_type:tiller-worker", "descriptor_id:abc123", "objective_hash:def456", "attempt_id:attempt-b", "backend_agent_id:backend-1"},
+	}); err != nil {
+		t.Fatalf("AppendLedgerEvent result: %v", err)
+	}
+
+	data, err := scratch.RenderStatusMarkdown(st, runID, scratch.StatusOptions{UpdatedAt: now.Add(3 * time.Minute), RecentLimit: 5})
+	if err != nil {
+		t.Fatalf("RenderStatusMarkdown: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		"## Task Descriptors",
+		"- total: 1",
+		"- by_status: completed=1",
+		"- `tiller-worker` codex completed 2026-06-12T11:01:00Z",
+		"attempt_id:attempt-a",
+		"attempt_id:attempt-b",
+		"backend_agent_id:backend-1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status markdown missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestRenderStatusMarkdownStaleLateWorkPopulated(t *testing.T) {
 	base := t.TempDir()
 	st := fsstore.Open(base)

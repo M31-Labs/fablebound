@@ -20,7 +20,8 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `TILLER_AMBIENT_BUDGET_WARN_RATIO` without changing hook allow/deny policy.
 - **Ambient task descriptors** - governed root `Task`/`Agent` and Codex
   `spawn_agent` requests now append descriptor-shaped ledger events and render
-  a `## Task Descriptors` section in `status.md`.
+  a `## Task Descriptors` section in `status.md`; repeated attempts keep a
+  stable `descriptor_id` while adding distinct `attempt_id` refs.
 - **Ambient stale/late triage** - `status.md` now renders a `## Stale/Late Work`
   section for late/stale/superseded agents and late/conflicting checkpoint
   candidates, with `none` when there is nothing to triage.

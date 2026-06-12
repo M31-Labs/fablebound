@@ -1103,6 +1103,8 @@ Root Codex session:
   criteria, and report contract.
 - Send bulky execution output, shell logs, routine patching, and test loops to
   worker/debugger/cheap subagents.
+- When the current run has ` + "`status.md`" + ` beside ` + "`ledger.jsonl`" + `, read ` + "`status.md`" + ` first for
+  compact run state before raw ledger files.
 - Keep root output compact; write durable docs/plans when they compound.
 - Queue/background independent descriptors and continue useful orchestration.
   Wait only for descriptors that block the next integration decision. Update
@@ -1137,6 +1139,7 @@ Codex delegation mechanics:
 - Use ` + "`tiller-summary`" + ` for compact status updates, run ledger summaries,
   stale/late report triage, checkpoint candidate synthesis, and next-action
   bookkeeping instead of spending root output on routine status compaction.
+  Prefer ` + "`status.md`" + ` first when it is present in the run directory.
 - Keep delegated prompts bounded. Include the concrete task, relevant paths,
   expected output, and verification target when known.
 - Continue useful orchestration while agents run. When a result returns, review
@@ -1191,6 +1194,7 @@ func codexSkillSnippet() string {
 		"- Maintain a descriptor-backed task list. Each descriptor should look like a portable subagent/task packet that can be mapped to Codex, Claude Code, OpenCode, Cursor, or future harnesses.",
 		"- Descriptor fields: id/title, role/profile, objective, context paths, constraints, expected outputs, verification target, budget tier/model ceiling, sandbox/permission needs, dependencies/blockers, checkpoint criteria, and report contract.",
 		"- Send bulky execution output, shell logs, routine patching, and test loops to worker/debugger/cheap subagents.",
+		"- When the current run has `status.md` beside `ledger.jsonl`, read `status.md` first for compact run state before raw ledger files.",
 		"- Keep root output compact; write durable docs/plans when they compound.",
 		"- Queue/background independent descriptors and continue useful orchestration. Wait only for descriptors that block the next integration decision. Update descriptors from returned reports.",
 		"- Prefer terse, direct, explicit technical artifacts and documentation: concrete paths, commands, diagnostics, decisions, and next actions over broad prose.",
@@ -1213,7 +1217,7 @@ func codexSkillSnippet() string {
 		"## Delegation",
 		"",
 		"- Use `tiller-scout` for cheap, bounded read-only reconnaissance and simple summaries.",
-		"- Use `tiller-summary` for compact status updates, run ledger summaries, stale/late report triage, checkpoint candidate synthesis, and next-action bookkeeping.",
+		"- Use `tiller-summary` for compact status updates, run ledger summaries, stale/late report triage, checkpoint candidate synthesis, and next-action bookkeeping. Prefer `status.md` first when it is present in the run directory.",
 		"- Use `tiller-worker` for implementation, file edits, builds, tests, generated files, and other execution work.",
 		"- Use `tiller-debugger` for root-cause debugging plus fixes.",
 		"- Use `tiller-investigator` for deep read-only tracing or claim verification.",
@@ -1279,6 +1283,8 @@ Root OpenCode session:
   criteria, and report contract.
 - Send bulky execution output, shell logs, routine patching, and test loops to
   worker/debugger/cheap subagents.
+- When the current run has ` + "`status.md`" + ` beside ` + "`ledger.jsonl`" + `, read ` + "`status.md`" + ` first for
+  compact run state before raw ledger files.
 - Keep root output compact; write durable docs/plans when they compound.
 - Queue/background independent descriptors and continue useful orchestration.
   Wait only for descriptors that block the next integration decision. Update

@@ -58,6 +58,7 @@ func appendCodexLifecycleRecord(full HookEventFull) {
 		Refs:       codexLifecycleRefs(full),
 	}
 	_ = st.AppendLedgerEvent(runID, ev)
+	refreshAmbientStatusSnapshot(runDir, now)
 }
 
 func isCodexMultiAgentLifecycleTool(toolName string) bool {

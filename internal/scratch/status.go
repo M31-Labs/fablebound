@@ -1,0 +1,350 @@
+package scratch
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+)
+
+// StatusOptions controls deterministic status.md rendering.
+type StatusOptions struct {
+	UpdatedAt   time.Time
+	RecentLimit int
+}
+
+// RenderStatusMarkdown builds a derived ambient run status snapshot from the
+// canonical scratch records. The returned markdown is suitable for writing to
+// status.md beside ledger.jsonl in an fs-backed run directory.
+func RenderStatusMarkdown(st Store, runID string, opts StatusOptions) ([]byte, error) {
+	if opts.RecentLimit <= 0 {
+		opts.RecentLimit = 5
+	}
+
+	r, err := st.ReadRun(runID)
+	if err != nil {
+		return nil, fmt.Errorf("render status: read run: %w", err)
+	}
+	dispatches, err := st.ListDispatches(runID)
+	if err != nil {
+		return nil, fmt.Errorf("render status: list dispatches: %w", err)
+	}
+	agents, err := st.ListAgentRuns(runID)
+	if err != nil {
+		return nil, fmt.Errorf("render status: list agent runs: %w", err)
+	}
+	candidates, err := st.ListCheckpointCandidates(runID)
+	if err != nil {
+		return nil, fmt.Errorf("render status: list checkpoint candidates: %w", err)
+	}
+	ledger, err := st.ListLedgerEvents(runID)
+	if err != nil {
+		return nil, fmt.Errorf("render status: list ledger events: %w", err)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# Tiller Run Status\n\n")
+	sb.WriteString("Generated snapshot from `manifest.json`, `dispatches/*/meta.json`, `agents/*.json`, `checkpoint_candidates.jsonl`, and `ledger.jsonl`. This file is derived for compact reading and is not a source of truth.\n\n")
+	if !opts.UpdatedAt.IsZero() {
+		sb.WriteString(fmt.Sprintf("Updated: %s\n\n", opts.UpdatedAt.UTC().Format(time.RFC3339)))
+	}
+
+	sb.WriteString("## Run\n\n")
+	writeKV(&sb, "run_id", r.ID)
+	writeKV(&sb, "status", r.Status)
+	writeKV(&sb, "task", oneLine(r.Task))
+	writeKV(&sb, "workspace", r.Workspace)
+	writeKV(&sb, "reason_budget", fmt.Sprint(r.ReasonBudget))
+	if r.MaxDepth != 0 {
+		writeKV(&sb, "max_depth", fmt.Sprint(r.MaxDepth))
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("## Dispatches\n\n")
+	sb.WriteString(fmt.Sprintf("- total: %d\n", len(dispatches)))
+	writeCounts(&sb, "- by_status", dispatchStatusCounts(dispatches))
+	writeCounts(&sb, "- by_tier", dispatchTierCounts(dispatches))
+	sb.WriteString("\n")
+
+	sb.WriteString("## Agents\n\n")
+	sb.WriteString(fmt.Sprintf("- total: %d\n", len(agents)))
+	writeCounts(&sb, "- by_status", agentStatusCounts(agents))
+	writeCounts(&sb, "- by_tier", agentTierCounts(agents))
+	sb.WriteString("- recent:\n")
+	for _, ar := range recentAgents(agents, opts.RecentLimit) {
+		sb.WriteString(fmt.Sprintf("  - `%s` %s %s %s %s\n", ar.ID, valueOr(ar.Backend, "unknown"), valueOr(ar.Role, "unknown"), valueOr(ar.Status, "unknown"), formatTime(ar.SpawnedAt)))
+		if ar.Summary != "" {
+			sb.WriteString(fmt.Sprintf("    summary: %s\n", oneLine(ar.Summary)))
+		}
+	}
+	if len(agents) == 0 {
+		sb.WriteString("  - none\n")
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("## Checkpoint Candidates\n\n")
+	sb.WriteString(fmt.Sprintf("- total: %d\n", len(candidates)))
+	writeCounts(&sb, "- by_status", checkpointStatusCounts(candidates))
+	sb.WriteString("- recent:\n")
+	for _, c := range recentCandidates(candidates, opts.RecentLimit) {
+		sb.WriteString(fmt.Sprintf("  - `%s` %s %s %s\n", c.ID, valueOr(c.Status, "unknown"), valueOr(c.AgentRunID, "no-agent"), formatTime(c.ReportedAt)))
+		if c.Summary != "" {
+			sb.WriteString(fmt.Sprintf("    summary: %s\n", oneLine(c.Summary)))
+		}
+		if len(c.ChangedFiles) > 0 {
+			sb.WriteString(fmt.Sprintf("    changed_files: %s\n", strings.Join(c.ChangedFiles, ", ")))
+		}
+	}
+	if len(candidates) == 0 {
+		sb.WriteString("  - none\n")
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("## Observed Token Usage\n\n")
+	writeUsage(&sb, "- dispatches", sumDispatchUsage(dispatches))
+	writeUsage(&sb, "- agents", sumAgentUsage(agents))
+	writeUsage(&sb, "- ledger", sumLedgerUsage(ledger))
+	total := TokenUsage{}
+	total.add(sumDispatchUsage(dispatches))
+	total.add(sumAgentUsage(agents))
+	total.add(sumLedgerUsage(ledger))
+	writeUsage(&sb, "- combined_observed", total)
+	sb.WriteString("\n")
+
+	sb.WriteString("## Recent Ledger Events\n\n")
+	recentLedger := tailLedger(ledger, opts.RecentLimit)
+	for _, ev := range recentLedger {
+		sb.WriteString(fmt.Sprintf("- `%s` %s %s %s\n", valueOr(ev.Kind, "unknown"), valueOr(ev.Backend, "unknown"), valueOr(ev.Status, "unknown"), formatTime(ev.At)))
+		if ev.Summary != "" {
+			sb.WriteString(fmt.Sprintf("  summary: %s\n", oneLine(ev.Summary)))
+		}
+		if len(ev.Refs) > 0 {
+			sb.WriteString(fmt.Sprintf("  refs: %s\n", strings.Join(ev.Refs, ", ")))
+		}
+	}
+	if len(recentLedger) == 0 {
+		sb.WriteString("- none\n")
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("## Next Useful Read Paths\n\n")
+	for _, p := range nextReadPaths(dispatches, agents, candidates, len(ledger) > 0) {
+		sb.WriteString(fmt.Sprintf("- `%s`\n", p))
+	}
+
+	return []byte(sb.String()), nil
+}
+
+func writeKV(sb *strings.Builder, key, value string) {
+	sb.WriteString(fmt.Sprintf("- %s: %s\n", key, valueOr(value, "unknown")))
+}
+
+func writeCounts(sb *strings.Builder, label string, counts map[string]int) {
+	if len(counts) == 0 {
+		sb.WriteString(label + ": none\n")
+		return
+	}
+	keys := make([]string, 0, len(counts))
+	for key := range counts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%d", key, counts[key]))
+	}
+	sb.WriteString(fmt.Sprintf("%s: %s\n", label, strings.Join(parts, ", ")))
+}
+
+func writeUsage(sb *strings.Builder, label string, u TokenUsage) {
+	sb.WriteString(fmt.Sprintf("%s: input=%d output=%d cache_create=%d cache_read=%d reasoning=%d total=%d\n",
+		label, u.InputTokens, u.OutputTokens, u.CacheCreationInputTokens, u.CacheReadInputTokens, u.ReasoningTokens, u.TotalTokens))
+}
+
+func dispatchStatusCounts(dispatches []*Dispatch) map[string]int {
+	counts := map[string]int{}
+	for _, d := range dispatches {
+		counts[valueOr(d.Status, "unknown")]++
+	}
+	return counts
+}
+
+func dispatchTierCounts(dispatches []*Dispatch) map[string]int {
+	counts := map[string]int{}
+	for _, d := range dispatches {
+		tier := d.Tier
+		if tier == "" {
+			tier = d.Model
+		}
+		counts[valueOr(tier, "unknown")]++
+	}
+	return counts
+}
+
+func agentStatusCounts(agents []*AgentRun) map[string]int {
+	counts := map[string]int{}
+	for _, ar := range agents {
+		counts[valueOr(ar.Status, "unknown")]++
+	}
+	return counts
+}
+
+func agentTierCounts(agents []*AgentRun) map[string]int {
+	counts := map[string]int{}
+	for _, ar := range agents {
+		counts[valueOr(ar.Tier, "unknown")]++
+	}
+	return counts
+}
+
+func checkpointStatusCounts(candidates []CheckpointCandidate) map[string]int {
+	counts := map[string]int{}
+	for _, c := range candidates {
+		counts[valueOr(c.Status, "unknown")]++
+	}
+	return counts
+}
+
+func recentAgents(agents []*AgentRun, limit int) []*AgentRun {
+	out := append([]*AgentRun(nil), agents...)
+	sort.SliceStable(out, func(i, j int) bool {
+		ti := out[i].SpawnedAt
+		tj := out[j].SpawnedAt
+		if !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		return out[i].ID > out[j].ID
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func recentCandidates(candidates []CheckpointCandidate, limit int) []CheckpointCandidate {
+	out := append([]CheckpointCandidate(nil), candidates...)
+	sort.SliceStable(out, func(i, j int) bool {
+		ti := out[i].ReportedAt
+		tj := out[j].ReportedAt
+		if !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		return out[i].ID > out[j].ID
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func tailLedger(events []LedgerEvent, limit int) []LedgerEvent {
+	if len(events) <= limit {
+		return append([]LedgerEvent(nil), events...)
+	}
+	return append([]LedgerEvent(nil), events[len(events)-limit:]...)
+}
+
+func sumDispatchUsage(dispatches []*Dispatch) TokenUsage {
+	var total TokenUsage
+	for _, d := range dispatches {
+		total.addPtr(d.TokenUsage)
+	}
+	return total
+}
+
+func sumAgentUsage(agents []*AgentRun) TokenUsage {
+	var total TokenUsage
+	for _, ar := range agents {
+		total.addPtr(ar.TokenUsage)
+	}
+	return total
+}
+
+func sumLedgerUsage(events []LedgerEvent) TokenUsage {
+	var total TokenUsage
+	for _, ev := range events {
+		total.addPtr(ev.TokenUsage)
+	}
+	return total
+}
+
+func (u *TokenUsage) addPtr(other *TokenUsage) {
+	if other == nil {
+		return
+	}
+	u.add(*other)
+}
+
+func (u *TokenUsage) add(other TokenUsage) {
+	u.InputTokens += other.InputTokens
+	u.OutputTokens += other.OutputTokens
+	u.CacheCreationInputTokens += other.CacheCreationInputTokens
+	u.CacheReadInputTokens += other.CacheReadInputTokens
+	u.ReasoningTokens += other.ReasoningTokens
+	u.TotalTokens += other.TotalTokens
+}
+
+func nextReadPaths(dispatches []*Dispatch, agents []*AgentRun, candidates []CheckpointCandidate, hasLedger bool) []string {
+	paths := []string{
+		"status.md",
+		"manifest.json",
+		"dispatches/*/meta.json",
+		"agents/*.json",
+		"checkpoint_candidates.jsonl",
+		"ledger.jsonl",
+	}
+	if len(dispatches) > 0 {
+		last := dispatches[len(dispatches)-1]
+		paths = append(paths, fmt.Sprintf("dispatches/%s/report.md", last.ID))
+	}
+	if len(agents) > 0 {
+		recent := recentAgents(agents, 1)[0]
+		paths = append(paths, fmt.Sprintf("agents/%s.json", recent.ID))
+	}
+	if len(candidates) > 0 {
+		paths = append(paths, "checkpoint_candidates.jsonl")
+	}
+	if hasLedger {
+		paths = append(paths, "ledger.jsonl")
+	}
+	return uniqueStrings(paths)
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
+}
+
+func oneLine(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "\r", " ")
+	value = strings.ReplaceAll(value, "\n", " ")
+	value = strings.Join(strings.Fields(value), " ")
+	if value == "" {
+		return "unknown"
+	}
+	return value
+}
+
+func valueOr(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func formatTime(t time.Time) string {
+	if t.IsZero() {
+		return "unknown-time"
+	}
+	return t.UTC().Format(time.RFC3339)
+}

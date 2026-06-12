@@ -750,6 +750,13 @@ func TestClaudeAmbientGovernedPreToolUseAppendsUsageLedger(t *testing.T) {
 	if !hasUsageRef {
 		t.Fatalf("ledger event missing stable usage ref: %#v", events[0].Refs)
 	}
+	status, err := os.ReadFile(filepath.Join(runDir, "status.md"))
+	if err != nil {
+		t.Fatalf("read status.md: %v", err)
+	}
+	if got := string(status); !strings.Contains(got, "claude.ambient_usage") || !strings.Contains(got, "- ledger: input=12 output=34") {
+		t.Fatalf("status.md missing Claude usage content:\n%s", got)
+	}
 }
 
 func TestClaudeAmbientGovernedPreToolUseWritesAuditLine(t *testing.T) {
@@ -1205,6 +1212,13 @@ func TestCodexLifecycleSessionStartAppendsLedger(t *testing.T) {
 	}
 	if events[0].TokenUsage == nil || events[0].TokenUsage.OutputTokens != 321 {
 		t.Fatalf("ledger token usage mismatch: %#v", events[0].TokenUsage)
+	}
+	status, err := os.ReadFile(filepath.Join(runDir, "status.md"))
+	if err != nil {
+		t.Fatalf("read status.md: %v", err)
+	}
+	if got := string(status); !strings.Contains(got, "Generated snapshot from `manifest.json`") || !strings.Contains(got, "codex.session_start") || !strings.Contains(got, "- ledger: input=0 output=321") {
+		t.Fatalf("status.md missing Codex lifecycle content:\n%s", got)
 	}
 }
 

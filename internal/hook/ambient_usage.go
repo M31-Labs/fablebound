@@ -42,6 +42,7 @@ func appendClaudeAmbientUsageLedger(full HookEventFull) {
 		Refs:       ambientUsageRefs(full, usageRef),
 	}
 	_ = st.AppendLedgerEvent(runID, ev)
+	refreshAmbientStatusSnapshot(runDir, now)
 }
 
 func claudeAmbientTokenUsage(full HookEventFull) *scratch.TokenUsage {

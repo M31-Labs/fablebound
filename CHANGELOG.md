@@ -11,6 +11,9 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Ambient status snapshot** - ambient ledger writes now refresh a generated
+  `status.md` beside `ledger.jsonl`, summarizing manifest, dispatch, agent,
+  checkpoint, token usage, and recent ledger state for cheap summary agents.
 - **Checkpoint guidance** - ambient prompts now treat coherent verified slices
   as commit checkpoints. Agents report exact files, verification, and caveats;
   a repo-configured checkpoint tool is preferred when present, with plain

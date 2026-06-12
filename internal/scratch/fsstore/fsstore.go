@@ -660,6 +660,16 @@ func (fs *FS) BuildRunSummaryJSON(runID string) ([]byte, error) {
 	return data, nil
 }
 
+// WriteStatusMarkdown renders and atomically writes status.md beside ledger.jsonl.
+func (fs *FS) WriteStatusMarkdown(runID string, updatedAt time.Time) error {
+	data, err := scratch.RenderStatusMarkdown(fs, runID, scratch.StatusOptions{UpdatedAt: updatedAt})
+	if err != nil {
+		return fmt.Errorf("fsstore.WriteStatusMarkdown %s: %w", runID, err)
+	}
+	path := filepath.Join(fs.runDir(runID), "status.md")
+	return writeFileAtomic(path, data)
+}
+
 // buildFSRunSummary builds a run.RunSummary from scratch records for JSON output.
 // Mirrors pgstore.buildRunSummaryFromRecords but adds report-path resolution
 // (which pgstore cannot do — it has no local filesystem access).

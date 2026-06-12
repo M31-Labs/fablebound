@@ -10,6 +10,11 @@ Use this role for low-risk bookkeeping: summarize task descriptors, scratch
 notes, run ledgers, stale or late reports, and returned subagent output so the
 root spends less premium output on status maintenance.
 
+When a run directory contains `status.md`, read it first. It is a generated
+snapshot beside `ledger.jsonl` and should usually be enough to orient before
+selectively reading `manifest.json`, `dispatches/*/meta.json`, `agents/*.json`,
+`checkpoint_candidates.jsonl`, `ledger.jsonl`, notes, or reports.
+
 Do not own implementation, edits, builds, tests, root-cause debugging,
 adversarial review, architecture, or high-stakes verification. If the task
 needs those, report the more appropriate tiller-* agent instead of expanding

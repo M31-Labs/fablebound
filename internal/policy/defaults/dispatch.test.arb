@@ -391,6 +391,46 @@ test "depth-1 caller does NOT fire DenyDirectSpawnAtDepth" {
     expect rule DenyDirectSpawnAtDepth not matched
 }
 
+test "depth-1 queued dispatch with max_depth 2 is allowed" {
+    given {
+        dispatch.role: "worker"
+        dispatch.tier: "execute"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        dispatch.queued: true
+        caller.role: "worker"
+        caller.depth: 1
+        caller.dispatch_id: "d01"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.reason_dispatches: 0
+        run.reason_budget: 2
+        run.max_depth: 2
+    }
+    expect rule DenyDirectSpawnAtDepth not matched
+    expect rule DenyDepthBeyondPolicy not matched
+    expect rule AllowDispatch matched
+}
+
+test "depth-2 queued dispatch with max_depth 2 is denied (DenyDepthBeyondPolicy)" {
+    given {
+        dispatch.role: "worker"
+        dispatch.tier: "execute"
+        dispatch.background: false
+        dispatch.brief_bytes: 100
+        dispatch.queued: true
+        caller.role: "worker"
+        caller.depth: 2
+        caller.dispatch_id: "d02"
+        run.id: "20260101-000000-0001"
+        run.active_dispatches: 0
+        run.reason_dispatches: 0
+        run.reason_budget: 2
+        run.max_depth: 2
+    }
+    expect rule DenyDepthBeyondPolicy matched
+}
+
 test "depth-3 queued dispatch with max_depth 4 is allowed (DenyDirectSpawnAtDepth not fired)" {
     given {
         dispatch.role: "worker"

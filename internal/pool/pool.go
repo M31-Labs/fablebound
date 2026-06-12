@@ -55,6 +55,7 @@ import (
 	"m31labs.dev/tiller/internal/adapter"
 	"m31labs.dev/tiller/internal/auditlog"
 	"m31labs.dev/tiller/internal/policy"
+	"m31labs.dev/tiller/internal/run"
 	"m31labs.dev/tiller/internal/scratch"
 )
 
@@ -483,7 +484,7 @@ func (p *Pool) evalGate(_ context.Context, runID, dispatchID string) (bool, gate
 	}
 	maxDepth := runRec.MaxDepth
 	if maxDepth == 0 {
-		maxDepth = 4
+		maxDepth = run.DefaultMaxDepth
 	}
 	callerDepth := max(d.Depth-1, 0)
 
@@ -605,6 +606,7 @@ func buildDispatchSpec(store scratch.Store, runsBase, runID string, d *scratch.D
 		Depth:      d.Depth,
 		MaxTurns:   d.MaxTurns,
 		WorkDir:    workDir,
+		Sandbox:    d.Sandbox,
 	}
 }
 

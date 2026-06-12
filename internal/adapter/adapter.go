@@ -31,6 +31,7 @@ import (
 	"context"
 	"time"
 
+	"m31labs.dev/tiller/internal/sandbox"
 	"m31labs.dev/tiller/internal/scratch"
 )
 
@@ -47,11 +48,12 @@ type DispatchSpec struct {
 	RunID      string
 	DispatchID string
 	Role       string
-	Tier       string // reason|scrutiny|execute (spec §2.2)
-	Provider   string // anthropic|openai|local|…
-	Model      string // provider-specific model identifier
-	Profile    string // settings / toolgate class
-	WorkDir    string // absolute path to the workspace root
+	Tier       string          // reason|scrutiny|execute (spec §2.2)
+	Provider   string          // anthropic|openai|local|…
+	Model      string          // provider-specific model identifier
+	Profile    string          // settings / toolgate class
+	WorkDir    string          // absolute path to the workspace root
+	Sandbox    *sandbox.Record // requested/active runtime isolation metadata, if any
 
 	Depth    int
 	MaxTurns int
@@ -89,13 +91,15 @@ type Result struct {
 //	             before execution (e.g. PreToolUse hook in Claude Code adapters)
 //	"degraded" — tool-call gating is best-effort or unavailable for this
 //	             runtime; the limitation is recorded on the dispatch record
+//	"sandboxed" — tool-call gating is unavailable or partial, but the dispatch
+//	              is wrapped by active runtime isolation recorded in Sandbox
 type Adapter interface {
 	// Name returns the stable adapter identifier used for registration and
 	// dispatch routing (e.g. "claude-headless", "claude-code", "command").
 	Name() string
 
 	// Enforcement returns the gate-enforcement level for this adapter:
-	// "full" or "degraded" (spec §5.1).
+	// "full", "degraded", or "sandboxed" (spec §5.1 plus sandbox extension).
 	Enforcement() string
 
 	// Prepare materialises the dispatch for execution. It MUST:

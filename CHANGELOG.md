@@ -14,6 +14,9 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Ambient status snapshot** - ambient ledger writes now refresh a generated
   `status.md` beside `ledger.jsonl`, summarizing manifest, dispatch, agent,
   checkpoint, token usage, and recent ledger state for cheap summary agents.
+- **Codex fallback ambient ledger** - governed Codex lifecycle observations now
+  append to `.tiller/scratch/codex/ambient-ledger.jsonl` when no managed run
+  directory is present, without changing ambient policy or run status rendering.
 - **Ambient spend budget visibility** - `status.md` can show advisory output
   and reasoning token budget bands from `TILLER_AMBIENT_OUTPUT_TOKEN_BUDGET`,
   `TILLER_AMBIENT_REASONING_TOKEN_BUDGET`, and

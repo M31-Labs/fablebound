@@ -36,9 +36,12 @@ import (
 //	find, tree, file, stat, du, sort, uniq, cut, pwd, which, echo, diff,
 //	jq, column.
 //
+//	Process/port diagnostics: ps, pgrep, pidof, lsof, netstat, and ss except
+//	for known mutating/write flags.
+//
 //	git: status, log, show, diff, blame, rev-parse, ls-files, describe,
-//	shortlog, grep, and bare "git branch" or "git branch --list" / "-l"
-//	forms only (any other branch args → other).
+//	shortlog, grep, and bare "git branch", "git branch --show-current", or
+//	"git branch --list" / "-l" forms only (any other branch args → other).
 //
 //	go: doc, list, version, vet.
 //
@@ -381,6 +384,12 @@ func classifySegment(seg string) string {
 	case "sed":
 		return classifySed(argv)
 
+	case "ps", "pgrep", "pidof", "lsof", "netstat":
+		return "readonly"
+
+	case "ss":
+		return classifySS(argv)
+
 	// ── git ──────────────────────────────────────────────────────────────────
 	case "git":
 		return classifyGit(sub, argv)
@@ -479,6 +488,23 @@ func sedLinePrintScript(script string) bool {
 	return true
 }
 
+func classifySS(argv []string) string {
+	for _, arg := range argv[1:] {
+		if arg == "-K" || arg == "--kill" || arg == "-D" ||
+			strings.HasPrefix(arg, "--kill=") ||
+			arg == "--diag" || strings.HasPrefix(arg, "--diag=") {
+			return "other"
+		}
+		if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
+			flags := strings.TrimPrefix(arg, "-")
+			if strings.ContainsAny(flags, "KD") {
+				return "other"
+			}
+		}
+	}
+	return "readonly"
+}
+
 func classifyCanopy(sub string) string {
 	switch sub {
 	case "search", "graph", "analyze", "help":
@@ -491,7 +517,8 @@ func classifyCanopy(sub string) string {
 // classifyGit classifies a git invocation by subcommand.
 // Allowed: status, log, show, diff, blame, rev-parse, ls-files, describe,
 //
-//	shortlog, grep, and bare "git branch" or "git branch --list" / "-l".
+//	shortlog, grep, and bare "git branch", "git branch --show-current",
+//	or "git branch --list" / "-l".
 //
 // Any other branch args → other.
 func classifyGit(sub string, argv []string) string {
@@ -506,6 +533,9 @@ func classifyGit(sub string, argv []string) string {
 		// argv is [git, branch, ...args]; extra args start at index 2.
 		if len(argv) <= 2 {
 			return "readonly" // bare "git branch"
+		}
+		if len(argv) == 3 && argv[2] == "--show-current" {
+			return "readonly"
 		}
 		// Scan flags: only --list / -l are permitted option flags; at most one
 		// optional non-option pattern argument is allowed after a list flag.

@@ -56,11 +56,12 @@ func TestClassifyCommand(t *testing.T) {
 		{"git branch --list", "readonly"},    // --list flag
 		{"git branch -l", "readonly"},        // -l flag
 		{"git branch -l 'main'", "readonly"}, // -l + pattern
-		{"git branch -d old", "other"},       // -d → other
-		{"git branch -D main", "other"},      // -D → other
-		{"git checkout main", "other"},       // checkout → other
-		{"git push origin main", "other"},    // push → other
-		{"git add .", "other"},               // add → other
+		{"git branch --show-current", "readonly"},
+		{"git branch -d old", "other"},    // -d → other
+		{"git branch -D main", "other"},   // -D → other
+		{"git checkout main", "other"},    // checkout → other
+		{"git push origin main", "other"}, // push → other
+		{"git add .", "other"},            // add → other
 
 		// ── go variants ──────────────────────────────────────────────────────
 		{"go doc fmt.Println", "readonly"},
@@ -104,6 +105,20 @@ func TestClassifyCommand(t *testing.T) {
 		{"sed -n '/Root Codex/p' AGENTS.md", "readonly"},
 		{"sed -i 's/a/b/' AGENTS.md", "other"},
 		{"sed -n '1,20w /tmp/out' AGENTS.md", "other"},
+		{"ps aux", "readonly"},
+		{"ps -ef", "readonly"},
+		{"pgrep -af node", "readonly"},
+		{"pidof node", "readonly"},
+		{"lsof -iTCP -sTCP:LISTEN -P -n", "readonly"},
+		{"netstat -tulpn", "readonly"},
+		{"ss -ltnp", "readonly"},
+		{"ss -tulpn", "readonly"},
+		{"ss -K dst 127.0.0.1", "other"},
+		{"ss --kill dst 127.0.0.1", "other"},
+		{"ss --kill=dst", "other"},
+		{"ss -D /tmp/x", "other"},
+		{"ss --diag /tmp/x", "other"},
+		{"ss --diag=/tmp/x", "other"},
 
 		// ── Canopy read-oriented commands ────────────────────────────────────
 		{"canopy search symbol Foo", "readonly"},

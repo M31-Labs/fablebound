@@ -594,7 +594,7 @@ func TestInstallAgents_ContentCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tiller-summary.md not found: %v", err)
 	}
-	for _, want := range []string{"model: haiku", "status compaction", "stale/late report classification", "checkpoint candidate"} {
+	for _, want := range []string{"model: haiku", "status compaction", "Stale/Late Work", "not `none`", "stale/late report classification", "checkpoint candidate"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("tiller-summary.md missing %q; content:\n%s", want, string(data))
 		}
@@ -693,7 +693,7 @@ func TestInstallCodexAgents_FreshDir(t *testing.T) {
 		t.Fatalf("read tiller-summary.toml: %v", err)
 	}
 	content = string(data)
-	for _, want := range []string{`model = "gpt-5.4-mini"`, `model_reasoning_effort = "medium"`, `sandbox_mode = "read-only"`, "status compaction", "stale/late report classification", "checkpoint candidate"} {
+	for _, want := range []string{`model = "gpt-5.4-mini"`, `model_reasoning_effort = "medium"`, `sandbox_mode = "read-only"`, "status compaction", "Stale/Late Work", "not `none`", "stale/late report classification", "checkpoint candidate"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("Codex summary missing %q:\n%s", want, content)
 		}
@@ -755,7 +755,7 @@ func TestInstallOpenCodeAgents_FreshDir(t *testing.T) {
 		t.Fatalf("read tiller-summary.md: %v", err)
 	}
 	content = string(data)
-	for _, want := range []string{"mode: subagent", "edit: deny", "status compaction", "stale/late report classification", "checkpoint candidate"} {
+	for _, want := range []string{"mode: subagent", "edit: deny", "status compaction", "Stale/Late Work", "not `none`", "stale/late report classification", "checkpoint candidate"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("OpenCode summary missing %q:\n%s", want, content)
 		}

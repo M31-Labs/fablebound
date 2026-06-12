@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"m31labs.dev/tiller/internal/harness"
 )
 
 // Manifest is the run-level record written to manifest.json.
@@ -27,7 +29,7 @@ type Manifest struct {
 }
 
 // DefaultMaxDepth is the default maximum dispatch depth when max_depth is absent.
-const DefaultMaxDepth = 2
+const DefaultMaxDepth = harness.DefaultMaxDepth
 
 // manifestPath returns the path to manifest.json inside a run directory.
 func manifestPath(runDir string) string {

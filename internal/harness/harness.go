@@ -6,6 +6,9 @@ import (
 	"strings"
 )
 
+// DefaultMaxDepth is the default maximum dispatch depth when max_depth is absent.
+const DefaultMaxDepth = 2
+
 // ModelDetection records how reliably a backend can identify the actual model
 // selected for an agent run.
 type ModelDetection string

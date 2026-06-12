@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"m31labs.dev/tiller/internal/procutil"
+	"m31labs.dev/tiller/internal/sandbox"
 )
 
 // Run is the run-level record (spec §3.1 "manifest" row).
@@ -22,7 +23,7 @@ type Run struct {
 	Workspace     string // absolute path to workspace root
 	Status        string // created|running|completed|failed|halted
 	ReasonBudget  int    // max reason dispatches; default 2 (v1 compat; was fable_budget on disk)
-	MaxDepth      int    // max dispatch depth; 0 means use default (4). spec §4.3
+	MaxDepth      int    // max dispatch depth; 0 means use default (2).
 	CreatedAt     time.Time
 	EndedAt       *time.Time        `json:"ended_at,omitempty"`
 	RootSessionID string            `json:"root_session_id,omitempty"`
@@ -57,16 +58,131 @@ type Dispatch struct {
 	NumTurns       int        `json:"num_turns,omitempty"`
 	SessionID      string     `json:"session_id,omitempty"`
 	// v2 fields — omitempty so v1 meta.json stays byte-stable
-	Tier        string `json:"tier,omitempty"`        // reason|scrutiny|execute
-	Enforcement string `json:"enforcement,omitempty"` // full|degraded; default "full"
-	Provider    string `json:"provider,omitempty"`    // anthropic|openai|local|…
-	Adapter     string `json:"adapter,omitempty"`     // claude-headless|claude-code|…
+	Tier        string          `json:"tier,omitempty"`        // reason|scrutiny|execute
+	Enforcement string          `json:"enforcement,omitempty"` // full|degraded|sandboxed; default "full"
+	Provider    string          `json:"provider,omitempty"`    // anthropic|openai|local|…
+	Adapter     string          `json:"adapter,omitempty"`     // claude-headless|claude-code|…
+	Sandbox     *sandbox.Record `json:"sandbox,omitempty"`
 	// Dispatch pool fields (inert until P4) — omitempty for byte stability
 	ClaimedBy  string     `json:"claimed_by,omitempty"`
 	LeaseUntil *time.Time `json:"lease_until,omitempty"`
 	// DenyReason is set when Status=="denied" (pool-time gate denial) or
 	// when a non-gate failure occurs. omitempty so v1 metas stay byte-stable.
 	DenyReason string `json:"deny_reason,omitempty"`
+}
+
+const (
+	AgentRunStatusRequested  = "requested"
+	AgentRunStatusSpawned    = "spawned"
+	AgentRunStatusRunning    = "running"
+	AgentRunStatusCompleted  = "completed"
+	AgentRunStatusFailed     = "failed"
+	AgentRunStatusHalted     = "halted"
+	AgentRunStatusLate       = "late"
+	AgentRunStatusStale      = "stale"
+	AgentRunStatusSuperseded = "superseded"
+	AgentRunStatusClosed     = "closed"
+
+	CheckpointStatusProposed    = "proposed"
+	CheckpointStatusFresh       = "fresh"
+	CheckpointStatusLateValid   = "late_valid"
+	CheckpointStatusLateStale   = "late_stale"
+	CheckpointStatusConflicting = "conflicting"
+	CheckpointStatusAccepted    = "accepted"
+	CheckpointStatusRejected    = "rejected"
+)
+
+// AgentRun records backend lifecycle metadata for an abstracted agent session.
+type AgentRun struct {
+	ID             string     `json:"id"`
+	RunID          string     `json:"run_id,omitempty"`
+	DispatchID     string     `json:"dispatch_id,omitempty"`
+	Backend        string     `json:"backend"`
+	BackendAgentID string     `json:"backend_agent_id,omitempty"`
+	Role           string     `json:"role,omitempty"`
+	Tier           string     `json:"tier,omitempty"`
+	Model          string     `json:"model,omitempty"`
+	Effort         string     `json:"effort,omitempty"`
+	ParentRunID    string     `json:"parent_run_id,omitempty"`
+	ParentAgentID  string     `json:"parent_agent_id,omitempty"`
+	BaseGitRev     string     `json:"base_git_rev,omitempty"`
+	BaseDirtyHash  string     `json:"base_dirty_hash,omitempty"`
+	ClaimedPaths   []string   `json:"claimed_paths,omitempty"`
+	SpawnedAt      time.Time  `json:"spawned_at"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	ReportedAt     *time.Time `json:"reported_at,omitempty"`
+	Status         string     `json:"status"`
+	ChangedFiles   []string   `json:"changed_files,omitempty"`
+	Verification   []string   `json:"verification,omitempty"`
+	Caveats        []string   `json:"caveats,omitempty"`
+	DiffHash       string     `json:"diff_hash,omitempty"`
+	Summary        string     `json:"summary,omitempty"`
+	Refs           []string   `json:"refs,omitempty"`
+}
+
+// CheckpointCandidate records a coherent, reviewable worktree slice.
+type CheckpointCandidate struct {
+	ID            string    `json:"id"`
+	RunID         string    `json:"run_id,omitempty"`
+	AgentRunID    string    `json:"agent_run_id,omitempty"`
+	DispatchID    string    `json:"dispatch_id,omitempty"`
+	Backend       string    `json:"backend,omitempty"`
+	Role          string    `json:"role,omitempty"`
+	Tier          string    `json:"tier,omitempty"`
+	Model         string    `json:"model,omitempty"`
+	Effort        string    `json:"effort,omitempty"`
+	ParentRunID   string    `json:"parent_run_id,omitempty"`
+	ParentAgentID string    `json:"parent_agent_id,omitempty"`
+	BaseGitRev    string    `json:"base_git_rev,omitempty"`
+	BaseDirtyHash string    `json:"base_dirty_hash,omitempty"`
+	ClaimedPaths  []string  `json:"claimed_paths,omitempty"`
+	ReportedAt    time.Time `json:"reported_at"`
+	Status        string    `json:"status"`
+	ChangedFiles  []string  `json:"changed_files,omitempty"`
+	Verification  []string  `json:"verification,omitempty"`
+	Caveats       []string  `json:"caveats,omitempty"`
+	DiffHash      string    `json:"diff_hash,omitempty"`
+	Summary       string    `json:"summary,omitempty"`
+	Refs          []string  `json:"refs,omitempty"`
+}
+
+// LedgerEvent records append-only lifecycle/audit facts that do not belong to
+// a single dispatch trace stream.
+type LedgerEvent struct {
+	ID                  string    `json:"id,omitempty"`
+	RunID               string    `json:"run_id,omitempty"`
+	AgentRunID          string    `json:"agent_run_id,omitempty"`
+	CheckpointCandidate string    `json:"checkpoint_candidate_id,omitempty"`
+	DispatchID          string    `json:"dispatch_id,omitempty"`
+	Backend             string    `json:"backend,omitempty"`
+	Kind                string    `json:"kind"`
+	Status              string    `json:"status,omitempty"`
+	At                  time.Time `json:"at"`
+	Summary             string    `json:"summary,omitempty"`
+	Refs                []string  `json:"refs,omitempty"`
+}
+
+// ValidAgentRunStatus reports whether status is a known AgentRun status.
+func ValidAgentRunStatus(status string) bool {
+	switch status {
+	case AgentRunStatusRequested, AgentRunStatusSpawned, AgentRunStatusRunning,
+		AgentRunStatusCompleted, AgentRunStatusFailed, AgentRunStatusHalted,
+		AgentRunStatusLate, AgentRunStatusStale, AgentRunStatusSuperseded,
+		AgentRunStatusClosed:
+		return true
+	}
+	return false
+}
+
+// ValidCheckpointStatus reports whether status is a known CheckpointCandidate status.
+func ValidCheckpointStatus(status string) bool {
+	switch status {
+	case CheckpointStatusProposed, CheckpointStatusFresh, CheckpointStatusLateValid,
+		CheckpointStatusLateStale, CheckpointStatusConflicting,
+		CheckpointStatusAccepted, CheckpointStatusRejected:
+		return true
+	}
+	return false
 }
 
 // IsTerminal returns true if the dispatch status is a terminal state.

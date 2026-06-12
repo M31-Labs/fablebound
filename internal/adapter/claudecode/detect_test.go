@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"m31labs.dev/tiller/internal/tier"
 )
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -166,6 +168,31 @@ func TestIsFableModel(t *testing.T) {
 		if got != c.want {
 			t.Errorf("IsFableModel(%q) = %v, want %v", c.model, got, c.want)
 		}
+	}
+}
+
+func TestDetectTierWithConfigUsesAmbientAliases(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "codex.jsonl")
+	line := `{"type":"assistant","isSidechain":false,"message":{"model":"5.5 xhigh","role":"assistant","content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(p, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &tier.AmbientConfig{
+		Detector:    "claude-jsonl-transcript",
+		GovernTiers: []string{"reason"},
+		Models: map[string][]string{
+			"reason":  {"5.5 xhigh"},
+			"execute": {"5.5 high", "5.5 medium", "5.5 low"},
+		},
+	}
+	got, ok := DetectTierWithConfig(p, cfg)
+	if !ok {
+		t.Fatal("DetectTierWithConfig returned ok=false, want true")
+	}
+	if got != "reason" {
+		t.Errorf("tier = %q, want reason", got)
 	}
 }
 

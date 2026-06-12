@@ -24,6 +24,7 @@
 package fsstore
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -245,6 +246,136 @@ func (fs *FS) DispatchFacts(runID string) (scratch.Facts, error) {
 		}
 	}
 	return f, nil
+}
+
+// ── Agent / checkpoint lifecycle records ─────────────────────────────────────
+
+// CreateAgentRun stores a newly spawned agent lifecycle record.
+func (fs *FS) CreateAgentRun(runID string, ar *scratch.AgentRun) error {
+	if ar == nil {
+		return fmt.Errorf("fsstore.CreateAgentRun: nil agent run")
+	}
+	if ar.ID == "" {
+		return fmt.Errorf("fsstore.CreateAgentRun: id is required")
+	}
+	if ar.Status == "" {
+		ar.Status = scratch.AgentRunStatusSpawned
+	}
+	if ar.Status != "" && !scratch.ValidAgentRunStatus(ar.Status) {
+		return fmt.Errorf("fsstore.CreateAgentRun: unknown status %q", ar.Status)
+	}
+	if ar.RunID == "" {
+		ar.RunID = runID
+	}
+	if ar.SpawnedAt.IsZero() {
+		ar.SpawnedAt = time.Now().UTC()
+	}
+	path := filepath.Join(fs.runDir(runID), "agents", ar.ID+".json")
+	data, err := json.MarshalIndent(ar, "", "  ")
+	if err != nil {
+		return fmt.Errorf("fsstore.CreateAgentRun: marshal: %w", err)
+	}
+	data = append(data, '\n')
+	return writeFileAtomic(path, data)
+}
+
+// WriteAgentRun updates an agent lifecycle record.
+func (fs *FS) WriteAgentRun(runID string, ar *scratch.AgentRun) error {
+	return fs.CreateAgentRun(runID, ar)
+}
+
+// ListAgentRuns returns all agent lifecycle records for a run.
+func (fs *FS) ListAgentRuns(runID string) ([]*scratch.AgentRun, error) {
+	dir := filepath.Join(fs.runDir(runID), "agents")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("fsstore.ListAgentRuns %s: %w", runID, err)
+	}
+	var out []*scratch.AgentRun
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("fsstore.ListAgentRuns %s/%s: %w", runID, e.Name(), err)
+		}
+		var ar scratch.AgentRun
+		if err := json.Unmarshal(data, &ar); err != nil {
+			return nil, fmt.Errorf("fsstore.ListAgentRuns %s/%s: %w", runID, e.Name(), err)
+		}
+		out = append(out, &ar)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
+}
+
+// AppendCheckpointCandidate records a checkpoint candidate.
+func (fs *FS) AppendCheckpointCandidate(runID string, c scratch.CheckpointCandidate) error {
+	if c.Status == "" {
+		c.Status = scratch.CheckpointStatusProposed
+	}
+	if c.Status != "" && !scratch.ValidCheckpointStatus(c.Status) {
+		return fmt.Errorf("fsstore.AppendCheckpointCandidate: unknown status %q", c.Status)
+	}
+	if c.RunID == "" {
+		c.RunID = runID
+	}
+	if c.ReportedAt.IsZero() {
+		c.ReportedAt = time.Now().UTC()
+	}
+	return fs.appendJSONL(runID, "checkpoint_candidates.jsonl", c)
+}
+
+// ListCheckpointCandidates returns checkpoint candidates in append order.
+func (fs *FS) ListCheckpointCandidates(runID string) ([]scratch.CheckpointCandidate, error) {
+	var out []scratch.CheckpointCandidate
+	if err := fs.readJSONL(runID, "checkpoint_candidates.jsonl", func(data []byte) error {
+		var c scratch.CheckpointCandidate
+		if err := json.Unmarshal(data, &c); err != nil {
+			return err
+		}
+		out = append(out, c)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// AppendLedgerEvent records an append-only lifecycle event.
+func (fs *FS) AppendLedgerEvent(runID string, ev scratch.LedgerEvent) error {
+	if ev.Kind == "" {
+		return fmt.Errorf("fsstore.AppendLedgerEvent: kind is required")
+	}
+	if ev.RunID == "" {
+		ev.RunID = runID
+	}
+	if ev.At.IsZero() {
+		ev.At = time.Now().UTC()
+	}
+	return fs.appendJSONL(runID, "ledger.jsonl", ev)
+}
+
+// ListLedgerEvents returns ledger events in append order.
+func (fs *FS) ListLedgerEvents(runID string) ([]scratch.LedgerEvent, error) {
+	var out []scratch.LedgerEvent
+	if err := fs.readJSONL(runID, "ledger.jsonl", func(data []byte) error {
+		var ev scratch.LedgerEvent
+		if err := json.Unmarshal(data, &ev); err != nil {
+			return err
+		}
+		out = append(out, ev)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ── Document records ──────────────────────────────────────────────────────────
@@ -725,4 +856,47 @@ func readDispatchRaw(runDir, dispatchID string) (*scratch.Dispatch, error) {
 		return nil, err
 	}
 	return &d, nil
+}
+
+func (fs *FS) appendJSONL(runID, name string, v any) error {
+	path := filepath.Join(fs.runDir(runID), name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("fsstore.appendJSONL: mkdir: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("fsstore.appendJSONL: open %s: %w", path, err)
+	}
+	defer f.Close()
+	if err := json.NewEncoder(f).Encode(v); err != nil {
+		return fmt.Errorf("fsstore.appendJSONL: encode %s: %w", path, err)
+	}
+	return nil
+}
+
+func (fs *FS) readJSONL(runID, name string, decode func([]byte) error) error {
+	path := filepath.Join(fs.runDir(runID), name)
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("fsstore.readJSONL: open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(strings.TrimSpace(string(line))) == 0 {
+			continue
+		}
+		if err := decode(line); err != nil {
+			return fmt.Errorf("fsstore.readJSONL: decode %s: %w", path, err)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("fsstore.readJSONL: scan %s: %w", path, err)
+	}
+	return nil
 }

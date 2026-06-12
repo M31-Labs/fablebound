@@ -1,6 +1,6 @@
 # Tests for ambient.arb — tiller ambient orchestrator-only gate.
 # Applied when TILLER_ROLE is unset and the session model is in the reason tier.
-# Denied: Edit, Write, NotebookEdit, Bash.
+# Denied: Edit, Write, NotebookEdit, Bash, apply_patch.
 # Allowed: Read, Glob, Grep, Agent, TodoWrite, WebFetch.
 # No match → deny (combinator default).
 #
@@ -197,6 +197,78 @@ test "Bash go build is denied (DenyExecution — not readonly)" {
     expect rule AllowPermittedBash not matched
 }
 
+test "Codex apply_patch is denied in ambient mode (DenyExecution)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "apply_patch"
+        tool.command: "*** Begin Patch\n*** Update File: main.go\n@@\n-func old() {}\n+func new() {}\n*** End Patch"
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: true
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule DenyExecution matched
+}
+
+test "Codex spawn_agent orchestration is allowed in ambient mode" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "spawn_agent"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowOrchestrationTools matched
+    expect rule DenyExecution not matched
+}
+
+test "Codex update_plan lifecycle tool is allowed in ambient mode" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "update_plan"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule AllowOrchestrationTools matched
+    expect rule DenyExecution not matched
+}
+
+test "Codex exec_command is denied in ambient mode" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "exec_command"
+        tool.command: "go test ./..."
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule DenyExecution matched
+}
+
 # ── DenyHyphaDaemons (defense-in-depth, priority 14) ─────────────────────────
 
 test "hypha mcp serve is denied (daemon guard, priority 14)" {
@@ -295,6 +367,23 @@ test "git log is allowed (readonly bash)" {
         agent.dispatch_id: ""
         tool.name: "Bash"
         tool.command: "git log --oneline -3"
+        tool.command_class: "readonly"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        run.id: ""
+    }
+    expect rule AllowPermittedBash matched
+}
+
+test "Codex exec_command rg is allowed (readonly shell)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "exec_command"
+        tool.command: "rg --files"
         tool.command_class: "readonly"
         tool.file_path: ""
         tool.path_in_scratch: false
@@ -613,6 +702,44 @@ test "TaskCreate is allowed in ambient mode" {
     expect rule AllowOrchestrationTools matched
 }
 
+test "Codex namespaced multi-agent wait is allowed in ambient mode" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "multi_agent_v1wait_agent"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule AllowOrchestrationTools matched
+}
+
+test "Codex namespaced multi-agent send input is allowed in ambient mode" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "multi_agent_v1send_input"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule AllowOrchestrationTools matched
+}
+
 # ── Gap 2: DenyReasonModelSubagent ────────────────────────────────────────────
 
 test "Task tiller-worker with reason-tier model is denied (DenyReasonModelSubagent)" {
@@ -667,6 +794,46 @@ test "Task tiller-deep-report with reason-tier model is allowed (deep-report exc
         tool.path_in_workspace: false
         tool.write_class: ""
         tool.agent_type: "tiller-deep-report"
+        tool.agent_model_tier: "reason"
+        run.id: ""
+    }
+    expect rule DenyReasonModelSubagent not matched
+    expect rule AllowAgent matched
+}
+
+test "Task tiller-investigator with reason-tier model is allowed (investigation exception)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Task"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: "tiller-investigator"
+        tool.agent_model_tier: "reason"
+        run.id: ""
+    }
+    expect rule DenyReasonModelSubagent not matched
+    expect rule AllowAgent matched
+}
+
+test "Task tiller-reviewer with reason-tier model is allowed (review exception)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Task"
+        tool.command: ""
+        tool.command_class: ""
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: "tiller-reviewer"
         tool.agent_model_tier: "reason"
         run.id: ""
     }
@@ -785,6 +952,44 @@ test "tiller uninstall --project is allowed (escape hatch)" {
         tool.name: "Bash"
         tool.command: "tiller uninstall --project"
         tool.command_class: "self-uninstall"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule AllowPermittedBash matched
+}
+
+test "tiller ambient disable is allowed (temporary escape hatch)" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "tiller ambient disable"
+        tool.command_class: "ambient-control"
+        tool.file_path: ""
+        tool.path_in_scratch: false
+        tool.path_in_workspace: false
+        tool.write_class: ""
+        tool.agent_type: ""
+        tool.agent_model_tier: ""
+        run.id: ""
+    }
+    expect rule AllowPermittedBash matched
+}
+
+test "codex exec medium execution is allowed" {
+    given {
+        agent.role: "ambient-orchestrator"
+        agent.depth: 0
+        agent.dispatch_id: ""
+        tool.name: "Bash"
+        tool.command: "codex exec -m gpt-5.5 -c model_reasoning_effort=medium task"
+        tool.command_class: "codex-exec"
         tool.file_path: ""
         tool.path_in_scratch: false
         tool.path_in_workspace: false

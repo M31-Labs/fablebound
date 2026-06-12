@@ -59,6 +59,32 @@ func TestModelDetectionSourcesValidate(t *testing.T) {
 	}
 }
 
+func TestModelEvidenceValidateRoundtrip(t *testing.T) {
+	evidence := ModelEvidence{
+		Model:     " gpt-5.5 ",
+		Effort:    " xhigh ",
+		Detection: ModelDetectionPayload,
+	}.Normalized()
+	if err := evidence.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if evidence.Model != "gpt-5.5" || evidence.Effort != "xhigh" {
+		t.Fatalf("normalized mismatch: %#v", evidence)
+	}
+
+	data, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var got ModelEvidence
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got != evidence {
+		t.Fatalf("roundtrip mismatch: got %#v want %#v", got, evidence)
+	}
+}
+
 func TestHarnessConnectionValidateRejectsInvalid(t *testing.T) {
 	tests := []struct {
 		name string
@@ -85,5 +111,16 @@ func TestHarnessConnectionValidateRejectsInvalid(t *testing.T) {
 				t.Fatal("Validate succeeded, want error")
 			}
 		})
+	}
+}
+
+func TestModelEvidenceValidateRejectsInvalidDetection(t *testing.T) {
+	evidence := ModelEvidence{
+		Model:     "gpt-5.5",
+		Effort:    "xhigh",
+		Detection: "probe",
+	}
+	if err := evidence.Validate(); err == nil {
+		t.Fatal("Validate succeeded, want error")
 	}
 }

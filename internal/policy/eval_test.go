@@ -2,6 +2,8 @@ package policy
 
 import (
 	"testing"
+
+	"m31labs.dev/tiller/internal/run"
 )
 
 // dispatchLoaded caches the loaded dispatch policy for tests.
@@ -147,6 +149,28 @@ func TestDispatch_Depth4MaxDepth4_Deny(t *testing.T) {
 	}
 	if res.Rule != "DenyDepthBeyondPolicy" {
 		t.Errorf("depth4 max4: rule = %q, want DenyDepthBeyondPolicy", res.Rule)
+	}
+}
+
+func TestDispatch_DefaultMaxDepth2_DenyDepth2Queued(t *testing.T) {
+	req := DispatchRequest{
+		Role:         "worker",
+		CallerRole:   "worker",
+		CallerDepth:  run.DefaultMaxDepth,
+		Queued:       true,
+		RunID:        "20260609-000000-ab02b",
+		ReasonBudget: 2,
+		MaxDepth:     run.DefaultMaxDepth,
+	}
+	res, err := EvalDispatch(dispatchLoaded, req)
+	if err != nil {
+		t.Fatalf("EvalDispatch depth2 queued max2: %v", err)
+	}
+	if res.Verdict != VerdictDeny {
+		t.Errorf("depth2 queued max2: verdict = %s, want Deny", res.Verdict)
+	}
+	if res.Rule != "DenyDepthBeyondPolicy" {
+		t.Errorf("depth2 queued max2: rule = %q, want DenyDepthBeyondPolicy", res.Rule)
 	}
 }
 

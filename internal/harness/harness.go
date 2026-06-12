@@ -1,7 +1,10 @@
 // Package harness describes backend capabilities for agent harness adapters.
 package harness
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // ModelDetection records how reliably a backend can identify the actual model
 // selected for an agent run.
@@ -13,6 +16,36 @@ const (
 	ModelDetectionPayload    ModelDetection = "payload"
 	ModelDetectionConfigured ModelDetection = "configured"
 )
+
+func validateModelDetection(source ModelDetection) error {
+	if source != "" &&
+		source != ModelDetectionNone &&
+		source != ModelDetectionTranscript &&
+		source != ModelDetectionPayload &&
+		source != ModelDetectionConfigured {
+		return fmt.Errorf("unknown model detection %q", source)
+	}
+	return nil
+}
+
+// ModelEvidence records provider-agnostic evidence for a selected model.
+type ModelEvidence struct {
+	Model     string         `json:"model,omitempty"`
+	Effort    string         `json:"effort,omitempty"`
+	Detection ModelDetection `json:"model_detection,omitempty"`
+}
+
+// Normalized returns evidence with whitespace-only variance removed.
+func (e ModelEvidence) Normalized() ModelEvidence {
+	e.Model = strings.TrimSpace(e.Model)
+	e.Effort = strings.TrimSpace(e.Effort)
+	return e
+}
+
+// Validate checks that model evidence uses a known detection source.
+func (e ModelEvidence) Validate() error {
+	return validateModelDetection(e.Detection)
+}
 
 // Capabilities records the affordances a harness backend can provide.
 type Capabilities struct {
@@ -30,14 +63,7 @@ type Capabilities struct {
 
 // Validate checks that capability metadata uses known enum values.
 func (c Capabilities) Validate() error {
-	if c.ModelDetection != "" &&
-		c.ModelDetection != ModelDetectionNone &&
-		c.ModelDetection != ModelDetectionTranscript &&
-		c.ModelDetection != ModelDetectionPayload &&
-		c.ModelDetection != ModelDetectionConfigured {
-		return fmt.Errorf("unknown model detection %q", c.ModelDetection)
-	}
-	return nil
+	return validateModelDetection(c.ModelDetection)
 }
 
 // HarnessConnection identifies a harness backend and the capabilities available

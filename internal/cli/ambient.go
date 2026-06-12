@@ -16,7 +16,7 @@ import (
 
 func runAmbient(args []string) error {
 	if len(args) != 1 {
-		return fmt.Errorf("usage: tiller ambient disable|enable|status|next")
+		return fmt.Errorf("usage: tiller ambient disable|enable|status|next|doctor")
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -73,8 +73,11 @@ func runAmbient(args []string) error {
 		printAmbientNextDigest(digest)
 		return nil
 
+	case "doctor":
+		return runAmbientDoctor()
+
 	default:
-		return fmt.Errorf("unknown ambient command %q (want disable, enable, status, or next)", args[0])
+		return fmt.Errorf("unknown ambient command %q (want disable, enable, status, next, or doctor)", args[0])
 	}
 }
 

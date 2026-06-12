@@ -43,6 +43,9 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Ambient next digest** - `tiller ambient next` now prints a compact
   run-control digest from scratch state, and `tiller ambient status` points to
   the active run's `status.md` and current Arbiter next action when available.
+- **Ambient runtime doctor** - `tiller ambient doctor` verifies the live
+  executable/version, source/binary drift, bypass state, ambient command
+  classifier, and hook policy smoke behavior.
 - **Ambient recommended next actions** - `status.md` now renders a deterministic
   `## Recommended Next Actions` section for stale triage, checkpoint review,
   compaction, waiting, or proceeding.

@@ -663,7 +663,7 @@ func isAllowedSelfUninstallBackend(backend string) bool {
 }
 
 // IsAmbientControl returns true if cmd is exactly "tiller ambient
-// disable|enable|status|next" with no other arguments, chaining, redirects, or
+// disable|enable|status|next|doctor" with no other arguments, chaining, redirects, or
 // command substitution. This is a temporary testing escape hatch for ambient
 // hook enforcement.
 func IsAmbientControl(cmd string) bool {
@@ -685,7 +685,7 @@ func IsAmbientControl(cmd string) bool {
 		return false
 	}
 	switch fields[2] {
-	case "disable", "enable", "status", "next", "off", "on":
+	case "disable", "enable", "status", "next", "doctor", "off", "on":
 		return true
 	default:
 		return false

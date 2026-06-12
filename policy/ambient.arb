@@ -145,8 +145,8 @@ rule DenyHyphaDaemons priority 14 {
 #                      uninstall mutates settings.json; the classifier must stay
 #                      honest.
 #
-#   "ambient-control" — temporary testing escape hatch for
-#                      "tiller ambient disable|enable|status|next".
+#   "ambient-control" — temporary testing/control commands:
+#                      "tiller ambient disable|enable|status|next|doctor".
 #
 #   "codex-exec"    — constrained Codex CLI delegation:
 #                      explicit gpt-5.5, explicit model_reasoning_effort,

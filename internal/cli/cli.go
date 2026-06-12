@@ -146,7 +146,7 @@ Subcommands:
   policy vet             compile+typecheck all policies
   store init|status      bootstrap or inspect the PostgreSQL scratch store
   hook [--backend b]     internal: backend hook gate (stdin JSON)
-  ambient disable|enable|status|next
+  ambient disable|enable|status|next|doctor
                          bypass/restore ambient hooks or print run-control status
   codex doctor           verify project-local Codex ambient install
   install [--backend b] [--print] [--project|--global]

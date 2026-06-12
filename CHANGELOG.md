@@ -9,6 +9,12 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+_No unreleased changes yet._
+
+---
+
+## [0.4.0] - 2026-06-12
+
 ### Added
 
 - **Ambient status snapshot** - ambient ledger writes now refresh a generated
@@ -220,7 +226,9 @@ Initial release.
 - **Hyphae integration** - traces, recall, `tiller promote`.
 - **Canonical subagent personas** - six `tiller-*` agents embedded and installed by `tiller install`.
 
-[0.3.0]: https://github.com/odvcencio/tiller/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/odvcencio/tiller/compare/v0.1.1...v0.2.0
-[0.1.1]: https://github.com/odvcencio/tiller/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/odvcencio/tiller/releases/tag/v0.1.0
+[Unreleased]: https://github.com/M31-Labs/tiller/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/M31-Labs/tiller/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/M31-Labs/tiller/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/M31-Labs/tiller/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/M31-Labs/tiller/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/M31-Labs/tiller/releases/tag/v0.1.0

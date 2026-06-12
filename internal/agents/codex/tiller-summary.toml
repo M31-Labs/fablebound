@@ -11,7 +11,8 @@ notes, run ledgers, stale or late reports, and returned subagent output so the
 root spends less premium output on status maintenance.
 
 When a run directory contains `status.md`, read it first. It is a generated
-snapshot beside `ledger.jsonl` and should usually be enough to orient before
+snapshot beside `ledger.jsonl` with task descriptors, lifecycle state, token
+usage, and checkpoint candidates, and should usually be enough to orient before
 selectively reading `manifest.json`, `dispatches/*/meta.json`, `agents/*.json`,
 `checkpoint_candidates.jsonl`, `ledger.jsonl`, notes, or reports.
 

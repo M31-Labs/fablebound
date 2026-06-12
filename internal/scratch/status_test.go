@@ -76,6 +76,17 @@ func TestRenderStatusMarkdown(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AppendLedgerEvent: %v", err)
 	}
+	if err := st.AppendLedgerEvent(runID, scratch.LedgerEvent{
+		ID:      "ambient-task-001",
+		Backend: "codex",
+		Kind:    "ambient.task_descriptor",
+		Status:  scratch.AgentRunStatusRequested,
+		At:      now.Add(-10 * time.Minute),
+		Summary: "tiller-worker: implement descriptor capture",
+		Refs:    []string{"tool:spawn_agent", "agent_type:tiller-worker", "descriptor_id:abc123", "objective_hash:def456"},
+	}); err != nil {
+		t.Fatalf("AppendLedgerEvent descriptor: %v", err)
+	}
 
 	data, err := scratch.RenderStatusMarkdown(st, runID, scratch.StatusOptions{UpdatedAt: now, RecentLimit: 3})
 	if err != nil {
@@ -95,6 +106,11 @@ func TestRenderStatusMarkdown(t *testing.T) {
 		"## Agents",
 		"- by_status: completed=1",
 		"- `agent-001` codex worker completed 2026-06-12T09:20:00Z",
+		"## Task Descriptors",
+		"- by_status: requested=1",
+		"- `tiller-worker` codex requested 2026-06-12T09:50:00Z",
+		"summary: tiller-worker: implement descriptor capture",
+		"refs: tool:spawn_agent, agent_type:tiller-worker, descriptor_id:abc123, objective_hash:def456",
 		"## Checkpoint Candidates",
 		"- `cp-001` fresh agent-001 2026-06-12T09:55:00Z",
 		"## Observed Token Usage",

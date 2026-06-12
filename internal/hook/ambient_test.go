@@ -1330,17 +1330,22 @@ func TestCodexLifecycleRootMultiAgentToolAppendsLedgerAndStaysSilent(t *testing.
 	if err != nil {
 		t.Fatalf("ListLedgerEvents: %v", err)
 	}
-	if len(events) != 1 {
-		t.Fatalf("ledger event count=%d want 1: %#v", len(events), events)
+	if len(events) != 2 {
+		t.Fatalf("ledger event count=%d want 2: %#v", len(events), events)
 	}
-	if events[0].Kind != "codex.lifecycle_tool" || events[0].Status != scratch.AgentRunStatusRequested {
-		t.Fatalf("unexpected ledger event: %#v", events[0])
+	lifecycle := findLedgerEventKind(events, "codex.lifecycle_tool")
+	if lifecycle == nil || lifecycle.Status != scratch.AgentRunStatusRequested {
+		t.Fatalf("missing lifecycle ledger event: %#v", events)
 	}
-	if events[0].TokenUsage == nil || events[0].TokenUsage.OutputTokens != 654 {
-		t.Fatalf("ledger token usage mismatch: %#v", events[0].TokenUsage)
+	if lifecycle.TokenUsage == nil || lifecycle.TokenUsage.OutputTokens != 654 {
+		t.Fatalf("ledger token usage mismatch: %#v", lifecycle.TokenUsage)
 	}
-	if !strings.Contains(events[0].Summary, "functions.spawn_agent") {
-		t.Fatalf("ledger summary missing tool name: %#v", events[0])
+	if !strings.Contains(lifecycle.Summary, "functions.spawn_agent") {
+		t.Fatalf("ledger summary missing tool name: %#v", lifecycle)
+	}
+	descriptor := findLedgerEventKind(events, "ambient.task_descriptor")
+	if descriptor == nil || descriptor.Status != scratch.AgentRunStatusRequested {
+		t.Fatalf("missing descriptor ledger event: %#v", events)
 	}
 }
 
@@ -1365,6 +1370,144 @@ func TestCodexLifecycleRootMultiAgentToolMediumDoesNotAppendLedger(t *testing.T)
 	if len(events) != 0 {
 		t.Fatalf("ledger event count=%d want 0: %#v", len(events), events)
 	}
+}
+
+func TestCodexAmbientSpawnAgentAppendsTaskDescriptorAndStatus(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := codexTranscript(t, "xhigh")
+	out := runCodexAmbientHook(t, p, "functions.spawn_agent", map[string]any{
+		"agent_type": "tiller-worker",
+		"prompt":     "Implement descriptor-backed task list.\nKeep it scoped.",
+	})
+	if len(out) != 0 {
+		t.Fatalf("Codex allowed spawn_agent should stay silent, got %s", out)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	descriptor := findLedgerEventKind(events, "ambient.task_descriptor")
+	if descriptor == nil {
+		t.Fatalf("descriptor ledger event missing: %#v", events)
+	}
+	if descriptor.Backend != "codex" || descriptor.Status != scratch.AgentRunStatusRequested {
+		t.Fatalf("unexpected descriptor event: %#v", descriptor)
+	}
+	for _, want := range []string{"tiller-worker: Implement descriptor-backed task list.", "tool:spawn_agent", "agent_type:tiller-worker", "descriptor_id:", "objective_hash:"} {
+		if !ledgerEventContains(*descriptor, want) {
+			t.Fatalf("descriptor missing %q: %#v", want, descriptor)
+		}
+	}
+	status, err := os.ReadFile(filepath.Join(runDir, "status.md"))
+	if err != nil {
+		t.Fatalf("read status.md: %v", err)
+	}
+	got := string(status)
+	for _, want := range []string{"## Task Descriptors", "- total: 1", "- by_status: requested=1", "tiller-worker: Implement descriptor-backed task list.", "refs: tool:spawn_agent, agent_type:tiller-worker"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status.md missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestClaudeAmbientTaskAppendsTaskDescriptor(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_ROLE", "")
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := fableTranscript(t)
+	event := map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "Task",
+		"tool_input": map[string]any{
+			"subagent_type": "tiller-worker",
+			"description":   "Patch the renderer",
+			"prompt":        "Patch the renderer and run tests.",
+		},
+		"transcript_path": p,
+		"agent_id":        "",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := Run(strings.NewReader(string(data)), &out, workspace); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if decision := parseAmbientDecision(t, bytes.TrimSpace(out.Bytes())); decision != "allow" {
+		t.Fatalf("expected allow, got %q", decision)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	descriptor := findLedgerEventKind(events, "ambient.task_descriptor")
+	if descriptor == nil {
+		t.Fatalf("descriptor ledger event missing: %#v", events)
+	}
+	if descriptor.Backend != "claude-code" || descriptor.Status != scratch.AgentRunStatusRequested {
+		t.Fatalf("unexpected descriptor event: %#v", descriptor)
+	}
+	for _, want := range []string{"tiller-worker: Patch the renderer", "tool:Task", "agent_type:tiller-worker", "descriptor_id:", "objective_hash:"} {
+		if !ledgerEventContains(*descriptor, want) {
+			t.Fatalf("descriptor missing %q: %#v", want, descriptor)
+		}
+	}
+}
+
+func TestCodexAmbientMediumSpawnAgentDoesNotAppendTaskDescriptor(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := codexTranscript(t, "medium")
+	out := runCodexAmbientHook(t, p, "functions.spawn_agent", map[string]any{
+		"agent_type": "tiller-worker",
+		"prompt":     "Do work.",
+	})
+	if len(out) != 0 {
+		t.Fatalf("Codex medium spawn_agent should pass through silently, got %s", out)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	if findLedgerEventKind(events, "ambient.task_descriptor") != nil {
+		t.Fatalf("descriptor should not be appended for medium Codex: %#v", events)
+	}
+}
+
+func findLedgerEventKind(events []scratch.LedgerEvent, kind string) *scratch.LedgerEvent {
+	for i := range events {
+		if events[i].Kind == kind {
+			return &events[i]
+		}
+	}
+	return nil
+}
+
+func ledgerEventContains(ev scratch.LedgerEvent, value string) bool {
+	if strings.Contains(ev.Summary, value) {
+		return true
+	}
+	for _, ref := range ev.Refs {
+		if strings.Contains(ref, value) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCodexLifecycleWriteFailureDoesNotBlockContext(t *testing.T) {

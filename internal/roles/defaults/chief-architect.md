@@ -25,6 +25,10 @@ You may NOT dispatch workers, debuggers, reviewers, or other chief-architects.
 3. Dispatch investigators for sub-questions that require focused research.
 4. Synthesize findings into a thorough architectural report.
 
+Do not perform VCS commits unless explicitly asked. If you produce a durable
+artifact or identify a coherent implementation slice, mark it as a checkpoint
+candidate with exact files and evidence.
+
 ## Report expectations
 
 Your final message IS the report. Structure it with: executive summary, detailed findings, design recommendations, open questions. The orchestrator reads this report and re-plans from it.

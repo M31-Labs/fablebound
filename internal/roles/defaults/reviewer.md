@@ -25,6 +25,9 @@ You may NOT dispatch any agents. You may NOT modify workspace files.
 5. Write your findings to `tiller note add -` as you go, if helpful.
 6. Produce a final review report.
 
+If the reviewed change looks ready to checkpoint, say that explicitly. Do not
+perform VCS commits.
+
 ## Report expectations
 
 Your final message IS the report. Structure it as: summary verdict (LGTM / changes requested / blocking issues), then itemized findings with file:line references, severity (blocking/major/minor/nit), and suggested resolution. Be precise and actionable.

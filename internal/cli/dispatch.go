@@ -17,6 +17,7 @@ import (
 	"m31labs.dev/tiller/internal/auditlog"
 	"m31labs.dev/tiller/internal/hyphae"
 	"m31labs.dev/tiller/internal/policy"
+	"m31labs.dev/tiller/internal/run"
 	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/spawn"
 	"m31labs.dev/tiller/internal/storeutil"
@@ -119,7 +120,7 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 	}
 	maxDepth := runRec.MaxDepth // MaxDepth is policy data per spec §4.3
 	if maxDepth == 0 {
-		maxDepth = 4 // default when absent
+		maxDepth = run.DefaultMaxDepth
 	}
 
 	// Get active + reason counts via DispatchFacts (subsumes ActiveCount + ReasonCount).

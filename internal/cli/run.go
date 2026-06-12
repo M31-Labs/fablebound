@@ -12,6 +12,7 @@ import (
 	"m31labs.dev/tiller/internal/hyphae"
 	"m31labs.dev/tiller/internal/policy"
 	"m31labs.dev/tiller/internal/procutil"
+	"m31labs.dev/tiller/internal/run"
 	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/spawn"
 	"m31labs.dev/tiller/internal/storeutil"
@@ -37,7 +38,7 @@ func runRun(args []string) error {
 
 	var (
 		fableBudget = fs.Int("reason-budget", 2, "max reason-tier dispatches per run (default 2)")
-		maxDepth    = fs.Int("max-depth", 4, "max dispatch depth (spec §4.3; default 4)")
+		maxDepth    = fs.Int("max-depth", run.DefaultMaxDepth, "max dispatch depth (default 2)")
 		policyDir   = fs.String("policy-dir", "", "project directory override for policy loading")
 		storeFlag   = fs.String("store", "", "storage backend: fs|pg|tee (default: TILLER_STORE env or fs)")
 		dsnFlag     = fs.String("store-dsn", "", "PostgreSQL DSN for pg/tee backends (default: TILLER_STORE_DSN env)")

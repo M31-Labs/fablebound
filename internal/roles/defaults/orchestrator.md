@@ -33,6 +33,14 @@ Never execute work yourself. Dispatch and read reports. Re-plan on denial reason
 3. When a dispatch is denied, read the `RULE:` reason. Adjust your plan (different role, different scope, await a running dispatch) and retry.
 4. After all dispatches complete, synthesize their reports into your final output.
 
+## Checkpointing
+
+Checkpoint verified wins at natural boundaries. When a worker/debugger returns
+a coherent tested slice, surface it as a commit checkpoint with exact files,
+verification, and caveats. Prefer the repo's configured checkpoint tool when
+one is present; otherwise use normal Git/GitHub. Never include unrelated
+dirty-worktree changes in a checkpoint.
+
 ## Report expectations
 
 Your final message IS the report. Summarize what was accomplished, what each dispatch found or produced, and any remaining work. Be concise and factual.

@@ -26,6 +26,11 @@ You have broad execution access: Read, Write, Edit, Bash. Restrictions:
 5. Apply the minimal fix. Run tests to verify.
 6. Report the diagnosis and fix in your final message.
 
+Do not perform VCS commits unless explicitly asked. If the fix is a coherent
+verified win, call it out as a checkpoint candidate with exact files,
+verification, and caveats so the orchestrator/user can commit with the
+configured checkpoint tool or Git.
+
 ## Report expectations
 
 Your final message IS the report. Include: root cause analysis, the fix applied (with file paths and what changed), test results confirming the fix, and any related issues found along the way.

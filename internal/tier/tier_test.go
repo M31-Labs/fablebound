@@ -290,6 +290,135 @@ func TestAdapterSectionMissing(t *testing.T) {
 	}
 }
 
+func TestAmbientDefaultsParse(t *testing.T) {
+	cfg, err := tier.Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	claude := cfg.AmbientConfig("claude-code")
+	if claude == nil {
+		t.Fatal("AmbientConfig(\"claude-code\") returned nil")
+	}
+	if claude.Detector != "claude-jsonl-transcript" {
+		t.Errorf("claude detector = %q, want claude-jsonl-transcript", claude.Detector)
+	}
+	if got := claude.ModelTier("claude-fable-5"); got != "reason" {
+		t.Errorf("claude ModelTier(claude-fable-5) = %q, want reason", got)
+	}
+	if !claude.GovernsTier("reason") {
+		t.Error("claude ambient config should govern reason tier")
+	}
+	if claude.GovernsTier("execute") {
+		t.Error("claude ambient config should not govern execute tier")
+	}
+
+	codex := cfg.AmbientConfig("codex")
+	if codex == nil {
+		t.Fatal("AmbientConfig(\"codex\") returned nil")
+	}
+	if codex.Detector != "codex-jsonl-transcript" {
+		t.Errorf("codex detector = %q, want codex-jsonl-transcript", codex.Detector)
+	}
+	if got := codex.ModelTier("5.5 xhigh"); got != "reason" {
+		t.Errorf("codex ModelTier(5.5 xhigh) = %q, want reason", got)
+	}
+	if got := codex.ModelTier("gpt-5.5 xhigh"); got != "reason" {
+		t.Errorf("codex ModelTier(gpt-5.5 xhigh) = %q, want reason", got)
+	}
+	for _, model := range []string{"5.5 high", "5.5 medium", "5.5 low", "gpt-5.5 high", "gpt-5.5 medium", "gpt-5.5 low"} {
+		if got := codex.ModelTier(model); got != "execute" {
+			t.Errorf("codex ModelTier(%q) = %q, want execute", model, got)
+		}
+	}
+	if got := codex.ModelTier("5.5 unknown"); got != "other" {
+		t.Errorf("codex ModelTier(unknown) = %q, want other", got)
+	}
+}
+
+func TestAmbientProjectOverrideWins(t *testing.T) {
+	tmpDir := t.TempDir()
+	tillerDir := filepath.Join(tmpDir, ".tiller")
+	if err := os.MkdirAll(tillerDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	content := `[ambient.codex]
+detector = "codex-jsonl-transcript"
+govern_tiers = ["reason"]
+reason_models = ["5.5 xhigh"]
+execute_models = ["5.5 high"]
+`
+	if err := os.WriteFile(filepath.Join(tillerDir, "models.toml"), []byte(content), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg, err := tier.Load(tmpDir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	codex := cfg.AmbientConfig("codex")
+	if codex == nil {
+		t.Fatal("AmbientConfig(\"codex\") returned nil")
+	}
+	if got := codex.ModelTier("5.5 xhigh"); got != "reason" {
+		t.Errorf("ModelTier(5.5 xhigh) = %q, want reason", got)
+	}
+	if got := codex.ModelTier("5.5 medium"); got != "other" {
+		t.Errorf("override should replace codex execute aliases; got %q", got)
+	}
+
+	claude := cfg.AmbientConfig("claude-code")
+	if claude == nil || claude.ModelTier("fable") != "reason" {
+		t.Fatal("non-overridden claude ambient config should keep embedded defaults")
+	}
+}
+
+func TestAmbientSectionRequiresDetectorAndGovernTiers(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name: "missing_detector",
+			content: `[ambient.codex]
+govern_tiers = ["reason"]
+reason_models = ["5.5 xhigh"]
+`,
+			want: "no detector",
+		},
+		{
+			name: "missing_govern_tiers",
+			content: `[ambient.codex]
+detector = "codex-jsonl-transcript"
+reason_models = ["5.5 xhigh"]
+`,
+			want: "no govern_tiers",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			tillerDir := filepath.Join(tmpDir, ".tiller")
+			if err := os.MkdirAll(tillerDir, 0755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(tillerDir, "models.toml"), []byte(tc.content), 0644); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			_, err := tier.Load(tmpDir)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error should contain %q, got: %v", tc.want, err)
+			}
+		})
+	}
+}
+
 // TestAdapterSectionDefaults verifies that an [adapter.<name>] with only argv
 // gets sensible defaults (report="stdout", timeout="").
 func TestAdapterSectionDefaults(t *testing.T) {

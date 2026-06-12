@@ -1,64 +1,89 @@
 # tiller
 
-A harness that gates Claude Code sessions with compiled [Arbiter](https://github.com/odvcencio/arbiter) policies, enforces tier-cost discipline, and makes the reason-tier model's orchestrator-only role the default ambient experience.
+A governance layer for interactive coding agents with compiled [Arbiter](https://github.com/odvcencio/arbiter) policies, tier-cost discipline, and an orchestrator/executor split. Claude Code and Codex ambient mode are implemented today through backend-specific adapters.
+
+Tiller is not a model, not a new reasoning architecture, not a true Recursive Language Model (RLM) implementation, and not a security sandbox. It is RLM-inspired only in the loose harness sense: work can recurse through delegated agent tasks, but the recursion happens at the orchestration/control layer around existing interactive coding agents. Its value is practical control: keeping expensive reasoning sessions focused on orchestration, separating roles by cost and authority, gating tool use with policy, and leaving audit trails that can be inspected or replayed.
 
 ## Why
 
-Reason-tier tokens are expensive. When you have reason-tier access, the natural waste pattern is using it for mechanical execution — writing files, running commands, editing boilerplate. tiller prevents this structurally: the reason-tier model orchestrates and reasons; cheaper tiers (scrutiny, execute) do the work. In ambient mode this happens automatically inside your normal `claude` session without any project setup.
+Reason-tier tokens are expensive. When you have reason-tier access, the natural waste pattern is using it for mechanical execution - writing files, running commands, editing boilerplate. tiller prevents this structurally: the reason-tier model orchestrates and reasons; cheaper tiers do the work. The strongest path today is Claude Code, with Codex ambient support also implemented. Arbiter policies, Hyphae observability/promotion, and the deferred Horizon backstop are implementation choices and optional integrations, not claims of general agent ecosystem adoption or benchmarked reasoning improvements.
 
-## Quickstart: Ambient Mode (recommended)
+## Quickstart: Ambient Mode
 
-Ambient mode is the primary way to use tiller. It self-activates whenever your Claude Code session is running a reason-tier model and is completely invisible for every other model.
+Ambient mode self-activates whenever your agent session is running a configured reason-tier model and is completely invisible for every other model.
 
 ```sh
 # Install (requires Go 1.25+)
 go install m31labs.dev/tiller/cmd/tiller@latest
 
-# Install hooks and tiller-* subagent personas globally
+# Choose Claude Code, Codex, OpenCode, or all and install into the current project
 tiller install
 
 # Preview what would be installed without writing
-tiller install --print
+tiller install --backend codex --project --print
 
-# Install into the current project only (repo-local)
-tiller install --project
+# Automation-friendly explicit install
+tiller install --backend codex --project
 
-# Remove everything tiller installed
-tiller uninstall
+# Verify the project Codex ambient install end-to-end
+tiller codex doctor
+
+# User-scope install
+tiller install --backend claude-code --global
+
+# Remove the project Codex install
+tiller uninstall --backend codex --project
+
+# Preview the Codex removal without writing
+tiller uninstall --backend codex --project --print
+
+# Temporarily bypass ambient enforcement while testing
+tiller ambient disable
+tiller ambient enable
+tiller ambient next
+tiller ambient step --dry-run
+tiller ambient doctor
 ```
 
-**Trialing is safe.** `tiller uninstall` reverts everything tiller installed — hooks and tiller-* personas — in one shot. It works even from inside a gated fable session (the hook explicitly allows it). Your run history (`.tiller/` dirs in your projects) is never touched. Use `tiller uninstall --print` to preview exactly what would be removed before committing.
+**Trialing is safe.** `tiller uninstall --backend <name> --project` reverts the matching project install in one shot. For Codex that includes hooks, managed tiller-* personas, managed agent defaults, and generated Codex skills when they have not been locally edited. It works even from inside a gated fable session (the hook explicitly allows it). Your run history (`.tiller/` dirs in your projects) is never touched. Use `tiller uninstall --backend <name> --project --print` to preview exactly what would be removed before committing.
 
-`tiller install` does two things:
-1. Merges `PreToolUse` and `PostToolUse` hook entries into `~/.claude/settings.json`
-2. Writes the six tiller-* subagent persona files into `~/.claude/agents/`
+`tiller install` with no flags is intentionally project-local. It asks which agent harness config to install, then writes only under the current directory's agent config (`.codex/` or `.claude/`). Use explicit `--backend ... --global` only when you want user-scope install.
 
-Then, in any `claude` session:
+For Codex, the project install writes `PreToolUse`, `PostToolUse`, `SessionStart`, and `SubagentStart` hooks to `.codex/hooks.json`, the eight Codex custom agent personas to `.codex/agents/`, `.codex/config.toml` defaults of `features.multi_agent = true`, `[agents] max_threads = 12`, and `max_depth = 2`, plus project operating notes in `AGENTS.md` and Codex skills at `.codex/skills/using-tiller/SKILL.md` and `.codex/skills/using-sirena/SKILL.md`. Run `tiller codex doctor` from the project root after install to verify hooks, config, agents, skills, bypass state, and Codex hook smoke checks.
+
+For OpenCode, the project install writes `opencode.json` with a managed instruction reference, `.opencode/tiller.md` operating notes, and OpenCode markdown agents under `.opencode/agents/`. Use the `tiller-orchestrator` primary agent for the root orchestration path and the `tiller-*` subagents for execution, debugging, investigation, review, and synthesis.
+
+`tiller ambient disable` creates `.tiller/ambient.disabled` in the current project. While that marker exists, ambient hooks pass through silently. `tiller ambient enable` removes it. `tiller ambient status` reports the marker and, inside a run, points to the current `status.md` and next action. `tiller ambient next` prints a compact run-control digest from scratch state. `tiller ambient step --dry-run` emits the current Arbiter next action as a portable descriptor packet for an orchestrator; it is observational only and does not spawn agents, edit files, commit, or mutate checkpoint state. `tiller ambient doctor` verifies the live ambient runtime, source/binary drift, bypass state, classifier allowlist, and hook policy smoke behavior. `TILLER_AMBIENT_DISABLED=1` is also honored as a process-local bypass.
+
+For Claude Code, then in any `claude` session:
 
 ```
 /model fable
 ```
 
-Ambient mode engages immediately. The fable root is restricted to orchestration-only tools — with targeted carve-outs described below. Execution is automatically delegated to tiller-* subagents on cheaper models.
+Ambient mode engages immediately. The fable root is restricted to orchestration-only tools - with targeted carve-outs described below. Execution is automatically delegated to tiller-* subagents on cheaper models.
 
-**How it works.** The installed `PreToolUse` hook reads the session transcript to find the model of the most recent assistant turn. The transcript is read backward from EOF so detection costs ~0.5 ms even on 50 MB files. If that model maps to the reason tier (`claude-fable-5` or `fable`), the hook evaluates `ambient.arb` — the orchestrator-only policy. For any other model the hook exits 0 immediately. Subagent calls (where `agent_id` is present) pass through unconditionally.
+For Codex, open or restart a Codex session in the installed project so Codex loads the project `.codex/` config, hooks, and custom agents. Codex remains silent at startup unless `SessionStart` can prove the root session maps to a governed tier, such as `gpt-5.5 xhigh`, from the hook payload or transcript. When that proof exists, `SessionStart` adds the Tiller operating context up front. `SubagentStart` adds role-specific context for each `tiller-*` agent. For OpenCode, open or restart OpenCode in the installed project and switch to the `tiller-orchestrator` primary agent.
 
-**Fail-open.** Any error reading the transcript (missing path, no assistant line, unreadable file) causes the hook to exit 0. It never blocks a non-reason-tier session. Model switches (e.g. `/model sonnet` → `/model fable`) are tracked live via the transcript.
+**How it works.** The installed `PreToolUse` hook reads the session transcript to find the model of the most recent assistant turn. The transcript is read backward from EOF so detection costs ~0.5 ms even on 50 MB files. If that model maps to a governed tier in `models.toml` (`reason` by default), the hook evaluates `ambient.arb` - the orchestrator-only policy. For any other model the hook exits 0 immediately. Subagent calls (where `agent_id` is present) pass through unconditionally.
+
+**Fail-open.** Any error reading the transcript (missing path, no assistant line, unreadable file) causes the hook to exit 0. It never blocks a non-reason-tier session. Model switches (e.g. `/model sonnet` to `/model fable`) are tracked live via the transcript.
 
 **What the ambient orchestrator can do.** The ambient policy is not fully read-only. The following carve-outs apply to the root reason-tier session (ground truth: `internal/policy/defaults/ambient.arb`):
 
 | Carve-out rule | What is permitted |
 |---|---|
-| `AllowReadOnlyBash` | Read-only Bash: `git log`, `ls`, `cat`, `gts *`, `hypha recall` (including `\| head` pipelines via `2>&1`), and equivalent read commands. Unquoted `>`, `>>`, `` ` ``, `$(` → denied. |
-| `AllowMarkdownAuthoring` | `Write`/`Edit` on `*.md` paths — specs, plans, prompts, directives, briefs, code-in-docs. Code files, notebooks, no-extension paths → denied. |
-| `AllowOrchestrationTools` | `ToolSearch`, `Skill`, `AskUserQuestion`, `EnterPlanMode`/`ExitPlanMode`, and `TaskCreate`/`TaskGet`/`TaskList`/`TaskUpdate`/`TaskOutput`/`TaskStop`. |
+| `AllowReadOnlyBash` | Read-only Bash: `git log`, `ls`, `cat`, `gts *`, `hypha recall` (including `\| head` pipelines via `2>&1`), and equivalent read commands. Unquoted `>`, `>>`, `` ` ``, `$(` are denied. |
+| `AllowMarkdownAuthoring` | `Write`/`Edit` on `*.md` paths - specs, plans, prompts, directives, briefs, code-in-docs. Code files, notebooks, no-extension paths are denied. |
+| `AllowOrchestrationTools` | `ToolSearch`, `Skill`, `AskUserQuestion`, `EnterPlanMode`/`ExitPlanMode`, `TaskCreate`/`TaskGet`/`TaskList`/`TaskUpdate`/`TaskOutput`/`TaskStop`, and Codex multi-agent tools such as `spawn_agent`, `send_input`, `resume_agent`, `wait_agent`, and `close_agent`. |
+| `AllowPermittedBash` | Also allows constrained `codex exec` delegation when the command pins `gpt-5.5`, sets `model_reasoning_effort` to `xhigh`, `high`, or `medium`, avoids dangerous sandbox bypasses, and writes optional reports only under `.tiller/`. `xhigh` requires `--sandbox read-only`. |
 
 Everything else (mutations to code files, running commands, launching daemons) stays denied. `DenyHyphaDaemons` explicitly blocks `hypha mcp serve` and `hypha hub serve` regardless of classifier output.
 
 **Subagent model guards.** Two rules protect against silent reason-tier budget leak in `Task`/`Agent` dispatches:
 
-- `DenyReasonModelSubagent` — blocks any `Task`/`Agent` call that carries an explicit reason-tier model override for a persona that is not `tiller-architect` or `tiller-deep-report`. Pass a cheaper model or pick the right persona.
-- `DenyImplicitReasonInheritance` — blocks generic subagent types (`general-purpose`, `claude`, `Explore`, `Plan`, or blank) with no explicit model field; in a reason-tier ambient session these silently inherit the parent model. Either name a cheaper model explicitly or use a named `tiller-*` persona whose frontmatter pins the model.
+- `DenyReasonModelSubagent` - blocks any `Task`/`Agent` call that carries an explicit reason-tier model override for an execution persona. Reason-tier overrides are reserved for `tiller-architect`, `tiller-deep-report`, `tiller-investigator`, and `tiller-reviewer`.
+- `DenyImplicitReasonInheritance` - blocks generic subagent types (`general-purpose`, `claude`, `Explore`, `Plan`, or blank) with no explicit model field; in a reason-tier ambient session these silently inherit the parent model. Either name a cheaper model explicitly or use a named `tiller-*` persona whose frontmatter pins the model.
 
 ## Upgrading
 
@@ -68,11 +93,11 @@ tiller hooks exec the binary fresh on every tool call and the ambient policy is 
 go install m31labs.dev/tiller/cmd/tiller@latest
 ```
 
-All running ambient sessions pick up the new binary and policy on their next tool call — **no session restart needed** for policy changes.
+All running ambient sessions pick up the new binary and policy on their next tool call - **no session restart needed** for policy changes.
 
 Exceptions that do require a session restart:
-- Hook re-registration (if the hook entry format changes) — run `tiller install` again.
-- Persona file changes — run `tiller install` again to redeploy `~/.claude/agents/tiller-*.md`.
+- Hook re-registration (if the hook entry format changes) - run `tiller install` again for the current project, or use explicit `--backend ... --project`.
+- Persona file changes - run install again to redeploy `~/.claude/agents/tiller-*.md` or `.codex/agents/tiller-*.toml`.
 
 The executor pool (`tiller pool`) must be restarted to pick up a new binary.
 
@@ -82,20 +107,64 @@ When the reason-tier root delegates via the Agent/Task tool, these personas rout
 
 | Persona | Model | Tier | Use for |
 |---|---|---|---|
+| `tiller-summary` | haiku | execute | Status compaction, distilled ambient state, run ledger summaries, stale/late report triage, checkpoint candidate synthesis |
 | `tiller-worker` | sonnet | execute | Writing/editing code, running builds and tests, all file-mutating work |
-| `tiller-debugger` | sonnet | execute | Systematic debugging — root-cause, fix, verify |
+| `tiller-debugger` | sonnet | execute | Systematic debugging - root-cause, fix, verify |
 | `tiller-investigator` | opus | scrutiny | Deep read-only investigation, code tracing, adversarial verification |
-| `tiller-reviewer` | opus | scrutiny | Code review — correctness, security, quality |
+| `tiller-reviewer` | opus | scrutiny | Code review - correctness, security, quality |
 | `tiller-architect` | fable | reason | Architectural specs, deep design, complex trade-off analysis |
 | `tiller-deep-report` | fable | reason | Exhaustive multi-source research reports |
 
-The deny reason when a reason-tier model tries to execute directly: `"tiller: ambient orchestrator runs in read/dispatch mode — delegate with the Task tool: code changes → tiller-worker, debugging → tiller-debugger, investigation → tiller-investigator, review → tiller-reviewer; reserve tiller-architect/tiller-deep-report for deep design and research. {tool.name} is not permitted for the root orchestrator agent."` — this steers the orchestrator toward the right persona without a second prompt.
+Claude Code deny reasons mention the Task tool. Codex deny reasons are Codex-native: the root can read/search directly, execution or mutation should use `spawn_agent` with the right `agent_type`, then `wait_agent`/`close_agent`.
 
-**Enforcement layering.** Ambient mode governs the root reason-tier session only. Subagents spawned via Task are unaffected by ambient policy — they pass through. Their model is baked into the persona frontmatter (`model: sonnet`/`opus`/`fable`), which is the primary cost lever in ambient mode.
+**Enforcement layering.** Ambient mode governs the root reason-tier session only. Subagents spawned via Task are unaffected by ambient policy; they pass through. Their model is baked into the persona frontmatter (`model: sonnet`/`opus`/`fable`), which is the primary cost lever in ambient mode.
+
+## Codex Operating Profile
+
+Codex has the same shape: a root interactive thread, lifecycle hooks, custom agents, model plus reasoning-effort settings, managed configuration, and discoverable project instructions. The project installer generates Codex agents in `.codex/agents/`, hooks in `.codex/hooks.json`, `AGENTS.md` instructions, plus `using-tiller` and `using-sirena` skills so Codex can use the technique immediately when `tiller` is on PATH:
+
+| Agent | Codex model settings | Tier | Use for |
+|---|---|---|---|
+| `tiller-scout` | `gpt-5.4-mini`, `model_reasoning_effort = "medium"`, read-only | scout | Cheap bounded reconnaissance, inventories, docs/log snippets, simple summaries |
+| `tiller-summary` | `gpt-5.3-codex-spark`, `model_reasoning_effort = "high"`, read-only | scrutiny | Fast status/distillation/checkpoint/commit-prep, run ledger summaries, stale/late report triage, checkpoint candidate synthesis |
+| `tiller-worker` | `gpt-5.5`, `model_reasoning_effort = "medium"` | execute | Bounded implementation, edits, builds, tests |
+| `tiller-debugger` | `gpt-5.5`, `model_reasoning_effort = "high"` | execute | Root-cause analysis, fixes, verification |
+| `tiller-investigator` | `gpt-5.5`, `model_reasoning_effort = "xhigh"`, read-only | reason | Deep investigation and adversarial verification |
+| `tiller-reviewer` | `gpt-5.5`, `model_reasoning_effort = "xhigh"`, read-only | reason | Code review, correctness, security, missing tests |
+| `tiller-architect` | `gpt-5.5`, `model_reasoning_effort = "xhigh"` | reason | Architecture, design, trade-off analysis |
+| `tiller-deep-report` | `gpt-5.5`, `model_reasoning_effort = "xhigh"` | reason | Multi-source research and synthesis |
+
+The Codex operating rule is to right-size the agent before spending reasoning budget: root reads/searches directly and makes routing decisions; `tiller-scout` stays on `gpt-5.4-mini` for cheap reconnaissance; `tiller-summary` uses `gpt-5.3-codex-spark` high, read-only, for fast status compaction, distilled ambient state, checkpoint summaries, and commit-prep briefs; `tiller-worker` uses `gpt-5.5 medium`; `tiller-debugger` uses `gpt-5.5 high`; investigator/reviewer/architect/deep-report use `gpt-5.5 xhigh` for high-stakes reasoning, review, and synthesis. `tiller hook --backend codex` reads Codex `turn_context` transcript lines, normalizes `model + effort` into aliases such as `gpt-5.5 xhigh`, and applies ambient policy only for governed tiers. For Codex `PreToolUse`, allow decisions are silent and deny decisions use Codex hook output with `spawn_agent`/`wait_agent`/`close_agent` guidance.
+
+Codex `SessionStart` returns `additionalContext` before any denial is needed only when the session is proven governed. If ambient is active, it reminds the root that reads/searches are direct, `status.md` should be read first for `Distillation` and `Arbiter Next Action`, with `Recommended Next Actions` preserved as legacy/fallback context; cheap reconnaissance can go to `tiller-scout`, fast Spark status/checkpoint/commit-prep can go to `tiller-summary`, and execution routes through `spawn_agent`. If `.tiller/ambient.disabled` or `TILLER_AMBIENT_DISABLED=1` disables ambient, that governed startup context says normal tools are allowed. Without governed/xhigh proof, `SessionStart` exits silently so Codex ambient activation stays invisible to non-governed sessions. Codex `SubagentStart` returns role-specific `additionalContext` for scout, summary, worker/debugger, investigator/reviewer, architect/deep-report, and unknown `tiller-*` agent types; it never blocks startup.
+
+Ambient run directories include a generated `status.md` snapshot beside `ledger.jsonl` when lifecycle, descriptor, result, distillation, or usage ledger events are observed. Outside managed runs, governed Codex lifecycle observations can append to `.tiller/scratch/codex/ambient-ledger.jsonl`; managed runs still use `status.md` and `ledger.jsonl`. It is derived from `manifest.json`, dispatch metadata, agent lifecycle records, checkpoint candidates, and the ledger. Governed root `Task`/`Agent` and Codex `spawn_agent` dispatch requests are captured as backend-neutral `ambient.task_descriptor` ledger events and rendered into a `## Task Descriptors` section so `tiller-summary` can read compact run state before opening raw records. Repeated attempts keep the same `descriptor_id` for logical rollup and add distinct `attempt_id` refs for per-attempt traceability. Root `PostToolUse` results reconcile descriptor-compatible reports into best-effort agent runs, `ambient.task_result` ledger events, proposed checkpoint candidates, and `ambient.distillation` ledger events when reports include `Distillation`, `Distilled State`, or `Reusable Context`. `status.md` renders `## Distillation` as reusable compressed state the orchestrator should read before raw logs or transcripts. `## Arbiter Next Action` evaluates compact scratch facts through the `ambient_next_action` policy and emits one advisory action, confidence, risk, reason, target, and budget posture; if policy evaluation fails in a plain render path, status uses a deterministic fallback and marks it. `## Stale/Late Work` highlights late, stale, superseded, late-valid, late-stale, and conflicting work for cheap triage. `## Recommended Next Actions` remains as legacy/fallback deterministic context for triage, checkpoint review, compaction, waiting, or proceeding. Optional advisory spend bands are configured with `TILLER_AMBIENT_OUTPUT_TOKEN_BUDGET`, `TILLER_AMBIENT_REASONING_TOKEN_BUDGET`, and `TILLER_AMBIENT_BUDGET_WARN_RATIO`; they are visibility-only and do not deny hooks.
+
+Use `.tiller/scratch/codex/` as the shared ambient Codex scratch path for terse handoff notes, reports, and claims. Root may write notes there for subagents; subagents should read relevant notes first when present and write final reports or handoff notes there when useful.
+
+Checkpointing is part of the workflow for ambient installs. At natural verified boundaries, agents should surface a checkpoint with exact changed files, verification, and caveats. Prefer the repo's configured checkpoint tool when one is present; otherwise use normal Git/GitHub. Stage explicit paths, inspect the diff, and never commit unrelated dirty-worktree changes.
+
+The root Codex orchestrator should read directly: file reads, searches, and
+safe read-only shell inspection do not require a subagent. Delegate when the
+work becomes mutation, build/test execution, debugging, deep investigation, or
+review.
+
+Codex orchestrator artifacts should be terse, direct, and explicit: concrete
+paths, commands, diagnostics, decisions, and next actions over broad prose.
+
+From a gated Claude/Fable ambient root, Codex can also be used as a CLI delegation target:
+
+```sh
+codex exec -m gpt-5.5 -c model_reasoning_effort=medium "make a bounded edit and report back"
+codex exec -m gpt-5.5 -c model_reasoning_effort=xhigh --sandbox read-only \
+  --output-last-message .tiller/reports/review.md "review the current diff"
+```
+
+This is intentionally a narrow test bridge. A generalized harness adapter can provide a broader provider/runtime abstraction later.
 
 ## Tiers & Model Routing
 
-tiller speaks three tiers throughout — policies route on them, audit logs record them, and the persona table maps to them:
+tiller speaks three tiers throughout - policies route on them, audit logs record them, and the persona table maps to them:
 
 | Tier | Role in the system | Default candidate |
 |---|---|---|
@@ -114,15 +183,34 @@ candidates = ["claude-headless:anthropic/opus"]
 
 [tiers.execute]
 candidates = ["claude-headless:anthropic/sonnet", "claude-headless:anthropic/haiku"]
+
+[ambient.claude-code]
+detector = "claude-jsonl-transcript"
+govern_tiers = ["reason"]
+reason_models = ["fable", "claude-fable-5"]
+scrutiny_models = ["opus", "claude-opus-4-8"]
+execute_models = ["sonnet", "claude-sonnet-4-5", "haiku", "claude-haiku-4-5"]
+
+[ambient.codex]
+detector = "codex-jsonl-transcript"
+govern_tiers = ["reason"]
+reason_models = ["5.5 xhigh", "gpt-5.5 xhigh"]
+execute_models = ["5.5 high", "5.5 medium", "5.5 low", "gpt-5.5 high", "gpt-5.5 medium", "gpt-5.5 low"]
 ```
 
 Each candidate is `adapter:provider/model`. The first candidate that resolves wins; haiku serves as a canary or fallback for the execute tier.
 
-Command (non-Claude) backends use the `command` adapter — see [Non-Claude Backends](#non-claude-backends) below.
+Command (non-Claude) backends use the `command` adapter - see [Non-Claude Backends](#non-claude-backends) below.
+
+`[ambient.<backend>]` sections are for interactive ambient sessions. They map backend-specific model strings to tiller tier labels before policy evaluation. Claude Code reads root assistant model IDs from its JSONL transcript. Codex reads the hook payload plus transcript `turn_context` and normalizes `gpt-5.5` with `xhigh` into the alias `gpt-5.5 xhigh` (or the shorthand `5.5 xhigh`) before policy evaluation.
+
+For Claude Code installs, `tiller install` renders the `model:` frontmatter in the `tiller-*` personas from `[ambient.claude-code]`: worker/debugger use the execute alias, architect/deep-report use the reason alias, and investigator/reviewer use the scrutiny alias when present or the reason alias otherwise. This keeps persona routing configurable without editing embedded markdown templates.
+
+For Codex, `tiller install --backend codex --project` writes the equivalent `.codex/agents/*.toml` files, `.codex/hooks.json`, `.codex/config.toml`, `AGENTS.md` operating notes, `.codex/skills/using-tiller/SKILL.md`, and `.codex/skills/using-sirena/SKILL.md` with subagent limits of 12 concurrent threads and max depth 2.
 
 ## Managed Mode: `tiller run` (optional)
 
-`tiller run` is the heavyweight alternative: it spawns agents as separate `claude -p` processes, enforces dispatch depth, writes full audit trails, and creates a run artifact tree. Use it when you need replayable audits, process-tree isolation, or the full dispatch → report → promote workflow.
+`tiller run` is the heavyweight alternative: it spawns agents as separate `claude -p` processes, enforces dispatch depth, writes full audit trails, and creates a run artifact tree. Use it when you need replayable audits, process-tree isolation, or the full dispatch -> report -> promote workflow.
 
 ```sh
 # Initialize a project (materializes .tiller/policy/*.arb and roles/*.md)
@@ -133,7 +221,7 @@ tiller init
 tiller run "investigate why the payment retry queue is backing up and write a findings report"
 
 # Flags
-tiller run --reason-budget 3 --max-depth 3 "my task"
+tiller run --reason-budget 3 --max-depth 2 "my task"
 tiller run --store tee --store-dsn postgres://user:pass@host/db "my task"
 
 # Inspect the run
@@ -150,27 +238,27 @@ tiller promote <run-id>
 
 ```
 user: tiller run "<task>"
- └─ tiller (root CLI)
-     ├─ creates .tiller/runs/<run-id>/
-     ├─ spawns orchestrator: claude -p <task> --model fable \
-     │          --settings <generated> --permission-mode dontAsk \
-     │          --append-system-prompt roles/orchestrator.md
-     │  (env: TILLER_ROLE=orchestrator, TILLER_DEPTH=0,
-     │        TILLER_RUN_DIR, TILLER_DISPATCH_ID=root)
-     │
-     │  every tool call ──▶ PreToolUse hook: tiller hook
-     │                       └─ toolgate.arb → allow/deny + audit
-     │
-     │  orchestrator runs: Bash(tiller dispatch --role investigator ...)
-     │    └─ tiller dispatch (child CLI invocation in the claude process)
-     │        ├─ builds DispatchRequest → dispatch.arb (rules gate + strategy route)
-     │        ├─ DENIED → exit 3, policy reason on stderr (orchestrator re-plans)
-     │        └─ ALLOWED → writes dispatches/<id>/{brief.md,settings.json,meta.json}
-     │            └─ spawns detached tiller _supervise <run> <id>
-     │                └─ execs claude -p --model <tier-resolved model> --output-format json
-     │                    captures report.md, finalizes meta.json
-     │
-     └─ depth-1 agents can dispatch further; depth-2 agents are terminal
+ -- tiller (root CLI)
+     -- creates .tiller/runs/<run-id>/
+     -- spawns orchestrator: claude -p <task> --model fable \
+     |          --settings <generated> --permission-mode dontAsk \
+     |          --append-system-prompt roles/orchestrator.md
+     |  (env: TILLER_ROLE=orchestrator, TILLER_DEPTH=0,
+     |        TILLER_RUN_DIR, TILLER_DISPATCH_ID=root)
+     |
+     |  every tool call --> PreToolUse hook: tiller hook
+     |                       -- toolgate.arb -> allow/deny + audit
+     |
+     |  orchestrator runs: Bash(tiller dispatch --role investigator ...)
+     |    -- tiller dispatch (child CLI invocation in the claude process)
+     |        -- builds DispatchRequest -> dispatch.arb (rules gate + strategy route)
+     |        -- DENIED -> exit 3, policy reason on stderr (orchestrator re-plans)
+     |        -- ALLOWED -> writes dispatches/<id>/{brief.md,settings.json,meta.json}
+     |            -- spawns detached tiller _supervise <run> <id>
+     |                -- execs claude -p --model <tier-resolved model> --output-format json
+     |                    captures report.md, finalizes meta.json
+     |
+     -- depth-1 agents can dispatch further; depth-2 agents are terminal
         (dispatch.arb DenyTerminalDepth, toolgate DenyTerminalDispatch,
          generated settings replace Bash(tiller *) with Bash(tiller note *))
 ```
@@ -186,7 +274,7 @@ user: tiller run "<task>"
 | Depth | Flat (subagents cannot spawn subagents) | Up to configurable depth (`--max-depth`) |
 | Model routing | Persona frontmatter | `dispatch.arb` strategy rules + `models.toml` |
 
-## Managed Mode: Role × Tier Matrix
+## Managed Mode: Role x Tier Matrix
 
 | Role | Tier | Profile | Edit/Write | Bash | May dispatch |
 |---|---|---|---|---|---|
@@ -207,7 +295,7 @@ For workloads where dispatches should not block the caller, tiller supports a qu
 ```sh
 # Queue a dispatch (returns dispatch id immediately, no spawn)
 tiller dispatch --queue --role worker --tier execute --brief "do the thing"
-# → prints dispatch id (e.g. d01) and exits 0
+# -> prints dispatch id (e.g. d01) and exits 0
 
 # Run the executor pool (host-managed singleton)
 tiller pool
@@ -257,7 +345,7 @@ role .md (cooperative)
   < settings deny (removes tools from context)
     < PreToolUse hook + toolgate.arb (re-checks every call, flock-serialized audit JSONL)
       < dispatch.arb (gates every dispatch request with identity from env)
-        < [future] Horizon LSM exec-deny profile (kernel-level, see §Appendix)
+        < [future] Horizon LSM exec-deny profile (kernel-level, see section Appendix)
 ```
 
 **Ambient mode** adds one enforcement point at the top of the root reason-tier session. It governs only the root; subagents pass through. **Managed mode** applies toolgate at every level.
@@ -268,7 +356,7 @@ role .md (cooperative)
 
 ## Policy Customization
 
-Policies live in `.tiller/policy/{dispatch.arb,toolgate.arb}`. Defaults are embedded and materialized by `tiller init`; the project copy wins.
+Policies live in `.tiller/policy/{dispatch.arb,toolgate.arb,ambient.arb,ambient_next_action.arb}`. Defaults are embedded and materialized by `tiller init`; the project copy wins.
 
 ```sh
 # Compile + schema-typecheck policies
@@ -293,7 +381,7 @@ arbiter replay .tiller/policy/toolgate.arb \
   notes/                             # shared scratch
   dispatches/
     root/                            # orchestrator
-    d01/, d02/, …/
+    d01/, d02/, .../
       brief.md  report.md  settings.json  meta.json
       tool_trace.jsonl  context_trace.jsonl  transcript.json  supervise.log
 ```
@@ -304,15 +392,21 @@ tiller runs show <run-id>
 tiller runs gc --keep 20 [--dry-run]
 ```
 
-## Storage Backends
+## Scratch Space & Storage
 
-tiller writes run artifacts (manifest, dispatches, audit logs) to a configurable storage backend. Three backends are available:
+tiller is filesystem-first. By default it writes every run artifact to `.tiller/runs/<id>/` and requires no database, daemon, account, bucket, or network service. The run directory is the scratch space: briefs, reports, per-dispatch metadata, hook settings, audit JSONL, tool traces, context traces, and notes all live there in a layout that can be inspected with normal shell tools and replayed by Arbiter.
+
+That local layout is also the enforcement anchor. Hooks verify identity and evaluate toolgate policy from the local run tree; they do not dial a database or object store. Remote or queryable backends should mirror the scratch bus, not replace the hot-path files.
+
+The current store implementations are:
 
 | Backend | Flag/Env | Description |
 |---------|----------|-------------|
 | `fs` (default) | `--store fs` | Writes to `.tiller/runs/<id>/` on disk. No DSN required. |
 | `pg` | `--store pg` | Writes to PostgreSQL. Requires `--store-dsn` / `TILLER_STORE_DSN`. |
-| `tee` | `--store tee` | Writes to both fs and pg. **Rollout mode.** |
+| `tee` | `--store tee` | Writes to fs synchronously and mirrors to pg asynchronously. **Rollout mode.** |
+
+PostgreSQL is optional. It is useful when you need a shared multi-host scratch bus, central SQL queries, or long-lived infrastructure integration. Most users should start with `fs`.
 
 **Selecting a backend:**
 
@@ -324,7 +418,7 @@ tiller run --store tee --store-dsn postgres://user:pass@host/db "my task"
 TILLER_STORE=tee TILLER_STORE_DSN=postgres://... tiller run "my task"
 ```
 
-Resolution order: `--store` flag → `TILLER_STORE` env → default `fs`.
+Resolution order: `--store` flag -> `TILLER_STORE` env -> default `fs`.
 
 **Tee rollout semantics.** In `tee` mode, fs is authoritative:
 - Every write goes to fs first, synchronously. Error semantics are identical to `fs` alone.
@@ -333,6 +427,12 @@ Resolution order: `--store` flag → `TILLER_STORE` env → default `fs`.
 - `Close` (called at end of `tiller run`) drains the mirror queue before returning.
 
 **Hot-path guard.** When `TILLER_RUN_DIR` is set (hook and child dispatch invocations), the store is always opened as `fs` regardless of `TILLER_STORE`/`TILLER_STORE_DSN`. The toolgate evaluates policy locally and must never touch the network.
+
+**Pluggable store shape.** All backends implement `scratch.Store`: run lifecycle, dispatch allocation, brief/report documents, notes, adapter config, trace append, audit sinks, materialization, rendered trees, summaries, and pool lease operations. That interface is deliberately compatible with local mirrors and remote stores:
+
+- SQLite is a natural next backend for local queryable logs: a single `.tiller/tiller.sqlite` mirror with no server, while fs remains the enforcement authority.
+- S3 or object storage is a natural artifact mirror: run records as keys, JSONL append streams as objects, and local materialization before adapter execution.
+- PostgreSQL remains the shared relational backend for multi-host pools and centralized dashboards.
 
 **DSN.** The DSN is a standard PostgreSQL connection string:
 
@@ -358,12 +458,12 @@ arbiter replay .tiller/policy/toolgate.arb \
 | Variable | Default | Description |
 |---|---|---|
 | `TILLER_CLAUDE_BIN` | `claude` | Path to the `claude` CLI binary |
-| `TILLER_ROLE` | — | Agent role; set by tiller at spawn |
+| `TILLER_ROLE` | - | Agent role; set by tiller at spawn |
 | `TILLER_DEPTH` | `0` | Spawn depth; set by tiller at spawn |
-| `TILLER_RUN_DIR` | — | Absolute path to the run scratch directory |
-| `TILLER_DISPATCH_ID` | — | Dispatch id of the current agent |
+| `TILLER_RUN_DIR` | - | Absolute path to the run scratch directory |
+| `TILLER_DISPATCH_ID` | - | Dispatch id of the current agent |
 | `TILLER_STORE` | `fs` | Storage backend: `fs`\|`pg`\|`tee` |
-| `TILLER_STORE_DSN` | — | PostgreSQL DSN (required for `pg` and `tee` backends) |
+| `TILLER_STORE_DSN` | - | PostgreSQL DSN (required for `pg` and `tee` backends) |
 
 ## Hyphae Integration
 

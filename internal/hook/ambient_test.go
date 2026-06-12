@@ -23,6 +23,7 @@ package hook
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,6 +31,9 @@ import (
 	"testing"
 
 	"m31labs.dev/tiller/internal/adapter/claudecode"
+	"m31labs.dev/tiller/internal/ambientgate"
+	"m31labs.dev/tiller/internal/scratch"
+	"m31labs.dev/tiller/internal/scratch/fsstore"
 )
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -335,6 +339,66 @@ func TestAmbientFableAllowRead(t *testing.T) {
 	}
 }
 
+func TestAmbientUsesProjectPolicyOverride(t *testing.T) {
+	workspace := t.TempDir()
+	policyDir := filepath.Join(workspace, ".tiller", "policy")
+	if err := os.MkdirAll(policyDir, 0o755); err != nil {
+		t.Fatalf("mkdir policy dir: %v", err)
+	}
+	const distinctiveReason = "project ambient override denied root Read"
+	override := `
+rule DenyProjectRead priority 1 {
+    when { tool.name == "Read" }
+    then Deny { reason: "` + distinctiveReason + `" }
+}
+`
+	if err := os.WriteFile(filepath.Join(policyDir, "ambient.arb"), []byte(override), 0o644); err != nil {
+		t.Fatalf("write ambient override: %v", err)
+	}
+
+	transcript := filepath.Join(workspace, "t.jsonl")
+	line := `{"type":"assistant","isSidechain":false,"message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(line), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	event := map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "Read",
+		"tool_input":      map[string]any{"file_path": filepath.Join(workspace, "foo.go")},
+		"transcript_path": transcript,
+		"agent_id":        "",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("TILLER_ROLE", old)
+		}
+	})
+
+	var out bytes.Buffer
+	if err := Run(strings.NewReader(string(data)), &out, workspace); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	outBytes := bytes.TrimSpace(out.Bytes())
+	if len(outBytes) == 0 {
+		t.Fatal("expected ambient policy decision, got passthrough")
+	}
+	if decision := parseAmbientDecision(t, outBytes); decision != "deny" {
+		t.Fatalf("decision = %q, want deny; raw output: %s", decision, outBytes)
+	}
+	reason := parseDecisionReason(t, outBytes)
+	if !strings.Contains(reason, "DenyProjectRead") || !strings.Contains(reason, distinctiveReason) {
+		t.Fatalf("override reason not used; got %q", reason)
+	}
+}
+
 // ─── Ambient deny reason: no vendor tokens, correct persona list ──────────────
 
 // runAmbientHookWithTranscriptFull returns the full decoded output including
@@ -440,6 +504,225 @@ func fableTranscript(t *testing.T) string {
 	return p
 }
 
+func fableTranscriptWithUsage(t *testing.T, inputTokens, outputTokens int) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "t.jsonl")
+	line := fmt.Sprintf(`{"type":"assistant","isSidechain":false,"message":{"model":"claude-fable-5","role":"assistant","usage":{"input_tokens":%d,"output_tokens":%d},"content":[{"type":"text","text":"hi"}]}}`+"\n", inputTokens, outputTokens)
+	if err := os.WriteFile(p, []byte(line), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	return p
+}
+
+func codexTranscript(t *testing.T, effort string) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "codex.jsonl")
+	line := `{"type":"turn_context","payload":{"model":"gpt-5.5","effort":"` + effort + `"}}` + "\n"
+	if err := os.WriteFile(p, []byte(line), 0o644); err != nil {
+		t.Fatalf("write Codex transcript: %v", err)
+	}
+	return p
+}
+
+func codexTranscriptWithUsage(t *testing.T, effort string, outputTokens int) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "codex.jsonl")
+	lines := `{"type":"turn_context","payload":{"model":"gpt-5.5","effort":"` + effort + `"}}` + "\n" +
+		`{"type":"turn_end","payload":{"usage":{"output_tokens":` + fmt.Sprint(outputTokens) + `}}}` + "\n"
+	if err := os.WriteFile(p, []byte(lines), 0o644); err != nil {
+		t.Fatalf("write Codex transcript: %v", err)
+	}
+	return p
+}
+
+func makeAmbientLifecycleRunDir(t *testing.T, workspace string) string {
+	t.Helper()
+	runID := "20260101-000000-codex"
+	runDir := filepath.Join(workspace, ".tiller", "runs", runID)
+	for _, sub := range []string{"audit", "notes", "dispatches"} {
+		if err := os.MkdirAll(filepath.Join(runDir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := map[string]any{
+		"run_id":    runID,
+		"task":      "test",
+		"workspace": workspace,
+		"status":    "running",
+	}
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "manifest.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return runDir
+}
+
+func readCodexFallbackAmbientLedger(t *testing.T, workspace string) []scratch.LedgerEvent {
+	t.Helper()
+	path := filepath.Join(workspace, ".tiller", "scratch", "codex", "ambient-ledger.jsonl")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fallback ambient ledger: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	events := make([]scratch.LedgerEvent, 0, len(lines))
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var ev scratch.LedgerEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("parse fallback ambient ledger line %q: %v", line, err)
+		}
+		events = append(events, ev)
+	}
+	return events
+}
+
+func codexAmbientWorkspaceForTest(t *testing.T) string {
+	t.Helper()
+	if runDir := os.Getenv("TILLER_RUN_DIR"); runDir != "" {
+		return filepath.Dir(filepath.Dir(filepath.Dir(runDir)))
+	}
+	return t.TempDir()
+}
+
+func runCodexAmbientHook(t *testing.T, transcriptFile, toolName string, toolInput map[string]any) []byte {
+	t.Helper()
+	event := map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       toolName,
+		"tool_input":      toolInput,
+		"transcript_path": transcriptFile,
+		"agent_id":        "",
+		"model":           "gpt-5.5",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("TILLER_ROLE", old)
+		}
+	})
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, codexAmbientWorkspaceForTest(t), "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	return bytes.TrimSpace(out.Bytes())
+}
+
+func runCodexAmbientPostHook(t *testing.T, transcriptFile, toolName string, toolInput map[string]any, toolResponse map[string]any) []byte {
+	t.Helper()
+	event := map[string]any{
+		"hook_event_name": "PostToolUse",
+		"tool_name":       toolName,
+		"tool_input":      toolInput,
+		"tool_response":   toolResponse,
+		"transcript_path": transcriptFile,
+		"agent_id":        "",
+		"model":           "gpt-5.5",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("TILLER_ROLE", old)
+		}
+	})
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, codexAmbientWorkspaceForTest(t), "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	return bytes.TrimSpace(out.Bytes())
+}
+
+func runClaudeAmbientPostHook(t *testing.T, workspace, transcriptFile, toolName string, toolInput map[string]any, toolResponse map[string]any) []byte {
+	t.Helper()
+	event := map[string]any{
+		"hook_event_name": "PostToolUse",
+		"tool_name":       toolName,
+		"tool_input":      toolInput,
+		"tool_response":   toolResponse,
+		"transcript_path": transcriptFile,
+		"agent_id":        "",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("TILLER_ROLE", old)
+		}
+	})
+
+	var out bytes.Buffer
+	if err := Run(strings.NewReader(string(data)), &out, workspace); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	return bytes.TrimSpace(out.Bytes())
+}
+
+func parseAmbientDecision(t *testing.T, out []byte) string {
+	t.Helper()
+	var wrapper struct {
+		HookSpecificOutput struct {
+			PermissionDecision string `json:"permissionDecision"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(out, &wrapper); err != nil {
+		t.Fatalf("parse output: %v (raw: %s)", err, out)
+	}
+	return wrapper.HookSpecificOutput.PermissionDecision
+}
+
+func parseAdditionalContext(t *testing.T, out []byte) string {
+	t.Helper()
+	var wrapper struct {
+		HookSpecificOutput struct {
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(out, &wrapper); err != nil {
+		t.Fatalf("parse context output: %v (raw: %s)", err, out)
+	}
+	return wrapper.HookSpecificOutput.AdditionalContext
+}
+
+func parseDecisionReason(t *testing.T, out []byte) string {
+	t.Helper()
+	var wrapper struct {
+		HookSpecificOutput struct {
+			PermissionDecisionReason string `json:"permissionDecisionReason"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(out, &wrapper); err != nil {
+		t.Fatalf("parse reason output: %v (raw: %s)", err, out)
+	}
+	return wrapper.HookSpecificOutput.PermissionDecisionReason
+}
+
 // runAmbientHookFull runs the ambient hook path with full tool_input control.
 // toolInput is passed verbatim as the tool_input JSON object.
 func runAmbientHookFull(t *testing.T, transcriptFile, toolName string, toolInput map[string]any) (decision string) {
@@ -484,6 +767,1347 @@ func runAmbientHookFull(t *testing.T, transcriptFile, toolName string, toolInput
 		t.Fatalf("parse output: %v (raw: %s)", err, outBytes)
 	}
 	return wrapper.HookSpecificOutput.PermissionDecision
+}
+
+func TestCodexAmbientApplyPatchDenied(t *testing.T) {
+	p := codexTranscript(t, "xhigh")
+	out := runCodexAmbientHook(t, p, "apply_patch", map[string]any{
+		"command": "*** Begin Patch\n*** Update File: main.go\n@@\n-old\n+new\n*** End Patch",
+	})
+	if len(out) == 0 {
+		t.Fatal("expected Codex deny output for root apply_patch in xhigh session")
+	}
+	if decision := parseAmbientDecision(t, out); decision != "deny" {
+		t.Fatalf("expected deny, got %q", decision)
+	}
+}
+
+func TestClaudeAmbientGovernedPreToolUseAppendsUsageLedger(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_ROLE", "")
+	t.Setenv("TILLER_RUN_DIR", runDir)
+	t.Setenv("TILLER_AMBIENT_OUTPUT_TOKEN_BUDGET", "40")
+	t.Setenv("TILLER_AMBIENT_REASONING_TOKEN_BUDGET", "10")
+	t.Setenv("TILLER_AMBIENT_BUDGET_WARN_RATIO", "0.75")
+
+	p := fableTranscriptWithUsage(t, 12, 34)
+	event := map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "Edit",
+		"tool_input":      map[string]any{"file_path": filepath.Join(workspace, "foo.go")},
+		"transcript_path": p,
+		"agent_id":        "",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	runHook := func() {
+		t.Helper()
+		var out bytes.Buffer
+		if err := Run(strings.NewReader(string(data)), &out, workspace); err != nil {
+			t.Fatalf("Run error: %v", err)
+		}
+		if decision := parseAmbientDecision(t, bytes.TrimSpace(out.Bytes())); decision != "deny" {
+			t.Fatalf("expected deny, got %q", decision)
+		}
+	}
+	runHook()
+	runHook()
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("ledger event count=%d want 1: %#v", len(events), events)
+	}
+	if events[0].Kind != "claude.ambient_usage" || events[0].Backend != "claude-code" {
+		t.Fatalf("unexpected ledger event: %#v", events[0])
+	}
+	if events[0].TokenUsage == nil || events[0].TokenUsage.InputTokens != 12 || events[0].TokenUsage.OutputTokens != 34 {
+		t.Fatalf("ledger token usage mismatch: %#v", events[0].TokenUsage)
+	}
+	if events[0].ID == "" {
+		t.Fatal("ledger event ID is empty")
+	}
+	hasUsageRef := false
+	for _, ref := range events[0].Refs {
+		if strings.HasPrefix(ref, "usage:") {
+			hasUsageRef = true
+			break
+		}
+	}
+	if !hasUsageRef {
+		t.Fatalf("ledger event missing stable usage ref: %#v", events[0].Refs)
+	}
+	status, err := os.ReadFile(filepath.Join(runDir, "status.md"))
+	if err != nil {
+		t.Fatalf("read status.md: %v", err)
+	}
+	got := string(status)
+	for _, want := range []string{
+		"claude.ambient_usage",
+		"- ledger: input=12 output=34",
+		"## Spend Budget",
+		"- ledger_observed_output: 34",
+		"- combined_observed_output: 34",
+		"- budget_warn_ratio: 0.75",
+		"- output_budget: configured=40 percent_used=85.00% band=warn",
+		"- reasoning_budget: configured=10 percent_used=0.00% band=ok",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status.md missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestClaudeAmbientGovernedPreToolUseWritesAuditLine(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_ROLE", "")
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := fableTranscript(t)
+	event := map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "Edit",
+		"tool_input":      map[string]any{"file_path": filepath.Join(workspace, "foo.go")},
+		"transcript_path": p,
+		"agent_id":        "",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := Run(strings.NewReader(string(data)), &out, workspace); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if decision := parseAmbientDecision(t, bytes.TrimSpace(out.Bytes())); decision != "deny" {
+		t.Fatalf("expected deny, got %q", decision)
+	}
+
+	auditPath := filepath.Join(runDir, "audit", "toolgate.jsonl")
+	raw, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatalf("read audit file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 1 || lines[0] == "" {
+		t.Fatalf("audit line count=%d want 1; raw=%q", len(lines), raw)
+	}
+
+	var ev map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &ev); err != nil {
+		t.Fatalf("invalid audit JSON: %v", err)
+	}
+	if requestID, _ := ev["request_id"].(string); !strings.HasPrefix(requestID, "ambient-root-") {
+		t.Fatalf("request_id = %q, want ambient-root-*", requestID)
+	}
+	if ctx, ok := ev["context"].(map[string]any); !ok || len(ctx) == 0 {
+		t.Fatalf("context is empty or missing: %#v", ev["context"])
+	}
+	if rules, ok := ev["rules"].([]any); !ok || len(rules) == 0 {
+		t.Fatalf("rules is empty or missing: %#v", ev["rules"])
+	}
+	if arbitrace, ok := ev["arbitrace"].([]any); !ok || len(arbitrace) == 0 {
+		t.Fatalf("arbitrace is empty or missing: %#v", ev["arbitrace"])
+	}
+}
+
+func TestCodexAmbientReadAllowedSilent(t *testing.T) {
+	p := codexTranscript(t, "xhigh")
+	out := runCodexAmbientHook(t, p, "Read", map[string]any{"file_path": "/workspace/main.go"})
+	if len(out) != 0 {
+		t.Fatalf("Codex allow should produce no stdout, got %s", out)
+	}
+}
+
+func TestCodexAmbientNamespacedViewImageAllowedSilent(t *testing.T) {
+	p := codexTranscript(t, "xhigh")
+	out := runCodexAmbientHook(t, p, "functions.view_image", map[string]any{"path": "/workspace/screenshot.png"})
+	if len(out) != 0 {
+		t.Fatalf("Codex allow for functions.view_image should produce no stdout, got %s", out)
+	}
+}
+
+func TestCodexAmbientNamespacedToolSearchAllowedSilent(t *testing.T) {
+	p := codexTranscript(t, "xhigh")
+	out := runCodexAmbientHook(t, p, "tool_search.tool_search_tool", map[string]any{"query": "github"})
+	if len(out) != 0 {
+		t.Fatalf("Codex allow for tool_search.tool_search_tool should produce no stdout, got %s", out)
+	}
+}
+
+func TestCodexAmbientNamespacedDiagnosticAllowedSilent(t *testing.T) {
+	p := codexTranscript(t, "xhigh")
+	out := runCodexAmbientHook(t, p, "functions.list_mcp_resources", map[string]any{})
+	if len(out) != 0 {
+		t.Fatalf("Codex allow for functions.list_mcp_resources should produce no stdout, got %s", out)
+	}
+}
+
+func TestCodexAmbientWebRunWrapperDenied(t *testing.T) {
+	p := codexTranscript(t, "xhigh")
+	out := runCodexAmbientHook(t, p, "web.run", map[string]any{})
+	if len(out) == 0 {
+		t.Fatal("expected Codex deny output for generic web.run wrapper")
+	}
+	if decision := parseAmbientDecision(t, out); decision != "deny" {
+		t.Fatalf("expected deny, got %q", decision)
+	}
+}
+
+func TestCodexAmbientNamespacedMultiAgentLifecycleAllowedSilent(t *testing.T) {
+	p := codexTranscript(t, "xhigh")
+	for _, toolName := range []string{
+		"multi_agent_v1spawn_agent",
+		"multi_agent_v1wait_agent",
+		"multi_agent_v1send_input",
+		"multi_agent_v1resume_agent",
+		"multi_agent_v1close_agent",
+	} {
+		out := runCodexAmbientHook(t, p, toolName, map[string]any{"agent_id": 1})
+		if len(out) != 0 {
+			t.Fatalf("Codex allow for %s should produce no stdout, got %s", toolName, out)
+		}
+	}
+}
+
+func TestCodexAmbientRootReadOnlyExecCommandAllowedSilent(t *testing.T) {
+	p := codexTranscript(t, "xhigh")
+	for _, cmd := range []string{
+		"pwd",
+		"rg --files",
+		"sed -n '1,40p' AGENTS.md",
+		"hypha recall tiller ambient",
+	} {
+		out := runCodexAmbientHook(t, p, "functions.exec_command", map[string]any{"cmd": cmd})
+		if len(out) != 0 {
+			t.Fatalf("Codex read-only exec_command %q should produce no stdout, got %s", cmd, out)
+		}
+	}
+}
+
+func TestCodexAmbientRootMutatingExecCommandDenied(t *testing.T) {
+	p := codexTranscript(t, "xhigh")
+	out := runCodexAmbientHook(t, p, "functions.exec_command", map[string]any{"cmd": "go test ./..."})
+	if len(out) == 0 {
+		t.Fatal("expected Codex deny output for root mutating shell execution")
+	}
+	if decision := parseAmbientDecision(t, out); decision != "deny" {
+		t.Fatalf("expected deny, got %q", decision)
+	}
+}
+
+func TestCodexAmbientMediumPassthrough(t *testing.T) {
+	p := codexTranscript(t, "medium")
+	out := runCodexAmbientHook(t, p, "apply_patch", map[string]any{
+		"command": "*** Begin Patch\n*** Update File: main.go\n@@\n-old\n+new\n*** End Patch",
+	})
+	if len(out) != 0 {
+		t.Fatalf("Codex medium effort should pass through, got %s", out)
+	}
+}
+
+func TestCodexSessionStartMediumPassthrough(t *testing.T) {
+	p := codexTranscript(t, "medium")
+	event := map[string]any{
+		"hook_event_name": "SessionStart",
+		"transcript_path": p,
+		"model":           "gpt-5.5",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("TILLER_ROLE", old)
+		}
+	})
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, "", "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	if got := bytes.TrimSpace(out.Bytes()); len(got) != 0 {
+		t.Fatalf("Codex medium SessionStart should pass through silently, got %s", got)
+	}
+}
+
+func TestCodexSessionStartPayloadXHighAdditionalContextWithoutTranscript(t *testing.T) {
+	workspace := t.TempDir()
+	event := map[string]any{
+		"hook_event_name": "SessionStart",
+		"model":           "gpt-5.5",
+		"effort":          "xhigh",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("TILLER_ROLE", old)
+		}
+	})
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, workspace, "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	ctx := parseAdditionalContext(t, bytes.TrimSpace(out.Bytes()))
+	if !strings.Contains(ctx, "Tiller ambient is active") {
+		t.Fatalf("missing Codex SessionStart context: %s", ctx)
+	}
+}
+
+func TestCodexSessionStartPayloadMediumPassthroughWithoutTranscript(t *testing.T) {
+	event := map[string]any{
+		"hook_event_name": "SessionStart",
+		"model":           "gpt-5.5",
+		"effort":          "medium",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("TILLER_ROLE", old)
+		}
+	})
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, "", "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	if got := bytes.TrimSpace(out.Bytes()); len(got) != 0 {
+		t.Fatalf("Codex medium SessionStart payload should pass through silently, got %s", got)
+	}
+}
+
+func TestCodexSessionStartWithoutXHighProofPassthrough(t *testing.T) {
+	event := map[string]any{
+		"hook_event_name": "SessionStart",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("TILLER_ROLE", old)
+		}
+	})
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, "", "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	if got := bytes.TrimSpace(out.Bytes()); len(got) != 0 {
+		t.Fatalf("Codex SessionStart without xhigh proof should pass through silently, got %s", got)
+	}
+}
+
+func TestCodexSessionStartAdditionalContext(t *testing.T) {
+	workspace := t.TempDir()
+	p := codexTranscript(t, "xhigh")
+	event := map[string]any{
+		"hook_event_name": "SessionStart",
+		"transcript_path": p,
+		"model":           "gpt-5.5",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("TILLER_ROLE", old)
+		}
+	})
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, workspace, "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	ctx := parseAdditionalContext(t, bytes.TrimSpace(out.Bytes()))
+	for _, want := range []string{"Tiller ambient is active", "Root may read/search directly", ".tiller/scratch/codex/", "premium/reason-tier output", "descriptor-backed task list", "Codex, Claude Code, OpenCode, Cursor", "Descriptor fields", "budget tier/model ceiling", "Distillation", "Arbiter Next Action", "Stale/Late Work", "Recommended Next Actions", "legacy/fallback context", "Queue/background independent descriptors", "update descriptors from returned reports", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "spawn_agent", "agent_type=\"tiller-scout\"", "agent_type=\"tiller-summary\"", "status/distillation/checkpoint/commit-prep", "stale/late report triage", "gpt-5.4-mini", "gpt-5.3-codex-spark", "agent_type=\"tiller-worker\"", "gpt-5.5 medium", "gpt-5.5 high", "gpt-5.5 xhigh", "wait_agent/close_agent"} {
+		if !strings.Contains(ctx, want) {
+			t.Fatalf("SessionStart context missing %q:\n%s", want, ctx)
+		}
+	}
+}
+
+func TestCodexSessionStartAdditionalContextDisabled(t *testing.T) {
+	dir := t.TempDir()
+	if _, _, err := ambientgate.Disable(dir); err != nil {
+		t.Fatalf("disable ambient: %v", err)
+	}
+	p := codexTranscript(t, "xhigh")
+	event := map[string]any{
+		"hook_event_name": "SessionStart",
+		"transcript_path": p,
+		"model":           "gpt-5.5",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("TILLER_ROLE", old)
+		}
+	})
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, dir, "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	ctx := parseAdditionalContext(t, bytes.TrimSpace(out.Bytes()))
+	for _, want := range []string{"temporarily disabled", "Normal Codex tools are allowed", ".tiller/scratch/codex/"} {
+		if !strings.Contains(ctx, want) {
+			t.Fatalf("disabled SessionStart context missing %q:\n%s", want, ctx)
+		}
+	}
+}
+
+func TestCodexSubagentStartAdditionalContext(t *testing.T) {
+	cases := []struct {
+		name      string
+		agentType string
+		want      []string
+	}{
+		{
+			name:      "worker",
+			agentType: "tiller-worker",
+			want:      []string{"Tiller execution agent", "changed files", "verification results", "Read relevant .tiller/scratch/codex/ notes first", "write final reports or handoff notes", "descriptor-compatible report contract", "checkpoint candidate yes/no", "update task status and checkpoint decisions", "checkpointable wins", "configured checkpoint tool or Git"},
+		},
+		{
+			name:      "scout",
+			agentType: "tiller-scout",
+			want:      []string{"Tiller scout agent", "gpt-5.4-mini", "bounded read-only inventories", "simple summaries", "Do not edit files", "Read relevant .tiller/scratch/codex/ notes first", "descriptor-compatible report contract", "checkpoint candidate yes/no", "update task status and checkpoint decisions", "checkpointable wins", "configured checkpoint tool or Git"},
+		},
+		{
+			name:      "summary",
+			agentType: "tiller-summary",
+			want:      []string{"Tiller summary agent", "gpt-5.3-codex-spark", "high, read-only", "Spark status/distillation/checkpoint/commit-prep", "stale/late report triage", "checkpoint candidate synthesis", "Distillation", "Arbiter Next Action", "Recommended Next Actions", "legacy/fallback context", "draft commit messages/checkpoint briefs", "must not mutate files or perform VCS commits", "Do not edit files", "Read relevant .tiller/scratch/codex/ notes first", "descriptor-compatible report contract", "checkpoint candidate yes/no", "update task status and checkpoint decisions", "checkpointable wins", "configured checkpoint tool or Git"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			event := map[string]any{
+				"hook_event_name": "SubagentStart",
+				"agent_type":      tc.agentType,
+			}
+			data, err := json.Marshal(event)
+			if err != nil {
+				t.Fatalf("marshal event: %v", err)
+			}
+
+			old := os.Getenv("TILLER_ROLE")
+			os.Unsetenv("TILLER_ROLE")
+			t.Cleanup(func() {
+				if old != "" {
+					os.Setenv("TILLER_ROLE", old)
+				}
+			})
+
+			var out bytes.Buffer
+			if err := RunWithBackend(strings.NewReader(string(data)), &out, workspace, "codex"); err != nil {
+				t.Fatalf("RunWithBackend error: %v", err)
+			}
+			ctx := parseAdditionalContext(t, bytes.TrimSpace(out.Bytes()))
+			for _, want := range tc.want {
+				if !strings.Contains(ctx, want) {
+					t.Fatalf("SubagentStart context missing %q:\n%s", want, ctx)
+				}
+			}
+		})
+	}
+}
+
+func TestCodexNonTillerSubagentStartPassthrough(t *testing.T) {
+	event := map[string]any{
+		"hook_event_name": "SubagentStart",
+		"agent_id":        "backend-agent-123",
+		"agent_type":      "general-purpose",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("TILLER_ROLE", old)
+		}
+	})
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, "", "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	if got := bytes.TrimSpace(out.Bytes()); len(got) != 0 {
+		t.Fatalf("non-Tiller Codex SubagentStart should pass through silently, got %s", got)
+	}
+}
+
+func TestCodexLifecycleSessionStartAppendsLedger(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_ROLE", "")
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := codexTranscript(t, "xhigh")
+	event := map[string]any{
+		"hook_event_name": "SessionStart",
+		"transcript_path": p,
+		"model":           "gpt-5.5",
+		"usage":           map[string]any{"output_tokens": 321},
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, workspace, "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	if ctx := parseAdditionalContext(t, bytes.TrimSpace(out.Bytes())); !strings.Contains(ctx, "Tiller ambient is active") {
+		t.Fatalf("missing Codex SessionStart context: %s", ctx)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("ledger event count=%d want 1: %#v", len(events), events)
+	}
+	if events[0].Kind != "codex.session_start" || events[0].Backend != "codex" {
+		t.Fatalf("unexpected ledger event: %#v", events[0])
+	}
+	if events[0].TokenUsage == nil || events[0].TokenUsage.OutputTokens != 321 {
+		t.Fatalf("ledger token usage mismatch: %#v", events[0].TokenUsage)
+	}
+	status, err := os.ReadFile(filepath.Join(runDir, "status.md"))
+	if err != nil {
+		t.Fatalf("read status.md: %v", err)
+	}
+	if got := string(status); !strings.Contains(got, "Generated snapshot from `manifest.json`") || !strings.Contains(got, "codex.session_start") || !strings.Contains(got, "- ledger: input=0 output=321") {
+		t.Fatalf("status.md missing Codex lifecycle content:\n%s", got)
+	}
+}
+
+func TestCodexLifecycleSessionStartMediumDoesNotAppendLedger(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_ROLE", "")
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := codexTranscript(t, "medium")
+	event := map[string]any{
+		"hook_event_name": "SessionStart",
+		"transcript_path": p,
+		"model":           "gpt-5.5",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, workspace, "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	if got := bytes.TrimSpace(out.Bytes()); len(got) != 0 {
+		t.Fatalf("medium Codex SessionStart should be silent, got %s", got)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("ledger event count=%d want 0: %#v", len(events), events)
+	}
+}
+
+func TestCodexLifecycleSubagentStartCreatesAgentRunWhenIdentityPresent(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_ROLE", "")
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	event := map[string]any{
+		"hook_event_name": "SubagentStart",
+		"agent_id":        "backend-agent-123",
+		"agent_type":      "tiller-worker",
+		"model":           "gpt-5.5",
+		"token_usage":     map[string]any{"input_tokens": 111, "output_tokens": 222},
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, workspace, "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	if ctx := parseAdditionalContext(t, bytes.TrimSpace(out.Bytes())); !strings.Contains(ctx, "Tiller execution agent") {
+		t.Fatalf("missing Codex SubagentStart context: %s", ctx)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("ledger event count=%d want 1: %#v", len(events), events)
+	}
+	if events[0].Kind != "codex.subagent_start" || events[0].AgentRunID == "" {
+		t.Fatalf("unexpected ledger event: %#v", events[0])
+	}
+	if events[0].TokenUsage == nil || events[0].TokenUsage.OutputTokens != 222 {
+		t.Fatalf("ledger token usage mismatch: %#v", events[0].TokenUsage)
+	}
+	agents, err := st.ListAgentRuns(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListAgentRuns: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("agent run count=%d want 1: %#v", len(agents), agents)
+	}
+	if agents[0].BackendAgentID != "backend-agent-123" || agents[0].Role != "worker" || agents[0].Tier != "execute" || agents[0].Status != scratch.AgentRunStatusRunning {
+		t.Fatalf("unexpected agent run: %#v", agents[0])
+	}
+	if agents[0].TokenUsage == nil || agents[0].TokenUsage.InputTokens != 111 || agents[0].TokenUsage.OutputTokens != 222 {
+		t.Fatalf("agent token usage mismatch: %#v", agents[0].TokenUsage)
+	}
+}
+
+func TestCodexLifecycleSessionStartFallbackLedgerWithoutRunDir(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("TILLER_ROLE", "")
+	t.Setenv("TILLER_RUN_DIR", "")
+
+	p := codexTranscript(t, "xhigh")
+	event := map[string]any{
+		"hook_event_name": "SessionStart",
+		"transcript_path": p,
+		"model":           "gpt-5.5",
+		"usage":           map[string]any{"output_tokens": 321},
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, workspace, "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	if ctx := parseAdditionalContext(t, bytes.TrimSpace(out.Bytes())); !strings.Contains(ctx, "Tiller ambient is active") {
+		t.Fatalf("missing Codex SessionStart context: %s", ctx)
+	}
+
+	events := readCodexFallbackAmbientLedger(t, workspace)
+	if len(events) != 1 {
+		t.Fatalf("fallback ledger event count=%d want 1: %#v", len(events), events)
+	}
+	ev := events[0]
+	if ev.RunID != "" || ev.Kind != "codex.session_start" || ev.Backend != "codex" || ev.Status != "observed" {
+		t.Fatalf("unexpected fallback ledger event: %#v", ev)
+	}
+	if ev.ID == "" || ev.At.IsZero() || ev.Summary == "" {
+		t.Fatalf("fallback ledger event missing compact fields: %#v", ev)
+	}
+	if ev.TokenUsage == nil || ev.TokenUsage.OutputTokens != 321 {
+		t.Fatalf("fallback ledger token usage mismatch: %#v", ev.TokenUsage)
+	}
+}
+
+func TestCodexLifecycleSessionStartMediumDoesNotWriteFallbackLedger(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("TILLER_ROLE", "")
+	t.Setenv("TILLER_RUN_DIR", "")
+
+	p := codexTranscript(t, "medium")
+	event := map[string]any{
+		"hook_event_name": "SessionStart",
+		"transcript_path": p,
+		"model":           "gpt-5.5",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, workspace, "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	if got := bytes.TrimSpace(out.Bytes()); len(got) != 0 {
+		t.Fatalf("medium Codex SessionStart should be silent, got %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".tiller", "scratch", "codex", "ambient-ledger.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("fallback ambient ledger should not exist for medium SessionStart, stat err=%v", err)
+	}
+}
+
+func TestCodexLifecycleSubagentStartFallbackLedgerWithoutRunDir(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("TILLER_ROLE", "")
+	t.Setenv("TILLER_RUN_DIR", "")
+
+	event := map[string]any{
+		"hook_event_name": "SubagentStart",
+		"agent_id":        "backend-agent-123",
+		"agent_type":      "tiller-worker",
+		"model":           "gpt-5.5",
+		"token_usage":     map[string]any{"input_tokens": 111, "output_tokens": 222},
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, workspace, "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	if ctx := parseAdditionalContext(t, bytes.TrimSpace(out.Bytes())); !strings.Contains(ctx, "Tiller execution agent") {
+		t.Fatalf("missing Codex SubagentStart context: %s", ctx)
+	}
+
+	events := readCodexFallbackAmbientLedger(t, workspace)
+	if len(events) != 1 {
+		t.Fatalf("fallback ledger event count=%d want 1: %#v", len(events), events)
+	}
+	ev := events[0]
+	if ev.RunID != "" || ev.Kind != "codex.subagent_start" || ev.Backend != "codex" || ev.Status != "observed" {
+		t.Fatalf("unexpected fallback ledger event: %#v", ev)
+	}
+	if ev.TokenUsage == nil || ev.TokenUsage.InputTokens != 111 || ev.TokenUsage.OutputTokens != 222 {
+		t.Fatalf("fallback ledger token usage mismatch: %#v", ev.TokenUsage)
+	}
+	if !ledgerEventContains(ev, "backend_agent_id:backend-agent-123") || !ledgerEventContains(ev, "agent_type:tiller-worker") {
+		t.Fatalf("fallback ledger event missing refs: %#v", ev)
+	}
+}
+
+func TestCodexLifecycleNonTillerSubagentStartDoesNotWriteFallbackLedger(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("TILLER_ROLE", "")
+	t.Setenv("TILLER_RUN_DIR", "")
+
+	event := map[string]any{
+		"hook_event_name": "SubagentStart",
+		"agent_id":        "backend-agent-123",
+		"agent_type":      "general-purpose",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, workspace, "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	if got := bytes.TrimSpace(out.Bytes()); len(got) != 0 {
+		t.Fatalf("non-Tiller Codex SubagentStart should pass through silently, got %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".tiller", "scratch", "codex", "ambient-ledger.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("fallback ambient ledger should not exist for non-Tiller SubagentStart, stat err=%v", err)
+	}
+}
+
+func TestCodexLifecycleRootMultiAgentToolAppendsLedgerAndStaysSilent(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := codexTranscriptWithUsage(t, "xhigh", 654)
+	out := runCodexAmbientHook(t, p, "functions.spawn_agent", map[string]any{
+		"agent_type": "tiller-worker",
+	})
+	if len(out) != 0 {
+		t.Fatalf("Codex allowed lifecycle tool should stay silent, got %s", out)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("ledger event count=%d want 2: %#v", len(events), events)
+	}
+	lifecycle := findLedgerEventKind(events, "codex.lifecycle_tool")
+	if lifecycle == nil || lifecycle.Status != scratch.AgentRunStatusRequested {
+		t.Fatalf("missing lifecycle ledger event: %#v", events)
+	}
+	if lifecycle.TokenUsage == nil || lifecycle.TokenUsage.OutputTokens != 654 {
+		t.Fatalf("ledger token usage mismatch: %#v", lifecycle.TokenUsage)
+	}
+	if !strings.Contains(lifecycle.Summary, "functions.spawn_agent") {
+		t.Fatalf("ledger summary missing tool name: %#v", lifecycle)
+	}
+	descriptor := findLedgerEventKind(events, "ambient.task_descriptor")
+	if descriptor == nil || descriptor.Status != scratch.AgentRunStatusRequested {
+		t.Fatalf("missing descriptor ledger event: %#v", events)
+	}
+}
+
+func TestCodexLifecycleRootMultiAgentToolMediumDoesNotAppendLedger(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := codexTranscript(t, "medium")
+	out := runCodexAmbientHook(t, p, "functions.spawn_agent", map[string]any{
+		"agent_type": "tiller-worker",
+	})
+	if len(out) != 0 {
+		t.Fatalf("Codex medium lifecycle tool should stay silent, got %s", out)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("ledger event count=%d want 0: %#v", len(events), events)
+	}
+}
+
+func TestCodexAmbientSpawnAgentAppendsTaskDescriptorAndStatus(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := codexTranscript(t, "xhigh")
+	out := runCodexAmbientHook(t, p, "functions.spawn_agent", map[string]any{
+		"agent_type": "tiller-worker",
+		"prompt":     "Implement descriptor-backed task list.\nKeep it scoped.",
+	})
+	if len(out) != 0 {
+		t.Fatalf("Codex allowed spawn_agent should stay silent, got %s", out)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	descriptor := findLedgerEventKind(events, "ambient.task_descriptor")
+	if descriptor == nil {
+		t.Fatalf("descriptor ledger event missing: %#v", events)
+	}
+	if descriptor.Backend != "codex" || descriptor.Status != scratch.AgentRunStatusRequested {
+		t.Fatalf("unexpected descriptor event: %#v", descriptor)
+	}
+	for _, want := range []string{"tiller-worker: Implement descriptor-backed task list.", "tool:spawn_agent", "agent_type:tiller-worker", "descriptor_id:", "objective_hash:", "attempt_id:"} {
+		if !ledgerEventContains(*descriptor, want) {
+			t.Fatalf("descriptor missing %q: %#v", want, descriptor)
+		}
+	}
+	status, err := os.ReadFile(filepath.Join(runDir, "status.md"))
+	if err != nil {
+		t.Fatalf("read status.md: %v", err)
+	}
+	got := string(status)
+	for _, want := range []string{"## Task Descriptors", "- total: 1", "- by_status: requested=1", "tiller-worker: Implement descriptor-backed task list.", "refs: tool:spawn_agent, agent_type:tiller-worker", "attempt_id:"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status.md missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestCodexAmbientRepeatedSpawnAgentAppendsAttemptsAndRollsUpStatus(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := codexTranscript(t, "xhigh")
+	toolInput := map[string]any{
+		"agent_type": "tiller-worker",
+		"prompt":     "Implement descriptor-backed task list.",
+	}
+	if out := runCodexAmbientHook(t, p, "functions.spawn_agent", toolInput); len(out) != 0 {
+		t.Fatalf("first spawn_agent should stay silent, got %s", out)
+	}
+	if out := runCodexAmbientHook(t, p, "functions.spawn_agent", toolInput); len(out) != 0 {
+		t.Fatalf("second spawn_agent should stay silent, got %s", out)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	descriptors := findLedgerEventsKind(events, "ambient.task_descriptor")
+	if len(descriptors) != 2 {
+		t.Fatalf("descriptor count=%d want 2: %#v", len(descriptors), events)
+	}
+	firstDescriptorID := ambientRefValue(descriptors[0].Refs, "descriptor_id")
+	if firstDescriptorID == "" || ambientRefValue(descriptors[1].Refs, "descriptor_id") != firstDescriptorID {
+		t.Fatalf("descriptor_id should be stable across attempts: %#v", descriptors)
+	}
+	firstAttemptID := ambientRefValue(descriptors[0].Refs, "attempt_id")
+	secondAttemptID := ambientRefValue(descriptors[1].Refs, "attempt_id")
+	if firstAttemptID == "" || secondAttemptID == "" || firstAttemptID == secondAttemptID {
+		t.Fatalf("attempt_id should be populated and distinct: %#v", descriptors)
+	}
+
+	out := runCodexAmbientPostHook(t, p, "functions.spawn_agent", toolInput, map[string]any{
+		"is_error": false,
+		"agent_id": "backend-agent-789",
+		"output":   "## Outcome\nSecond attempt requested.\n## Recommended Next Action\nwait_for_agents",
+	})
+	if len(out) != 0 {
+		t.Fatalf("PostToolUse should stay silent, got %s", out)
+	}
+
+	events, err = st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents after result: %v", err)
+	}
+	result := findLedgerEventKind(events, "ambient.task_result")
+	if result == nil {
+		t.Fatalf("result ledger event missing: %#v", events)
+	}
+	if got := ambientRefValue(result.Refs, "descriptor_id"); got != firstDescriptorID {
+		t.Fatalf("result descriptor_id=%q want %q: %#v", got, firstDescriptorID, result)
+	}
+	if got := ambientRefValue(result.Refs, "attempt_id"); got != secondAttemptID {
+		t.Fatalf("result attempt_id=%q want latest attempt %q: %#v", got, secondAttemptID, result)
+	}
+
+	status, err := os.ReadFile(filepath.Join(runDir, "status.md"))
+	if err != nil {
+		t.Fatalf("read status.md: %v", err)
+	}
+	got := string(status)
+	for _, want := range []string{
+		"## Task Descriptors",
+		"- total: 1",
+		"- by_status: requested=1",
+		"attempt_id:" + firstAttemptID,
+		"attempt_id:" + secondAttemptID,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status.md missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestClaudeAmbientTaskAppendsTaskDescriptor(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_ROLE", "")
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := fableTranscript(t)
+	event := map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "Task",
+		"tool_input": map[string]any{
+			"subagent_type": "tiller-worker",
+			"description":   "Patch the renderer",
+			"prompt":        "Patch the renderer and run tests.",
+		},
+		"transcript_path": p,
+		"agent_id":        "",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := Run(strings.NewReader(string(data)), &out, workspace); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if decision := parseAmbientDecision(t, bytes.TrimSpace(out.Bytes())); decision != "allow" {
+		t.Fatalf("expected allow, got %q", decision)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	descriptor := findLedgerEventKind(events, "ambient.task_descriptor")
+	if descriptor == nil {
+		t.Fatalf("descriptor ledger event missing: %#v", events)
+	}
+	if descriptor.Backend != "claude-code" || descriptor.Status != scratch.AgentRunStatusRequested {
+		t.Fatalf("unexpected descriptor event: %#v", descriptor)
+	}
+	for _, want := range []string{"tiller-worker: Patch the renderer", "tool:Task", "agent_type:tiller-worker", "descriptor_id:", "objective_hash:", "attempt_id:"} {
+		if !ledgerEventContains(*descriptor, want) {
+			t.Fatalf("descriptor missing %q: %#v", want, descriptor)
+		}
+	}
+}
+
+func TestClaudeAmbientTaskPostToolUseReconcilesReport(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_ROLE", "")
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := fableTranscript(t)
+	toolInput := map[string]any{
+		"subagent_type": "tiller-worker",
+		"description":   "Patch the renderer",
+		"prompt":        "Patch the renderer and run tests.",
+	}
+	pre := map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "Task",
+		"tool_input":      toolInput,
+		"transcript_path": p,
+		"agent_id":        "",
+	}
+	preData, err := json.Marshal(pre)
+	if err != nil {
+		t.Fatalf("marshal pre event: %v", err)
+	}
+	var preOut bytes.Buffer
+	if err := Run(strings.NewReader(string(preData)), &preOut, workspace); err != nil {
+		t.Fatalf("Run pre error: %v", err)
+	}
+	if decision := parseAmbientDecision(t, bytes.TrimSpace(preOut.Bytes())); decision != "allow" {
+		t.Fatalf("expected allow, got %q", decision)
+	}
+
+	report := strings.Join([]string{
+		"## Outcome",
+		"Renderer patched and verified.",
+		"## Distilled State",
+		"Renderer status rendering now includes compact task state and checkpoint advice.",
+		"## Files Changed",
+		"- internal/scratch/status.go",
+		"- README.md",
+		"## Verification Commands and Results",
+		"- go test ./internal/scratch: pass",
+		"## Caveats or Residual Risk",
+		"- no full integration run",
+		"## Checkpoint Candidate",
+		"yes",
+		"## Recommended Next Action",
+		"checkpoint_candidate",
+	}, "\n")
+	out := runClaudeAmbientPostHook(t, workspace, p, "Task", toolInput, map[string]any{
+		"is_error": false,
+		"output":   report,
+	})
+	if len(out) != 0 {
+		t.Fatalf("PostToolUse should stay silent, got %s", out)
+	}
+	out = runClaudeAmbientPostHook(t, workspace, p, "Task", toolInput, map[string]any{
+		"is_error": false,
+		"output":   report,
+	})
+	if len(out) != 0 {
+		t.Fatalf("second PostToolUse should stay silent, got %s", out)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	result := findLedgerEventKind(events, "ambient.task_result")
+	if result == nil || result.Status != scratch.AgentRunStatusCompleted || result.AgentRunID == "" {
+		t.Fatalf("missing completed result event: %#v", events)
+	}
+	for _, want := range []string{"Renderer patched and verified.", "tool:Task", "agent_type:tiller-worker", "descriptor_id:", "objective_hash:", "attempt_id:"} {
+		if !ledgerEventContains(*result, want) {
+			t.Fatalf("result missing %q: %#v", want, result)
+		}
+	}
+	distillations := findLedgerEventsKind(events, "ambient.distillation")
+	if len(distillations) != 1 {
+		t.Fatalf("distillation count=%d want 1: %#v", len(distillations), events)
+	}
+	distillation := distillations[0]
+	if distillation.Status != scratch.AgentRunStatusCompleted || distillation.AgentRunID != result.AgentRunID {
+		t.Fatalf("unexpected distillation event: %#v", distillation)
+	}
+	for _, want := range []string{"Renderer status rendering now includes compact task state", "tool:Task", "descriptor_id:", "attempt_id:"} {
+		if !ledgerEventContains(distillation, want) {
+			t.Fatalf("distillation missing %q: %#v", want, distillation)
+		}
+	}
+	agents, err := st.ListAgentRuns(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListAgentRuns: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("agent run count=%d want 1: %#v", len(agents), agents)
+	}
+	if agents[0].Status != scratch.AgentRunStatusCompleted || agents[0].Summary != "Renderer patched and verified." {
+		t.Fatalf("unexpected agent run: %#v", agents[0])
+	}
+	if strings.Join(agents[0].ChangedFiles, ",") != "README.md,internal/scratch/status.go" {
+		t.Fatalf("changed files not parsed/sorted: %#v", agents[0].ChangedFiles)
+	}
+	candidates, err := st.ListCheckpointCandidates(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListCheckpointCandidates: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].Status != scratch.CheckpointStatusProposed || candidates[0].AgentRunID != agents[0].ID {
+		t.Fatalf("unexpected checkpoint candidates: %#v", candidates)
+	}
+	status, err := os.ReadFile(filepath.Join(runDir, "status.md"))
+	if err != nil {
+		t.Fatalf("read status.md: %v", err)
+	}
+	got := string(status)
+	for _, want := range []string{
+		"## Task Descriptors",
+		"- by_status: completed=1",
+		"## Distillation",
+		"Reusable compressed state for the orchestrator",
+		"summary: Renderer status rendering now includes compact task state and checkpoint advice.",
+		"## Recommended Next Actions",
+		"- `checkpoint_candidate`: review checkpoint candidates=1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status.md missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestParseAmbientReportRecognizesDistillationAliases(t *testing.T) {
+	cases := []string{"Distillation", "Distilled State", "Reusable Context"}
+	for _, heading := range cases {
+		t.Run(heading, func(t *testing.T) {
+			report := parseAmbientReport("## Outcome\nDone.\n## " + heading + "\nKeep descriptor rollups in status.md; raw ledger reads are fallback only.\n")
+			if report.Summary != "Done." {
+				t.Fatalf("summary=%q want Done.", report.Summary)
+			}
+			if report.Distillation != "Keep descriptor rollups in status.md; raw ledger reads are fallback only." {
+				t.Fatalf("distillation=%q", report.Distillation)
+			}
+		})
+	}
+}
+
+func TestCodexAmbientPostToolUseReconcilesStableBackendAgent(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := codexTranscript(t, "xhigh")
+	toolInput := map[string]any{
+		"agent_type": "tiller-worker",
+		"prompt":     "Implement descriptor-backed task list.",
+	}
+	if out := runCodexAmbientHook(t, p, "functions.spawn_agent", toolInput); len(out) != 0 {
+		t.Fatalf("Codex allowed spawn_agent should stay silent, got %s", out)
+	}
+	out := runCodexAmbientPostHook(t, p, "functions.spawn_agent", toolInput, map[string]any{
+		"is_error": false,
+		"agent_id": "backend-agent-456",
+		"output":   "## Outcome\nAgent requested.\n## Recommended Next Action\nwait_for_agents",
+	})
+	if len(out) != 0 {
+		t.Fatalf("PostToolUse should stay silent, got %s", out)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	result := findLedgerEventKind(events, "ambient.task_result")
+	if result == nil || result.Status != scratch.AgentRunStatusRequested || result.AgentRunID == "" {
+		t.Fatalf("missing requested result event: %#v", events)
+	}
+	agents, err := st.ListAgentRuns(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListAgentRuns: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("agent run count=%d want 1: %#v", len(agents), agents)
+	}
+	if agents[0].BackendAgentID != "backend-agent-456" || agents[0].Status != scratch.AgentRunStatusRequested || agents[0].Role != "worker" {
+		t.Fatalf("unexpected agent run: %#v", agents[0])
+	}
+	status, err := os.ReadFile(filepath.Join(runDir, "status.md"))
+	if err != nil {
+		t.Fatalf("read status.md: %v", err)
+	}
+	got := string(status)
+	for _, want := range []string{
+		"## Task Descriptors",
+		"- by_status: requested=1",
+		"## Recommended Next Actions",
+		"- `wait_for_agents`: outstanding descriptors=1 agents=1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("status.md missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestCodexAmbientMediumSpawnAgentDoesNotAppendTaskDescriptor(t *testing.T) {
+	workspace := t.TempDir()
+	runDir := makeAmbientLifecycleRunDir(t, workspace)
+	t.Setenv("TILLER_RUN_DIR", runDir)
+
+	p := codexTranscript(t, "medium")
+	out := runCodexAmbientHook(t, p, "functions.spawn_agent", map[string]any{
+		"agent_type": "tiller-worker",
+		"prompt":     "Do work.",
+	})
+	if len(out) != 0 {
+		t.Fatalf("Codex medium spawn_agent should pass through silently, got %s", out)
+	}
+
+	st := fsstore.Open(filepath.Dir(runDir))
+	events, err := st.ListLedgerEvents(filepath.Base(runDir))
+	if err != nil {
+		t.Fatalf("ListLedgerEvents: %v", err)
+	}
+	if findLedgerEventKind(events, "ambient.task_descriptor") != nil {
+		t.Fatalf("descriptor should not be appended for medium Codex: %#v", events)
+	}
+}
+
+func findLedgerEventKind(events []scratch.LedgerEvent, kind string) *scratch.LedgerEvent {
+	for i := range events {
+		if events[i].Kind == kind {
+			return &events[i]
+		}
+	}
+	return nil
+}
+
+func findLedgerEventsKind(events []scratch.LedgerEvent, kind string) []scratch.LedgerEvent {
+	var out []scratch.LedgerEvent
+	for _, ev := range events {
+		if ev.Kind == kind {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+func ledgerEventContains(ev scratch.LedgerEvent, value string) bool {
+	if strings.Contains(ev.Summary, value) {
+		return true
+	}
+	for _, ref := range ev.Refs {
+		if strings.Contains(ref, value) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestCodexLifecycleWriteFailureDoesNotBlockContext(t *testing.T) {
+	t.Setenv("TILLER_ROLE", "")
+	runFile := filepath.Join(t.TempDir(), "not-a-run-dir")
+	if err := os.WriteFile(runFile, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write run file fixture: %v", err)
+	}
+	t.Setenv("TILLER_RUN_DIR", runFile)
+
+	event := map[string]any{
+		"hook_event_name": "SubagentStart",
+		"agent_id":        "backend-agent-123",
+		"agent_type":      "tiller-worker",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, "", "codex"); err != nil {
+		t.Fatalf("RunWithBackend error: %v", err)
+	}
+	if ctx := parseAdditionalContext(t, bytes.TrimSpace(out.Bytes())); !strings.Contains(ctx, "Tiller execution agent") {
+		t.Fatalf("write failure altered Codex context output: %s", ctx)
+	}
+}
+
+func TestAmbientDisabledMarkerPassthrough(t *testing.T) {
+	p := fableTranscript(t)
+	dir := t.TempDir()
+	if _, _, err := ambientgate.Disable(dir); err != nil {
+		t.Fatalf("disable ambient: %v", err)
+	}
+
+	event := map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "Edit",
+		"tool_input":      map[string]any{"file_path": filepath.Join(dir, "main.go")},
+		"transcript_path": p,
+		"agent_id":        "",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	old := os.Getenv("TILLER_ROLE")
+	os.Unsetenv("TILLER_ROLE")
+	t.Cleanup(func() {
+		if old != "" {
+			os.Setenv("TILLER_ROLE", old)
+		}
+	})
+
+	var out bytes.Buffer
+	if err := Run(strings.NewReader(string(data)), &out, dir); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if got := bytes.TrimSpace(out.Bytes()); len(got) != 0 {
+		t.Fatalf("ambient disabled should pass through silently, got %s", got)
+	}
 }
 
 // TestAllowHyphaKnowledge_Recall: hypha recall is allowed for fable ambient.
@@ -545,6 +2169,33 @@ func TestAllowHyphaKnowledge_AllowLs(t *testing.T) {
 	decision := runAmbientHookFull(t, p, "Bash", map[string]any{"command": "ls -la"})
 	if decision != "allow" {
 		t.Errorf("expected allow for ls -la (readonly utility), got %q", decision)
+	}
+}
+
+func TestAllowCodexExec_MediumExecution(t *testing.T) {
+	p := fableTranscript(t)
+	cmd := `codex exec -m gpt-5.5 -c model_reasoning_effort=medium "make the requested bounded edit"`
+	decision := runAmbientHookFull(t, p, "Bash", map[string]any{"command": cmd})
+	if decision != "allow" {
+		t.Errorf("expected allow for constrained medium Codex exec, got %q", decision)
+	}
+}
+
+func TestAllowCodexExec_XHighReadOnlyReview(t *testing.T) {
+	p := fableTranscript(t)
+	cmd := `codex exec --model gpt-5.5 --config model_reasoning_effort=xhigh --sandbox read-only --output-last-message .tiller/reports/review.md "review the current diff"`
+	decision := runAmbientHookFull(t, p, "Bash", map[string]any{"command": cmd})
+	if decision != "allow" {
+		t.Errorf("expected allow for constrained xhigh read-only Codex exec, got %q", decision)
+	}
+}
+
+func TestDenyCodexExec_XHighWithoutReadOnly(t *testing.T) {
+	p := fableTranscript(t)
+	cmd := `codex exec --model gpt-5.5 --config model_reasoning_effort=xhigh "review the current diff"`
+	decision := runAmbientHookFull(t, p, "Bash", map[string]any{"command": cmd})
+	if decision != "deny" {
+		t.Errorf("expected deny for xhigh Codex exec without read-only sandbox, got %q", decision)
 	}
 }
 
@@ -777,7 +2428,7 @@ func TestAllowMarkdownAuthoring_CodeDominantEdit(t *testing.T) {
 	}
 }
 
-// ─── Gap 1: orchestration/harness tools ─────────────────────────────────────
+// ─── Gap 1: orchestration tools ─────────────────────────────────────────────
 
 // TestGap1_ToolSearchAllowed: ToolSearch is allowed for the ambient orchestrator.
 func TestGap1_ToolSearchAllowed(t *testing.T) {
@@ -803,6 +2454,48 @@ func TestGap1_TaskUpdateAllowed(t *testing.T) {
 	decision := runAmbientHookFull(t, p, "TaskUpdate", map[string]any{"id": "t1", "status": "in_progress"})
 	if decision != "allow" {
 		t.Errorf("expected allow for TaskUpdate, got %q", decision)
+	}
+}
+
+func TestCodexNamespacedSpawnAgentAllowed(t *testing.T) {
+	p := codexTranscript(t, "xhigh")
+	out := runCodexAmbientHook(t, p, "functions.spawn_agent", map[string]any{
+		"agent": "tiller-worker",
+	})
+	if len(out) != 0 {
+		t.Fatalf("Codex namespaced spawn_agent allow should produce no stdout, got %s", out)
+	}
+}
+
+func TestCodexNamespacedLifecycleAllowed(t *testing.T) {
+	p := codexTranscript(t, "xhigh")
+	out := runCodexAmbientHook(t, p, "functions.update_plan", map[string]any{
+		"plan": []map[string]any{{"step": "dispatch work", "status": "in_progress"}},
+	})
+	if len(out) != 0 {
+		t.Fatalf("Codex namespaced update_plan allow should produce no stdout, got %s", out)
+	}
+}
+
+func TestCodexNamespacedExecCommandDenied(t *testing.T) {
+	p := codexTranscript(t, "xhigh")
+	out := runCodexAmbientHook(t, p, "functions.exec_command", map[string]any{
+		"cmd": "go test ./...",
+	})
+	if len(out) == 0 {
+		t.Fatal("expected Codex deny output for root functions.exec_command in xhigh session")
+	}
+	if decision := parseAmbientDecision(t, out); decision != "deny" {
+		t.Fatalf("expected deny, got %q", decision)
+	}
+	reason := parseDecisionReason(t, out)
+	for _, want := range []string{"DenyExecution", "root can read/search directly", "spawn_agent", "agent_type=\"tiller-worker\"", "wait_agent/close_agent"} {
+		if !strings.Contains(reason, want) {
+			t.Fatalf("Codex deny reason missing %q:\n%s", want, reason)
+		}
+	}
+	if strings.Contains(reason, "Task tool") {
+		t.Fatalf("Codex deny reason must not mention Claude Task tool:\n%s", reason)
 	}
 }
 
@@ -899,6 +2592,16 @@ func TestSelfUninstall_AllowProject(t *testing.T) {
 	decision := runAmbientHookFull(t, p, "Bash", map[string]any{"command": "tiller uninstall --project"})
 	if decision != "allow" {
 		t.Errorf("expected allow for 'tiller uninstall --project', got %q", decision)
+	}
+}
+
+// TestSelfUninstall_AllowBackendProject: project-scoped backend uninstall is
+// allowed so a gated session can remove the matching project install.
+func TestSelfUninstall_AllowBackendProject(t *testing.T) {
+	p := fableTranscript(t)
+	decision := runAmbientHookFull(t, p, "Bash", map[string]any{"command": "tiller uninstall --backend codex --project"})
+	if decision != "allow" {
+		t.Errorf("expected allow for 'tiller uninstall --backend codex --project', got %q", decision)
 	}
 }
 

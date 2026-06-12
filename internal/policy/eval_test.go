@@ -2,11 +2,14 @@ package policy
 
 import (
 	"testing"
+
+	"m31labs.dev/tiller/internal/run"
 )
 
 // dispatchLoaded caches the loaded dispatch policy for tests.
 var dispatchLoaded *Loaded
 var toolgateLoaded *Loaded
+var ambientNextActionLoaded *Loaded
 
 func init() {
 	var err error
@@ -17,6 +20,10 @@ func init() {
 	toolgateLoaded, err = Load("toolgate", "")
 	if err != nil {
 		panic("load toolgate policy: " + err.Error())
+	}
+	ambientNextActionLoaded, err = Load("ambient_next_action", "")
+	if err != nil {
+		panic("load ambient_next_action policy: " + err.Error())
 	}
 }
 
@@ -147,6 +154,28 @@ func TestDispatch_Depth4MaxDepth4_Deny(t *testing.T) {
 	}
 	if res.Rule != "DenyDepthBeyondPolicy" {
 		t.Errorf("depth4 max4: rule = %q, want DenyDepthBeyondPolicy", res.Rule)
+	}
+}
+
+func TestDispatch_DefaultMaxDepth2_DenyDepth2Queued(t *testing.T) {
+	req := DispatchRequest{
+		Role:         "worker",
+		CallerRole:   "worker",
+		CallerDepth:  run.DefaultMaxDepth,
+		Queued:       true,
+		RunID:        "20260609-000000-ab02b",
+		ReasonBudget: 2,
+		MaxDepth:     run.DefaultMaxDepth,
+	}
+	res, err := EvalDispatch(dispatchLoaded, req)
+	if err != nil {
+		t.Fatalf("EvalDispatch depth2 queued max2: %v", err)
+	}
+	if res.Verdict != VerdictDeny {
+		t.Errorf("depth2 queued max2: verdict = %s, want Deny", res.Verdict)
+	}
+	if res.Rule != "DenyDepthBeyondPolicy" {
+		t.Errorf("depth2 queued max2: rule = %q, want DenyDepthBeyondPolicy", res.Rule)
 	}
 }
 
@@ -369,5 +398,162 @@ func TestToolCall_ReviewerWrite_ScratchTrue_Allow(t *testing.T) {
 	}
 	if res.Verdict != VerdictAllow {
 		t.Errorf("verdict = %s, want Allow (rule=%s reason=%s)", res.Verdict, res.Rule, res.Reason)
+	}
+}
+
+func TestAmbientNextActionDecisions(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*AmbientNextActionRequest)
+		want   string
+	}{
+		{
+			name: "checkpoint fresh",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.DistillationAvailable = true
+				req.DistillationCount = 1
+				req.DistillationAgeSeconds = 120
+				req.DistillationStatus = "fresh"
+				req.CheckpointFreshCount = 1
+				req.CheckpointHasVerification = true
+				req.RiskChangedFilesCount = 2
+			},
+			want: "checkpoint",
+		},
+		{
+			name: "checkpoint proposed",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.DistillationAvailable = true
+				req.DistillationCount = 1
+				req.DistillationAgeSeconds = 120
+				req.DistillationStatus = "fresh"
+				req.CheckpointProposedCount = 1
+				req.CheckpointHasVerification = true
+				req.RiskChangedFilesCount = 2
+			},
+			want: "checkpoint",
+		},
+		{
+			name: "review verified policy checkpoint",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.CheckpointFreshCount = 1
+				req.CheckpointHasVerification = true
+				req.RiskChangedFilesCount = 1
+				req.RiskTouchesPolicy = true
+			},
+			want: "review",
+		},
+		{
+			name: "review verified sandbox checkpoint",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.CheckpointProposedCount = 1
+				req.CheckpointHasVerification = true
+				req.RiskChangedFilesCount = 1
+				req.RiskTouchesSandbox = true
+			},
+			want: "review",
+		},
+		{
+			name: "review verified conflicting checkpoint",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.CheckpointFreshCount = 1
+				req.CheckpointHasVerification = true
+				req.CheckpointConflictingCount = 1
+				req.RiskChangedFilesCount = 1
+			},
+			want: "review",
+		},
+		{
+			name: "late checkpoint distills",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.CheckpointLateCount = 1
+				req.CheckpointHasVerification = true
+				req.RiskChangedFilesCount = 1
+			},
+			want: "distill",
+		},
+		{
+			name: "wait",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.WorkPendingDescriptorCount = 1
+				req.WorkPendingAgentCount = 1
+			},
+			want: "wait",
+		},
+		{
+			name: "distill stale",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.WorkStaleAgentCount = 1
+				req.DistillationStatus = "stale"
+			},
+			want: "distill",
+		},
+		{
+			name: "distill spend warn",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.RunOutputBudgetBand = "warn"
+			},
+			want: "distill",
+		},
+		{
+			name: "debug",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.WorkFailedAgentCount = 1
+			},
+			want: "debug",
+		},
+		{
+			name: "retry",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.WorkFailedDescriptorCount = 1
+			},
+			want: "retry",
+		},
+		{
+			name: "review",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.RiskTouchesPolicy = true
+				req.RiskChangedFilesCount = 1
+			},
+			want: "review",
+		},
+		{
+			name: "halt",
+			mutate: func(req *AmbientNextActionRequest) {
+				req.RunOutputBudgetBand = "over"
+				req.WorkPendingAgentCount = 1
+			},
+			want: "halt",
+		},
+		{
+			name:   "proceed",
+			mutate: func(req *AmbientNextActionRequest) {},
+			want:   "proceed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := baselineAmbientNextActionRequest()
+			tt.mutate(&req)
+			res, err := EvalAmbientNextAction(ambientNextActionLoaded, req)
+			if err != nil {
+				t.Fatalf("EvalAmbientNextAction: %v", err)
+			}
+			if res.Decision.Action != tt.want {
+				t.Fatalf("action = %q, want %q; decision=%+v", res.Decision.Action, tt.want, res.Decision)
+			}
+			if res.Decision.Confidence == 0 || res.Decision.Risk == "" || res.Decision.Reason == "" || res.Decision.Target == "" || res.Decision.BudgetPosture == "" {
+				t.Fatalf("decision missing required fields: %+v", res.Decision)
+			}
+		})
+	}
+}
+
+func baselineAmbientNextActionRequest() AmbientNextActionRequest {
+	return AmbientNextActionRequest{
+		RunStatus:              "running",
+		RunReasonBudget:        2,
+		RunOutputBudgetBand:    "ok",
+		RunReasoningBudgetBand: "ok",
 	}
 }

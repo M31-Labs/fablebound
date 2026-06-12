@@ -6,3 +6,16 @@ candidates = ["claude-headless:anthropic/opus"]
 
 [tiers.execute]
 candidates = ["claude-headless:anthropic/sonnet", "claude-headless:anthropic/haiku"]
+
+[ambient.claude-code]
+detector = "claude-jsonl-transcript"
+govern_tiers = ["reason"]
+reason_models = ["fable", "claude-fable-5"]
+scrutiny_models = ["opus", "claude-opus-4-8"]
+execute_models = ["sonnet", "claude-sonnet-4-5", "haiku", "claude-haiku-4-5"]
+
+[ambient.codex]
+detector = "codex-jsonl-transcript"
+govern_tiers = ["reason"]
+reason_models = ["5.5 xhigh", "gpt-5.5 xhigh"]
+execute_models = ["5.5 high", "5.5 medium", "5.5 low", "gpt-5.5 high", "gpt-5.5 medium", "gpt-5.5 low"]

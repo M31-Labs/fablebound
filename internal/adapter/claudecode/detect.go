@@ -1,9 +1,8 @@
 // Package claudecode provides the Claude Code interactive-session adapter for
 // tiller (spec.tiller-provider-agnostic §2.1).
 //
-// This package is the ONLY place in the tiller codebase where vendor model IDs
-// (fable tier model strings) are referenced — spec §2.1 confinement.  No other
-// package should contain bare model-ID literals for fable/claude-fable-* models.
+// Backend-specific transcript parsing is confined here. Provider model IDs are
+// loaded from tier ambient config rather than hardcoded in this package.
 package claudecode
 
 import (
@@ -13,14 +12,17 @@ import (
 	"io"
 	"os"
 	"slices"
+
+	"m31labs.dev/tiller/internal/scratch"
+	"m31labs.dev/tiller/internal/tier"
 )
 
-// fableModels is the set of model IDs that identify the fable (reason-tier)
-// model family.  THIS MAP IS THE SINGLE CANONICAL LOCATION for fable model IDs
-// in the tiller codebase — spec §2.1 confinement.
-var fableModels = map[string]bool{
-	"claude-fable-5": true,
-	"fable":          true,
+func defaultAmbientConfig() *tier.AmbientConfig {
+	cfg, err := tier.Load("")
+	if err != nil {
+		return nil
+	}
+	return cfg.AmbientConfig("claude-code")
 }
 
 // transcriptAssistantLine is the minimal struct we need from a transcript line.
@@ -30,6 +32,15 @@ type transcriptAssistantLine struct {
 	AgentID     string `json:"agentId"`
 	Message     struct {
 		Model string `json:"model"`
+	} `json:"message"`
+}
+
+type transcriptUsageLine struct {
+	Type        string `json:"type"`
+	IsSidechain *bool  `json:"isSidechain"`
+	AgentID     string `json:"agentId"`
+	Message     struct {
+		Usage scratch.TokenUsage `json:"usage"`
 	} `json:"message"`
 }
 
@@ -170,10 +181,9 @@ func tailLines(f *os.File, maxLines int) ([]string, error) {
 // DetectTier reads up to the last 400 lines of the transcript at
 // transcriptPath and returns the tier and whether detection succeeded.
 //
-// Returns ("reason", true) when the last qualifying root assistant turn is a
-// fable model — the caller should apply reason-tier (ambient orchestrator)
-// policy.  Returns ("", false) on any error, empty file, or when the last
-// qualifying turn is a non-fable model (fail open).
+// Returns (tier, true) when the last qualifying root assistant turn maps to a
+// configured tier governed by ambient policy. Returns ("", false) on any error,
+// empty file, or when the last qualifying turn is not governed (fail open).
 //
 // Hardening applied:
 //   - Fix 1: skips lines where message.model == "<synthetic>".
@@ -186,6 +196,13 @@ func tailLines(f *os.File, maxLines int) ([]string, error) {
 //
 // On any error or no qualifier found returns ("", false) — fail open.
 func DetectTier(transcriptPath string) (tier string, ok bool) {
+	return DetectTierWithConfig(transcriptPath, defaultAmbientConfig())
+}
+
+// DetectTierWithConfig is DetectTier with an explicit ambient backend config.
+// It lets callers test or select provider-specific model aliases without adding
+// model literals to this package.
+func DetectTierWithConfig(transcriptPath string, ambient *tier.AmbientConfig) (tierName string, ok bool) {
 	if transcriptPath == "" {
 		return "", false
 	}
@@ -212,8 +229,9 @@ func DetectTier(transcriptPath string) (tier string, ok bool) {
 		}
 		if isQualifyingAssistantLine(tl) {
 			m := tl.Message.Model
-			if fableModels[m] {
-				return "reason", true
+			tierName := ambient.ModelTier(m)
+			if ambient.GovernsTier(tierName) {
+				return tierName, true
 			}
 			return "", false
 		}
@@ -236,32 +254,68 @@ func DetectTier(transcriptPath string) (tier string, ok bool) {
 	if lastModel == "" {
 		return "", false
 	}
-	if fableModels[lastModel] {
-		return "reason", true
+	tierName = ambient.ModelTier(lastModel)
+	if ambient.GovernsTier(tierName) {
+		return tierName, true
 	}
 	return "", false
 }
 
+// LatestTokenUsage returns the latest root assistant message usage visible in
+// the tail of a Claude Code JSONL transcript. It is bounded to the same tail
+// window used for hot-path model detection and returns nil when usage is absent
+// or only present on sidechain/subagent lines.
+func LatestTokenUsage(transcriptPath string) *scratch.TokenUsage {
+	if transcriptPath == "" {
+		return nil
+	}
+	f, err := os.Open(transcriptPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	const maxLines = 400
+	tail, err := tailLines(f, maxLines)
+	if err != nil {
+		return nil
+	}
+	for _, line := range slices.Backward(tail) {
+		var tl transcriptUsageLine
+		if err := json.Unmarshal([]byte(line), &tl); err != nil {
+			continue
+		}
+		if tl.Type != "assistant" {
+			continue
+		}
+		if tl.IsSidechain != nil && *tl.IsSidechain {
+			continue
+		}
+		if tl.Message.Usage.Empty() {
+			continue
+		}
+		usage := tl.Message.Usage
+		return &usage
+	}
+	return nil
+}
+
 // IsFableModel reports whether model is a fable-tier model ID.
-// Exported so hook.go can remain free of model-ID literals while still
-// making the old lastFableModelInTranscript compatible during the migration.
+// Kept for compatibility with older tests and callers. New code should use
+// ModelTier or tier.AmbientConfig directly.
 func IsFableModel(model string) bool {
-	return fableModels[model]
+	return defaultAmbientConfig().ModelTier(model) == "reason"
 }
 
 // ModelTier maps a model string to its tier label.
-//   - "reason" — model is in the fable (reason-tier) family
+//   - "reason" — model is in the configured reason-tier aliases
 //   - ""       — model string is empty (absent / not specified)
-//   - "other"  — model is non-empty but not a fable model
+//   - "other"  — model is non-empty but not a configured tier alias
 //
-// Vendor model IDs are confined to this package (spec §2.1); callers receive
-// only the opaque tier string.
+// Callers receive only the opaque tier string.
 func ModelTier(model string) string {
 	if model == "" {
 		return ""
 	}
-	if fableModels[model] {
-		return "reason"
-	}
-	return "other"
+	return defaultAmbientConfig().ModelTier(model)
 }

@@ -44,12 +44,13 @@ var maxTranscriptParseBytes int64 = 64 << 20 // 64 MiB
 //
 // Use parseClaudeResult to decode either shape.
 type ClaudeResult struct {
-	Type      string  `json:"type"`
-	Result    string  `json:"result"`
-	CostUSD   float64 // normalised from cost_usd (legacy) or total_cost_usd (real)
-	NumTurns  int     `json:"num_turns"`
-	SessionID string  `json:"session_id"`
-	IsError   bool    `json:"is_error"`
+	Type       string  `json:"type"`
+	Result     string  `json:"result"`
+	CostUSD    float64 // normalised from cost_usd (legacy) or total_cost_usd (real)
+	NumTurns   int     `json:"num_turns"`
+	SessionID  string  `json:"session_id"`
+	IsError    bool    `json:"is_error"`
+	TokenUsage *scratch.TokenUsage
 }
 
 // parseClaudeResult decodes the raw bytes captured from claude's stdout and
@@ -75,13 +76,14 @@ func parseClaudeResult(data []byte) (ClaudeResult, error) {
 		// Real claude ≥2.1.172: JSON array of event objects.
 		// rawArrayEvent is a minimal struct for one event in the array.
 		type rawArrayEvent struct {
-			Type         string  `json:"type"`
-			Result       string  `json:"result"`
-			TotalCostUSD float64 `json:"total_cost_usd"`
-			NumTurns     int     `json:"num_turns"`
-			SessionID    string  `json:"session_id"`
-			IsError      bool    `json:"is_error"`
-			Subtype      string  `json:"subtype"`
+			Type         string         `json:"type"`
+			Result       string         `json:"result"`
+			TotalCostUSD float64        `json:"total_cost_usd"`
+			NumTurns     int            `json:"num_turns"`
+			SessionID    string         `json:"session_id"`
+			IsError      bool           `json:"is_error"`
+			Subtype      string         `json:"subtype"`
+			Usage        tokenUsageJSON `json:"usage"`
 		}
 		var events []rawArrayEvent
 		if err := json.Unmarshal(trimmed, &events); err != nil {
@@ -92,12 +94,13 @@ func parseClaudeResult(data []byte) (ClaudeResult, error) {
 
 			if e.Type == "result" {
 				return ClaudeResult{
-					Type:      e.Type,
-					Result:    e.Result,
-					CostUSD:   e.TotalCostUSD,
-					NumTurns:  e.NumTurns,
-					SessionID: e.SessionID,
-					IsError:   e.IsError,
+					Type:       e.Type,
+					Result:     e.Result,
+					CostUSD:    e.TotalCostUSD,
+					NumTurns:   e.NumTurns,
+					SessionID:  e.SessionID,
+					IsError:    e.IsError,
+					TokenUsage: e.Usage.toScratch(),
 				}, nil
 			}
 		}
@@ -107,25 +110,51 @@ func parseClaudeResult(data []byte) (ClaudeResult, error) {
 	// Legacy / stub shape: single JSON object, possibly preceded by log noise.
 	// trimOutput finds the first line whose first non-whitespace byte is '{'.
 	type rawLegacyResult struct {
-		Type      string  `json:"type"`
-		Result    string  `json:"result"`
-		CostUSD   float64 `json:"cost_usd"`
-		NumTurns  int     `json:"num_turns"`
-		SessionID string  `json:"session_id"`
-		IsError   bool    `json:"is_error"`
+		Type      string         `json:"type"`
+		Result    string         `json:"result"`
+		CostUSD   float64        `json:"cost_usd"`
+		NumTurns  int            `json:"num_turns"`
+		SessionID string         `json:"session_id"`
+		IsError   bool           `json:"is_error"`
+		Usage     tokenUsageJSON `json:"usage"`
 	}
 	var raw rawLegacyResult
 	if err := json.Unmarshal(trimOutput(data), &raw); err != nil {
 		return ClaudeResult{}, fmt.Errorf("parse claude single-object output: %w", err)
 	}
 	return ClaudeResult{
-		Type:      raw.Type,
-		Result:    raw.Result,
-		CostUSD:   raw.CostUSD,
-		NumTurns:  raw.NumTurns,
-		SessionID: raw.SessionID,
-		IsError:   raw.IsError,
+		Type:       raw.Type,
+		Result:     raw.Result,
+		CostUSD:    raw.CostUSD,
+		NumTurns:   raw.NumTurns,
+		SessionID:  raw.SessionID,
+		IsError:    raw.IsError,
+		TokenUsage: raw.Usage.toScratch(),
 	}, nil
+}
+
+type tokenUsageJSON struct {
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	ReasoningTokens          int64 `json:"reasoning_tokens"`
+	TotalTokens              int64 `json:"total_tokens"`
+}
+
+func (u tokenUsageJSON) toScratch() *scratch.TokenUsage {
+	usage := scratch.TokenUsage{
+		InputTokens:              u.InputTokens,
+		OutputTokens:             u.OutputTokens,
+		CacheCreationInputTokens: u.CacheCreationInputTokens,
+		CacheReadInputTokens:     u.CacheReadInputTokens,
+		ReasoningTokens:          u.ReasoningTokens,
+		TotalTokens:              u.TotalTokens,
+	}
+	if usage.Empty() {
+		return nil
+	}
+	return &usage
 }
 
 // SuperviseArgs holds everything needed to run the supervisor.
@@ -401,6 +430,7 @@ func Supervise(a SuperviseArgs) error {
 	d.CostUSD = claudeRes.CostUSD
 	d.NumTurns = claudeRes.NumTurns
 	d.SessionID = claudeRes.SessionID
+	d.TokenUsage = claudeRes.TokenUsage
 	_ = startedAt // already recorded in initial dispatch write
 
 	if err := st.WriteDispatch(runID, d); err != nil {

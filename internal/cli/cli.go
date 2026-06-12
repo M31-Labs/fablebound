@@ -94,6 +94,8 @@ func Main(args []string) {
 		{"policy", runPolicy},
 		{"store", runStore},
 		{"hook", runHook},
+		{"ambient", runAmbient},
+		{"codex", runCodex},
 		{"install", runInstall},
 		{"uninstall", runUninstall},
 		{"_supervise", runSupervise},
@@ -141,11 +143,16 @@ Subcommands:
   note add [-|"text"]    append a timestamped note
   runs list|show <id>    list or inspect runs
   promote <run-id>       distill run into a hyphae spore
-  policy vet             compile+typecheck both policies
+  policy vet             compile+typecheck all policies
   store init|status      bootstrap or inspect the PostgreSQL scratch store
-  hook                   internal: PreToolUse/PostToolUse gate (stdin JSON)
-  install [--print]      install PreToolUse/PostToolUse hooks in ~/.claude/settings.json
-  uninstall [--print]    remove tiller hooks from ~/.claude/settings.json
+  hook [--backend b]     internal: backend hook gate (stdin JSON)
+  ambient disable|enable|status|next|step --dry-run|doctor
+                         bypass/restore ambient hooks or print run-control status/descriptor
+  codex doctor           verify project-local Codex ambient install
+  install [--backend b] [--print] [--project|--global]
+                         install backend config and tiller-* personas; no flags prompts for project config
+  uninstall [--backend b] [--print] [--project]
+                         remove backend config and tiller-* personas installed by tiller
   _supervise <run> <id>  internal: detached child supervisor
   version                print version
 

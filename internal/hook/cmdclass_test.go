@@ -56,11 +56,12 @@ func TestClassifyCommand(t *testing.T) {
 		{"git branch --list", "readonly"},    // --list flag
 		{"git branch -l", "readonly"},        // -l flag
 		{"git branch -l 'main'", "readonly"}, // -l + pattern
-		{"git branch -d old", "other"},       // -d → other
-		{"git branch -D main", "other"},      // -D → other
-		{"git checkout main", "other"},       // checkout → other
-		{"git push origin main", "other"},    // push → other
-		{"git add .", "other"},               // add → other
+		{"git branch --show-current", "readonly"},
+		{"git branch -d old", "other"},    // -d → other
+		{"git branch -D main", "other"},   // -D → other
+		{"git checkout main", "other"},    // checkout → other
+		{"git push origin main", "other"}, // push → other
+		{"git add .", "other"},            // add → other
 
 		// ── go variants ──────────────────────────────────────────────────────
 		{"go doc fmt.Println", "readonly"},
@@ -99,6 +100,33 @@ func TestClassifyCommand(t *testing.T) {
 		{"diff a.go b.go", "readonly"},
 		{"jq '.name' package.json", "readonly"},
 		{"column -t", "readonly"},
+		{"nl -ba AGENTS.md", "readonly"},
+		{"sed -n '1,120p' AGENTS.md", "readonly"},
+		{"sed -n '/Root Codex/p' AGENTS.md", "readonly"},
+		{"sed -i 's/a/b/' AGENTS.md", "other"},
+		{"sed -n '1,20w /tmp/out' AGENTS.md", "other"},
+		{"ps aux", "readonly"},
+		{"ps -ef", "readonly"},
+		{"pgrep -af node", "readonly"},
+		{"pidof node", "readonly"},
+		{"lsof -iTCP -sTCP:LISTEN -P -n", "readonly"},
+		{"netstat -tulpn", "readonly"},
+		{"ss -ltnp", "readonly"},
+		{"ss -tulpn", "readonly"},
+		{"ss -K dst 127.0.0.1", "other"},
+		{"ss --kill dst 127.0.0.1", "other"},
+		{"ss --kill=dst", "other"},
+		{"ss -D /tmp/x", "other"},
+		{"ss --diag /tmp/x", "other"},
+		{"ss --diag=/tmp/x", "other"},
+
+		// ── Canopy read-oriented commands ────────────────────────────────────
+		{"canopy search symbol Foo", "readonly"},
+		{"canopy graph call Foo", "readonly"},
+		{"canopy analyze report", "readonly"},
+		{"canopy index build .", "other"},
+		{"canopy init", "other"},
+		{"canopy mcp --root .", "other"},
 
 		// ── tiller variants ───────────────────────────────────────────────────
 		{"tiller runs", "readonly"},
@@ -186,6 +214,9 @@ func TestIsSelfUninstall(t *testing.T) {
 		{"tiller uninstall --project", true},
 		{"tiller uninstall --print --project", true},
 		{"tiller uninstall --project --print", true},
+		{"tiller uninstall --backend codex --project", true},
+		{"tiller uninstall --project --backend claude-code --print", true},
+		{"tiller uninstall --backend=codex", true},
 		// Full path binary — base must be "tiller".
 		{"/usr/local/bin/tiller uninstall", true},
 		{"/home/user/go/bin/tiller uninstall --print", true},
@@ -204,10 +235,15 @@ func TestIsSelfUninstall(t *testing.T) {
 		// ── Denied: duplicate flags ───────────────────────────────────────────
 		{"tiller uninstall --print --print", false},
 		{"tiller uninstall --project --project", false},
+		{"tiller uninstall --backend codex --backend claude-code", false},
+		{"tiller uninstall --backend=codex --backend claude-code", false},
 
 		// ── Denied: unknown flags ─────────────────────────────────────────────
 		{"tiller uninstall --force", false},
 		{"tiller uninstall --dry-run", false},
+		{"tiller uninstall --backend", false},
+		{"tiller uninstall --backend unknown", false},
+		{"tiller uninstall --backend=unknown", false},
 
 		// ── Denied: dangerous patterns ────────────────────────────────────────
 		{"tiller uninstall > /dev/null", false},
@@ -227,6 +263,87 @@ func TestIsSelfUninstall(t *testing.T) {
 			got := IsSelfUninstall(tc.cmd)
 			if got != tc.want {
 				t.Errorf("IsSelfUninstall(%q) = %v, want %v", tc.cmd, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsAmbientControl(t *testing.T) {
+	cases := []struct {
+		cmd  string
+		want bool
+	}{
+		{"tiller ambient disable", true},
+		{"tiller ambient enable", true},
+		{"tiller ambient status", true},
+		{"tiller ambient next", true},
+		{"tiller ambient step --dry-run", true},
+		{"tiller ambient doctor", true},
+		{"tiller ambient off", true},
+		{"/usr/local/bin/tiller ambient on", true},
+		{"tiller ambient disable --force", false},
+		{"tiller ambient next extra", false},
+		{"tiller ambient step", false},
+		{"tiller ambient step --dry-run extra", false},
+		{"tiller ambient step --force", false},
+		{"tiller ambient doctor --force", false},
+		{"tiller ambient unknown", false},
+		{"tiller ambient disable; rm -rf /", false},
+		{"tiller ambient step --dry-run && rm -rf /", false},
+		{"PATH=/tmp/evil tiller ambient disable", false},
+		{"TILLER_RUN_DIR=/tmp/run tiller ambient step --dry-run", false},
+		{"notiller ambient disable", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.cmd, func(t *testing.T) {
+			got := IsAmbientControl(tc.cmd)
+			if got != tc.want {
+				t.Errorf("IsAmbientControl(%q) = %v, want %v", tc.cmd, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsCodexExec(t *testing.T) {
+	cases := []struct {
+		cmd  string
+		want bool
+	}{
+		{`codex exec -m gpt-5.5 -c model_reasoning_effort=medium "implement the fix"`, true},
+		{`codex exec --model=gpt-5.5 --config=model_reasoning_effort=high --sandbox workspace-write "debug this"`, true},
+		{`codex exec --model gpt-5.5 --config 'model_reasoning_effort="xhigh"' --sandbox read-only "review the diff"`, true},
+		{`codex e -m gpt-5.5 -c model_reasoning_effort=med "small edit"`, true},
+		{`codex exec -m gpt-5.5 -c model_reasoning_effort=xhigh --sandbox read-only --output-last-message .tiller/reports/review.md "review"`, true},
+		{`codex exec -m gpt-5.5 -c model_reasoning_effort=medium --cd . "work"`, true},
+		{`codex exec -m gpt-5.5 -c model_reasoning_effort=medium --cd packages/app "work"`, true},
+		{`/home/draco/.bun/bin/codex exec -m gpt-5.5 -c model_reasoning_effort=medium --json --color never "work"`, true},
+
+		// Must be explicit about model and effort.
+		{`codex exec -c model_reasoning_effort=medium "work"`, false},
+		{`codex exec -m gpt-5.5 "work"`, false},
+		{`codex exec -m gpt-5.4 -c model_reasoning_effort=medium "work"`, false},
+
+		// xhigh is scrutiny/review only and must be read-only.
+		{`codex exec -m gpt-5.5 -c model_reasoning_effort=xhigh "review"`, false},
+		{`codex exec -m gpt-5.5 -c model_reasoning_effort=xhigh --sandbox workspace-write "review"`, false},
+
+		// Dangerous flags and broad config are denied.
+		{`codex exec -m gpt-5.5 -c model_reasoning_effort=medium --sandbox danger-full-access "work"`, false},
+		{`codex exec -m gpt-5.5 -c model_reasoning_effort=medium --dangerously-bypass-approvals-and-sandbox "work"`, false},
+		{`codex exec -m gpt-5.5 -c model_reasoning_effort=medium -c 'sandbox_permissions=["disk-full-read-access"]' "work"`, false},
+		{`codex exec -m gpt-5.5 -c model_reasoning_effort=xhigh --sandbox read-only -o review.md "review"`, false},
+		{`codex exec -m gpt-5.5 -c model_reasoning_effort=xhigh --sandbox read-only -o /tmp/review.md "review"`, false},
+		{`codex exec -m gpt-5.5 -c model_reasoning_effort=medium --cd /tmp "work"`, false},
+		{`codex exec -m gpt-5.5 -c model_reasoning_effort=medium --cd ../other "work"`, false},
+		{`codex exec -m gpt-5.5 -c model_reasoning_effort=medium && rm -rf /`, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.cmd, func(t *testing.T) {
+			got := IsCodexExec(tc.cmd)
+			if got != tc.want {
+				t.Errorf("IsCodexExec(%q) = %v, want %v", tc.cmd, got, tc.want)
 			}
 		})
 	}

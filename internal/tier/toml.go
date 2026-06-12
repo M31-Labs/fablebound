@@ -14,6 +14,7 @@ const (
 	sectionNone    sectionKind = iota
 	sectionTiers               // [tiers.<name>]
 	sectionAdapter             // [adapter.<name>]
+	sectionAmbient             // [ambient.<name>]
 )
 
 // parse parses the hand-rolled TOML subset used for models.toml.
@@ -28,12 +29,17 @@ const (
 //	argv    = ["cmd", "{brief}", "{report}"]  — single-line string array
 //	report  = "stdout"  — string value
 //	timeout = "5m"      — string value
+//	[ambient.<name>]  — interactive ambient backend section headers
+//	detector = "claude-jsonl-transcript"  — string value
+//	govern_tiers = ["reason"]             — single-line string array
+//	reason_models = ["fable"]             — tier aliases; <tier>_models
 //
 // Any other content is rejected. Line numbers in errors are 1-based.
 func parse(data []byte) (*Config, error) {
 	cfg := &Config{
 		tiers:    make(map[string][]Candidate),
 		adapters: make(map[string]*AdapterConfig),
+		ambient:  make(map[string]*AmbientConfig),
 	}
 
 	scanner := bufio.NewScanner(bytes.NewReader(data))
@@ -41,6 +47,7 @@ func parse(data []byte) (*Config, error) {
 		currentKind    sectionKind
 		currentTier    string
 		currentAdapter string
+		currentAmbient string
 	)
 	lineNum := 0
 
@@ -63,6 +70,7 @@ func parse(data []byte) (*Config, error) {
 
 			const tiersPrefix = "tiers."
 			const adapterPrefix = "adapter."
+			const ambientPrefix = "ambient."
 
 			switch {
 			case strings.HasPrefix(inner, tiersPrefix):
@@ -73,6 +81,7 @@ func parse(data []byte) (*Config, error) {
 				currentKind = sectionTiers
 				currentTier = name
 				currentAdapter = ""
+				currentAmbient = ""
 				// Initialise empty candidate slice so override detection works even
 				// for tiers with no candidates key yet.
 				if _, exists := cfg.tiers[currentTier]; !exists {
@@ -87,12 +96,28 @@ func parse(data []byte) (*Config, error) {
 				currentKind = sectionAdapter
 				currentAdapter = name
 				currentTier = ""
+				currentAmbient = ""
 				if _, exists := cfg.adapters[currentAdapter]; !exists {
 					cfg.adapters[currentAdapter] = &AdapterConfig{Report: "stdout"}
 				}
 
+			case strings.HasPrefix(inner, ambientPrefix):
+				name := inner[len(ambientPrefix):]
+				if name == "" || strings.ContainsAny(name, " \t[]") {
+					return nil, fmt.Errorf("line %d: invalid ambient backend name in section header: %q", lineNum, line)
+				}
+				currentKind = sectionAmbient
+				currentAmbient = name
+				currentTier = ""
+				currentAdapter = ""
+				if _, exists := cfg.ambient[currentAmbient]; !exists {
+					cfg.ambient[currentAmbient] = &AmbientConfig{
+						Models: make(map[string][]string),
+					}
+				}
+
 			default:
-				return nil, fmt.Errorf("line %d: unsupported section %q (want [tiers.<name>] or [adapter.<name>])", lineNum, line)
+				return nil, fmt.Errorf("line %d: unsupported section %q (want [tiers.<name>], [adapter.<name>], or [ambient.<name>])", lineNum, line)
 			}
 			continue
 		}
@@ -141,6 +166,55 @@ func parse(data []byte) (*Config, error) {
 			}
 			return nil, fmt.Errorf("line %d: unexpected content in [adapter.%s]: %q", lineNum, currentAdapter, line)
 
+		case sectionAmbient:
+			ac := cfg.ambient[currentAmbient]
+			if strings.HasPrefix(line, "detector") {
+				val, err := parseStringValue(line, "detector", lineNum)
+				if err != nil {
+					return nil, err
+				}
+				if val == "" {
+					return nil, fmt.Errorf("line %d: detector must not be empty", lineNum)
+				}
+				ac.Detector = val
+				continue
+			}
+			if strings.HasPrefix(line, "govern_tiers") {
+				tiers, err := parseStringArrayLine(line, "govern_tiers", lineNum)
+				if err != nil {
+					return nil, err
+				}
+				if len(tiers) == 0 {
+					return nil, fmt.Errorf("line %d: govern_tiers list must not be empty", lineNum)
+				}
+				ac.GovernTiers = tiers
+				continue
+			}
+			if strings.Contains(line, "_models") {
+				before, _, ok := strings.Cut(line, "=")
+				if !ok {
+					return nil, fmt.Errorf("line %d: missing '=' in ambient model assignment", lineNum)
+				}
+				key := strings.TrimSpace(before)
+				if !strings.HasSuffix(key, "_models") {
+					return nil, fmt.Errorf("line %d: unexpected key %q in [ambient.%s]", lineNum, key, currentAmbient)
+				}
+				tierName := strings.TrimSuffix(key, "_models")
+				if tierName == "" || strings.ContainsAny(tierName, " \t.[]") {
+					return nil, fmt.Errorf("line %d: invalid ambient tier name in key %q", lineNum, key)
+				}
+				models, err := parseStringArrayLine(line, key, lineNum)
+				if err != nil {
+					return nil, err
+				}
+				if len(models) == 0 {
+					return nil, fmt.Errorf("line %d: %s list must not be empty", lineNum, key)
+				}
+				ac.Models[tierName] = models
+				continue
+			}
+			return nil, fmt.Errorf("line %d: unexpected content in [ambient.%s]: %q", lineNum, currentAmbient, line)
+
 		default:
 			return nil, fmt.Errorf("line %d: unexpected content outside a section: %q", lineNum, line)
 		}
@@ -153,6 +227,17 @@ func parse(data []byte) (*Config, error) {
 	for name, cands := range cfg.tiers {
 		if cands == nil {
 			return nil, fmt.Errorf("tier %q declared but has no candidates", name)
+		}
+	}
+	for name, ac := range cfg.ambient {
+		if ac.Detector == "" {
+			return nil, fmt.Errorf("ambient backend %q declared but has no detector", name)
+		}
+		if len(ac.GovernTiers) == 0 {
+			return nil, fmt.Errorf("ambient backend %q declared but has no govern_tiers", name)
+		}
+		if len(ac.Models) == 0 {
+			return nil, fmt.Errorf("ambient backend %q declared but has no *_models entries", name)
 		}
 	}
 

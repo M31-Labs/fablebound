@@ -163,6 +163,72 @@ func (t *TeeStore) DispatchFacts(runID string) (Facts, error) {
 	return t.fs.DispatchFacts(runID)
 }
 
+// ── Agent / checkpoint lifecycle records ─────────────────────────────────────
+
+func (t *TeeStore) CreateAgentRun(runID string, ar *AgentRun) error {
+	if err := t.fs.CreateAgentRun(runID, ar); err != nil {
+		return err
+	}
+	arCopy := cloneAgentRun(ar)
+	t.enqueue(func() {
+		if err := t.pg.CreateAgentRun(runID, arCopy); err != nil {
+			log.Printf("teestore: mirror CreateAgentRun %s/%s: %v", runID, arCopy.ID, err)
+		}
+	})
+	return nil
+}
+
+func (t *TeeStore) WriteAgentRun(runID string, ar *AgentRun) error {
+	if err := t.fs.WriteAgentRun(runID, ar); err != nil {
+		return err
+	}
+	arCopy := cloneAgentRun(ar)
+	t.enqueue(func() {
+		if err := t.pg.WriteAgentRun(runID, arCopy); err != nil {
+			log.Printf("teestore: mirror WriteAgentRun %s/%s: %v", runID, arCopy.ID, err)
+		}
+	})
+	return nil
+}
+
+func (t *TeeStore) ListAgentRuns(runID string) ([]*AgentRun, error) {
+	return t.fs.ListAgentRuns(runID)
+}
+
+func (t *TeeStore) AppendCheckpointCandidate(runID string, c CheckpointCandidate) error {
+	if err := t.fs.AppendCheckpointCandidate(runID, c); err != nil {
+		return err
+	}
+	cCopy := cloneCheckpointCandidate(c)
+	t.enqueue(func() {
+		if err := t.pg.AppendCheckpointCandidate(runID, cCopy); err != nil {
+			log.Printf("teestore: mirror AppendCheckpointCandidate %s/%s: %v", runID, cCopy.ID, err)
+		}
+	})
+	return nil
+}
+
+func (t *TeeStore) ListCheckpointCandidates(runID string) ([]CheckpointCandidate, error) {
+	return t.fs.ListCheckpointCandidates(runID)
+}
+
+func (t *TeeStore) AppendLedgerEvent(runID string, ev LedgerEvent) error {
+	if err := t.fs.AppendLedgerEvent(runID, ev); err != nil {
+		return err
+	}
+	evCopy := cloneLedgerEvent(ev)
+	t.enqueue(func() {
+		if err := t.pg.AppendLedgerEvent(runID, evCopy); err != nil {
+			log.Printf("teestore: mirror AppendLedgerEvent %s/%s: %v", runID, evCopy.ID, err)
+		}
+	})
+	return nil
+}
+
+func (t *TeeStore) ListLedgerEvents(runID string) ([]LedgerEvent, error) {
+	return t.fs.ListLedgerEvents(runID)
+}
+
 // ── Document records ──────────────────────────────────────────────────────────
 
 func (t *TeeStore) WriteBrief(runID, dispatchID string, body []byte) error {
@@ -330,6 +396,33 @@ func (t *TeeStore) ExpireLeases(runID string) ([]string, error) {
 
 func (t *TeeStore) ListPendingDispatches(runID string) ([]*Dispatch, error) {
 	return t.fs.ListPendingDispatches(runID)
+}
+
+func cloneAgentRun(ar *AgentRun) *AgentRun {
+	if ar == nil {
+		return nil
+	}
+	out := *ar
+	out.ClaimedPaths = append([]string(nil), ar.ClaimedPaths...)
+	out.ChangedFiles = append([]string(nil), ar.ChangedFiles...)
+	out.Verification = append([]string(nil), ar.Verification...)
+	out.Caveats = append([]string(nil), ar.Caveats...)
+	out.Refs = append([]string(nil), ar.Refs...)
+	return &out
+}
+
+func cloneCheckpointCandidate(c CheckpointCandidate) CheckpointCandidate {
+	c.ClaimedPaths = append([]string(nil), c.ClaimedPaths...)
+	c.ChangedFiles = append([]string(nil), c.ChangedFiles...)
+	c.Verification = append([]string(nil), c.Verification...)
+	c.Caveats = append([]string(nil), c.Caveats...)
+	c.Refs = append([]string(nil), c.Refs...)
+	return c
+}
+
+func cloneLedgerEvent(ev LedgerEvent) LedgerEvent {
+	ev.Refs = append([]string(nil), ev.Refs...)
+	return ev
 }
 
 // ── interface compliance ──────────────────────────────────────────────────────

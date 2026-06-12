@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// TestDefaultsCompile verifies that both embedded default policies compile
+// TestDefaultsCompile verifies that all embedded default policies compile
 // with schema typecheck successfully.
 func TestDefaultsCompile(t *testing.T) {
-	for _, kind := range []string{"dispatch", "toolgate"} {
+	for _, kind := range []string{"dispatch", "toolgate", "ambient", "ambient_next_action"} {
 		t.Run(kind, func(t *testing.T) {
 			loaded, err := Load(kind, "")
 			if err != nil {
@@ -58,17 +58,21 @@ rule BogusRule priority 1 {
 // yields the expected nested dispatch.*/caller.*/run.* keys.
 func TestContextMapDispatch(t *testing.T) {
 	req := DispatchRequest{
-		Role:         "worker",
-		Tier:         "execute",
-		Background:   false,
-		BriefBytes:   1024,
-		CallerRole:   "orchestrator",
-		CallerDepth:  0,
-		CallerID:     "root",
-		RunID:        "20260609-123456-ab12",
-		ActiveCount:  1,
-		ReasonCount:  0,
-		ReasonBudget: 2,
+		Role:             "worker",
+		Tier:             "execute",
+		Background:       false,
+		BriefBytes:       1024,
+		Enforcement:      "degraded",
+		SandboxMode:      "process",
+		SandboxProfile:   "execution",
+		HorizonManifests: 1,
+		CallerRole:       "orchestrator",
+		CallerDepth:      0,
+		CallerID:         "root",
+		RunID:            "20260609-123456-ab12",
+		ActiveCount:      1,
+		ReasonCount:      0,
+		ReasonBudget:     2,
 	}
 
 	m := ContextMap(req)
@@ -86,6 +90,26 @@ func TestContextMapDispatch(t *testing.T) {
 	}
 	if got := dispatch["brief_bytes"]; got != 1024 {
 		t.Errorf("dispatch.brief_bytes = %v, want 1024", got)
+	}
+	if got := dispatch["enforcement"]; got != "degraded" {
+		t.Errorf("dispatch.enforcement = %v, want degraded", got)
+	}
+	sandbox, ok := dispatch["sandbox"].(map[string]any)
+	if !ok {
+		t.Fatalf("dispatch.sandbox = %T, want map[string]any", dispatch["sandbox"])
+	}
+	if got := sandbox["mode"]; got != "process" {
+		t.Errorf("dispatch.sandbox.mode = %v, want process", got)
+	}
+	if got := sandbox["profile"]; got != "execution" {
+		t.Errorf("dispatch.sandbox.profile = %v, want execution", got)
+	}
+	horizon, ok := dispatch["horizon"].(map[string]any)
+	if !ok {
+		t.Fatalf("dispatch.horizon = %T, want map[string]any", dispatch["horizon"])
+	}
+	if got := horizon["manifests"]; got != 1 {
+		t.Errorf("dispatch.horizon.manifests = %v, want 1", got)
 	}
 
 	// Check caller.* keys

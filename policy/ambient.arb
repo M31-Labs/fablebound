@@ -5,7 +5,7 @@
 # but may not directly edit, write, or execute.
 
 segment denied_tools {
-    tool.name in ["Edit", "Write", "NotebookEdit", "Bash"]
+    tool.name in ["Edit", "Write", "NotebookEdit", "Bash", "apply_patch", "exec_command", "write_stdin"]
 }
 
 rule HaltAmbient priority 0 {
@@ -15,8 +15,23 @@ rule HaltAmbient priority 0 {
 }
 
 rule AllowRead priority 10 {
-    when { tool.name in ["Read", "Glob", "Grep"] }
-    then Allow { reason: "reading is permitted for the ambient orchestrator" }
+    when {
+        tool.name in [
+            "Read",
+            "Glob",
+            "Grep",
+            "view_image",
+            "WebFetch",
+            "WebSearch",
+            "ToolSearch",
+            "tool_search_tool",
+            "list_mcp_resources",
+            "list_mcp_resource_templates",
+            "read_mcp_resource",
+            "get_goal"
+        ]
+    }
+    then Allow { reason: "read/context gathering is permitted for the ambient orchestrator" }
 }
 
 rule AllowAgent priority 10 {
@@ -29,22 +44,17 @@ rule AllowTodoWrite priority 10 {
     then Allow { reason: "todo management is permitted for planning" }
 }
 
-rule AllowWebFetch priority 10 {
-    when { tool.name == "WebFetch" }
-    then Allow { reason: "web reading is permitted for the ambient orchestrator" }
-}
-
-# Gap 1: orchestration / harness tools that the ambient orchestrator needs.
-# ToolSearch loads deferred tool schemas — without it the orchestrator cannot
-# invoke any deferred tool at all.  Skill, AskUserQuestion, EnterPlanMode,
+# Gap 1: orchestration tools that the ambient orchestrator needs.
+# Skill, AskUserQuestion, EnterPlanMode,
 # ExitPlanMode are orchestration-shaped and must be allowed at the same tier.
 # The Task-tracking family (TaskCreate / TaskGet / TaskList / TaskUpdate /
 # TaskOutput / TaskStop) lets the orchestrator manage in-flight work items;
-# "Task" (the subagent spawner) is already allowed by AllowAgent above.
+# "Task" (the Claude Code subagent spawner) is already allowed by AllowAgent
+# above. Codex multi-agent tool names are included in both bare and hook
+# matcher-concatenated namespace forms.
 rule AllowOrchestrationTools priority 10 {
     when {
         tool.name in [
-            "ToolSearch",
             "Skill",
             "AskUserQuestion",
             "EnterPlanMode",
@@ -54,10 +64,26 @@ rule AllowOrchestrationTools priority 10 {
             "TaskList",
             "TaskUpdate",
             "TaskOutput",
-            "TaskStop"
+            "TaskStop",
+            "spawn_agent",
+            "spawn_agents_on_csv",
+            "send_input",
+            "resume_agent",
+            "wait_agent",
+            "close_agent",
+            "multi_agent_v1spawn_agent",
+            "multi_agent_v1spawn_agents_on_csv",
+            "multi_agent_v1send_input",
+            "multi_agent_v1resume_agent",
+            "multi_agent_v1wait_agent",
+            "multi_agent_v1close_agent",
+            "update_plan",
+            "request_user_input",
+            "create_goal",
+            "update_goal"
         ]
     }
-    then Allow { reason: "orchestration and harness tools are permitted for the ambient orchestrator" }
+    then Allow { reason: "orchestration tools are permitted for the ambient orchestrator" }
 }
 
 # Gap 2: confinement rules for Task/Agent subagent model selection.
@@ -65,16 +91,16 @@ rule AllowOrchestrationTools priority 10 {
 #
 # DenyReasonModelSubagent — blocks Task/Agent calls that carry an explicit
 # reason-tier model override for persona types that should use cheaper tiers.
-# tiller-architect and tiller-deep-report are the only personas legitimately
-# operated at the reason tier; all execution/investigation/review personas
-# should pin to cheaper models via their frontmatter.
+# tiller-architect, tiller-deep-report, tiller-investigator, and
+# tiller-reviewer are permitted to use reason-tier overrides. Execution personas
+# must stay below reason tier.
 rule DenyReasonModelSubagent priority 8 {
     when {
         tool.name in ["Task", "Agent"] and
         tool.agent_model_tier == "reason" and
-        tool.agent_type not in ["tiller-architect", "tiller-deep-report"]
+        tool.agent_type not in ["tiller-architect", "tiller-deep-report", "tiller-investigator", "tiller-reviewer"]
     }
-    then Deny { reason: "tiller: reason-tier model overrides are reserved for tiller-architect and tiller-deep-report. Execution work → tiller-worker or tiller-debugger; investigation → tiller-investigator; review → tiller-reviewer. Remove the model override or select the appropriate tiller-* persona." }
+    then Deny { reason: "tiller: reason-tier model overrides are reserved for design, research, investigation, and review personas. Execution work → tiller-worker or tiller-debugger on a non-reason model. Remove the model override or select the appropriate tiller-* persona." }
 }
 
 # DenyImplicitReasonInheritance — blocks Task/Agent calls with a generic
@@ -88,7 +114,7 @@ rule DenyImplicitReasonInheritance priority 9 {
         tool.agent_type in ["general-purpose", "claude", "Explore", "Plan", ""] and
         tool.agent_model_tier == ""
     }
-    then Deny { reason: "tiller: generic subagent types inherit the ambient reason-tier model when no explicit model is provided. Pass an explicit cheaper model or use a named tiller-* persona (tiller-worker, tiller-debugger, tiller-investigator, tiller-reviewer, tiller-architect, tiller-deep-report) whose frontmatter pins the model." }
+    then Deny { reason: "tiller: generic subagent types inherit the ambient reason-tier model when no explicit model is provided. Pass an explicit cheaper model or use a named tiller-* persona (tiller-scout, tiller-summary, tiller-worker, tiller-debugger, tiller-investigator, tiller-reviewer, tiller-architect, tiller-deep-report) whose frontmatter pins the model." }
 }
 
 # DenyHyphaDaemons — defense-in-depth: even if a future classifier change
@@ -119,14 +145,23 @@ rule DenyHyphaDaemons priority 14 {
 #                      uninstall mutates settings.json; the classifier must stay
 #                      honest.
 #
-# These two classes are combined in one rule to avoid an arbiter v1.8.0 VM
+#   "ambient-control" — temporary testing/control commands:
+#                      "tiller ambient disable|enable|status|next|step --dry-run|doctor".
+#
+#   "codex-exec"    — constrained Codex CLI delegation:
+#                      explicit gpt-5.5, explicit model_reasoning_effort,
+#                      xhigh only with read-only sandboxing, high/medium for
+#                      execution, optional report output under .tiller/, and
+#                      no dangerous sandbox bypass flags.
+#
+# These classes are combined in one rule to avoid an arbiter v1.8.0 VM
 # quirk: having two separate inline-condition rules before a segment-based rule
 # causes the segment rule to not evaluate.  A single OR condition is the
 # correct workaround.
 rule AllowPermittedBash priority 15 {
     when {
-        (tool.name == "Bash") and
-        (tool.command_class == "readonly" or tool.command_class == "self-uninstall")
+        (tool.name in ["Bash", "exec_command"]) and
+        (tool.command_class == "readonly" or tool.command_class == "self-uninstall" or tool.command_class == "ambient-control" or tool.command_class == "codex-exec")
     }
     then Allow { reason: "Bash command permitted for the ambient orchestrator (class: {tool.command_class})" }
 }
@@ -145,5 +180,5 @@ rule AllowMarkdownAuthoring priority 15 {
 
 rule DenyExecution priority 20 {
     when segment denied_tools { true }
-    then Deny { reason: "tiller: ambient orchestrator runs in read/dispatch mode — delegate with the Task tool: code changes → tiller-worker, debugging → tiller-debugger, investigation → tiller-investigator, review → tiller-reviewer; reserve tiller-architect/tiller-deep-report for deep design and research. {tool.name} is not permitted for the root orchestrator agent." }
+    then Deny { reason: "tiller: ambient orchestrator runs in read/dispatch mode — delegate with the Task tool: status compaction → tiller-summary, code changes → tiller-worker, debugging → tiller-debugger, investigation → tiller-investigator, review → tiller-reviewer; reserve tiller-architect/tiller-deep-report for deep design and research. {tool.name} is not permitted for the root orchestrator agent." }
 }

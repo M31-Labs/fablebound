@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"m31labs.dev/tiller/internal/tier"
 )
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -40,6 +42,15 @@ func fixturePath(t *testing.T, name string) string {
 	p := filepath.Join(fixturesDir(t), name)
 	if _, err := os.Stat(p); err != nil {
 		t.Fatalf("testdata fixture not found: %s", p)
+	}
+	return p
+}
+
+func writeTranscript(t *testing.T, lines ...string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
 	}
 	return p
 }
@@ -169,6 +180,31 @@ func TestIsFableModel(t *testing.T) {
 	}
 }
 
+func TestDetectTierWithConfigUsesAmbientAliases(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "codex.jsonl")
+	line := `{"type":"assistant","isSidechain":false,"message":{"model":"5.5 xhigh","role":"assistant","content":[{"type":"text","text":"hi"}]}}` + "\n"
+	if err := os.WriteFile(p, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &tier.AmbientConfig{
+		Detector:    "claude-jsonl-transcript",
+		GovernTiers: []string{"reason"},
+		Models: map[string][]string{
+			"reason":  {"5.5 xhigh"},
+			"execute": {"5.5 high", "5.5 medium", "5.5 low"},
+		},
+	}
+	got, ok := DetectTierWithConfig(p, cfg)
+	if !ok {
+		t.Fatal("DetectTierWithConfig returned ok=false, want true")
+	}
+	if got != "reason" {
+		t.Errorf("tier = %q, want reason", got)
+	}
+}
+
 // ─── Large-transcript correctness + benchmark ────────────────────────────────
 
 // tbHelper is the minimal interface shared by *testing.T and *testing.B.
@@ -240,6 +276,44 @@ func TestDetectTierLarge(t *testing.T) {
 	}
 	if tier != "reason" {
 		t.Errorf("DetectTier large transcript: got tier=%q, want reason", tier)
+	}
+}
+
+func TestLatestTokenUsageRootAssistantOnly(t *testing.T) {
+	p := writeTranscript(t,
+		`{"type":"assistant","isSidechain":false,"message":{"model":"claude-fable-5","role":"assistant","usage":{"input_tokens":11,"output_tokens":22},"content":[{"type":"text","text":"root"}]}}`,
+		`{"type":"assistant","isSidechain":true,"agentId":"agent-1","message":{"model":"claude-sonnet-4-8","role":"assistant","usage":{"input_tokens":999,"output_tokens":999},"content":[{"type":"text","text":"sidechain"}]}}`,
+	)
+
+	usage := LatestTokenUsage(p)
+	if usage == nil {
+		t.Fatal("LatestTokenUsage returned nil")
+	}
+	if usage.InputTokens != 11 || usage.OutputTokens != 22 {
+		t.Fatalf("usage mismatch: %#v", usage)
+	}
+}
+
+func TestLatestTokenUsageUsesBoundedTail(t *testing.T) {
+	lines := []string{
+		`{"type":"assistant","isSidechain":false,"message":{"model":"claude-fable-5","role":"assistant","usage":{"output_tokens":1},"content":[{"type":"text","text":"old"}]}}`,
+	}
+	for i := 0; i < 410; i++ {
+		lines = append(lines, fmt.Sprintf(`{"type":"tool_result","content":"filler-%d"}`, i))
+	}
+	p := writeTranscript(t, lines...)
+	if usage := LatestTokenUsage(p); usage != nil {
+		t.Fatalf("old usage outside tail should not be returned: %#v", usage)
+	}
+
+	lines = append(lines, `{"type":"assistant","isSidechain":false,"message":{"model":"claude-fable-5","role":"assistant","usage":{"input_tokens":33,"output_tokens":44},"content":[{"type":"text","text":"new"}]}}`)
+	p = writeTranscript(t, lines...)
+	usage := LatestTokenUsage(p)
+	if usage == nil {
+		t.Fatal("LatestTokenUsage returned nil")
+	}
+	if usage.InputTokens != 33 || usage.OutputTokens != 44 {
+		t.Fatalf("usage mismatch: %#v", usage)
 	}
 }
 

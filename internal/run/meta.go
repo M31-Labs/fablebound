@@ -12,23 +12,34 @@ import (
 
 // Meta is the per-dispatch record written to dispatches/<id>/meta.json.
 type Meta struct {
-	ID             string     `json:"id"`
-	Parent         string     `json:"parent,omitempty"` // parent dispatch id; "" for root
-	Role           string     `json:"role"`
-	Model          string     `json:"model"`
-	Tier           string     `json:"tier,omitempty"` // reason|scrutiny|execute; empty on v1 records
-	Profile        string     `json:"profile"`        // settings/toolgate class
-	Status         string     `json:"status"`         // running|completed|failed|halted|stale
-	Depth          int        `json:"depth"`
-	SupervisorPID  int        `json:"supervisor_pid,omitempty"` // PID of the _supervise process
-	MaxTurns       int        `json:"max_turns,omitempty"`
-	TimeoutMinutes int        `json:"timeout_minutes,omitempty"`
-	StartedAt      time.Time  `json:"started_at"`
-	EndedAt        *time.Time `json:"ended_at,omitempty"`
-	Exit           int        `json:"exit,omitempty"`
-	CostUSD        float64    `json:"cost_usd,omitempty"`
-	NumTurns       int        `json:"num_turns,omitempty"`
-	SessionID      string     `json:"session_id,omitempty"`
+	ID             string      `json:"id"`
+	Parent         string      `json:"parent,omitempty"` // parent dispatch id; "" for root
+	Role           string      `json:"role"`
+	Model          string      `json:"model"`
+	Tier           string      `json:"tier,omitempty"` // reason|scrutiny|execute; empty on v1 records
+	Profile        string      `json:"profile"`        // settings/toolgate class
+	Status         string      `json:"status"`         // running|completed|failed|halted|stale
+	Depth          int         `json:"depth"`
+	SupervisorPID  int         `json:"supervisor_pid,omitempty"` // PID of the _supervise process
+	MaxTurns       int         `json:"max_turns,omitempty"`
+	TimeoutMinutes int         `json:"timeout_minutes,omitempty"`
+	StartedAt      time.Time   `json:"started_at"`
+	EndedAt        *time.Time  `json:"ended_at,omitempty"`
+	Exit           int         `json:"exit,omitempty"`
+	CostUSD        float64     `json:"cost_usd,omitempty"`
+	NumTurns       int         `json:"num_turns,omitempty"`
+	SessionID      string      `json:"session_id,omitempty"`
+	TokenUsage     *TokenUsage `json:"token_usage,omitempty"`
+}
+
+// TokenUsage is provider-neutral token accounting metadata for a dispatch.
+type TokenUsage struct {
+	InputTokens              int64 `json:"input_tokens,omitempty"`
+	OutputTokens             int64 `json:"output_tokens,omitempty"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
+	ReasoningTokens          int64 `json:"reasoning_tokens,omitempty"`
+	TotalTokens              int64 `json:"total_tokens,omitempty"`
 }
 
 // IsTerminal returns true if the meta status is a terminal state.

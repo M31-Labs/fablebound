@@ -101,17 +101,18 @@ type RunSummary struct {
 
 // DispatchSummary is one node in the derived dispatch tree for --json output.
 type DispatchSummary struct {
-	ID       string             `json:"id"`
-	Parent   string             `json:"parent,omitempty"`
-	Role     string             `json:"role"`
-	Model    string             `json:"model"`
-	Profile  string             `json:"profile,omitempty"`
-	Status   string             `json:"status"`
-	Depth    int                `json:"depth"`
-	CostUSD  float64            `json:"cost_usd,omitempty"`
-	NumTurns int                `json:"num_turns,omitempty"`
-	Report   string             `json:"report,omitempty"` // relative path if exists
-	Children []*DispatchSummary `json:"children,omitempty"`
+	ID         string             `json:"id"`
+	Parent     string             `json:"parent,omitempty"`
+	Role       string             `json:"role"`
+	Model      string             `json:"model"`
+	Profile    string             `json:"profile,omitempty"`
+	Status     string             `json:"status"`
+	Depth      int                `json:"depth"`
+	CostUSD    float64            `json:"cost_usd,omitempty"`
+	NumTurns   int                `json:"num_turns,omitempty"`
+	TokenUsage *TokenUsage        `json:"token_usage,omitempty"`
+	Report     string             `json:"report,omitempty"` // relative path if exists
+	Children   []*DispatchSummary `json:"children,omitempty"`
 }
 
 // BuildRunSummary builds a RunSummary from a run directory.
@@ -165,15 +166,16 @@ func nodeToDispatchSummary(n *Node, runDir string) *DispatchSummary {
 	m := n.Meta
 
 	ds := &DispatchSummary{
-		ID:       m.ID,
-		Parent:   m.Parent,
-		Role:     m.Role,
-		Model:    m.Model,
-		Profile:  m.Profile,
-		Status:   m.EffectiveStatus(runDir),
-		Depth:    m.Depth,
-		CostUSD:  m.CostUSD,
-		NumTurns: m.NumTurns,
+		ID:         m.ID,
+		Parent:     m.Parent,
+		Role:       m.Role,
+		Model:      m.Model,
+		Profile:    m.Profile,
+		Status:     m.EffectiveStatus(runDir),
+		Depth:      m.Depth,
+		CostUSD:    m.CostUSD,
+		NumTurns:   m.NumTurns,
+		TokenUsage: m.TokenUsage,
 	}
 
 	// Set report path if the file exists.

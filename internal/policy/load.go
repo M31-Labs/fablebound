@@ -24,7 +24,8 @@ type Loaded struct {
 	Path   string // the resolved source path ("embedded:<kind>" if embedded)
 }
 
-// Load compiles a policy of the given kind ("dispatch" or "toolgate").
+// Load compiles a policy of the given kind ("dispatch", "toolgate",
+// "ambient", or "ambient_next_action").
 // It prefers .tiller/policy/<kind>.arb in projectDir over the embedded
 // default. The program is schema-typechecked against the matching Go struct.
 func Load(kind, projectDir string) (*Loaded, error) {
@@ -116,8 +117,10 @@ func structNameForKind(kind string) (string, error) {
 		return "ToolCallRequest", nil
 	case "ambient":
 		return "ToolCallRequest", nil
+	case "ambient_next_action":
+		return "AmbientNextActionRequest", nil
 	default:
-		return "", fmt.Errorf("unknown policy kind %q (want dispatch, toolgate, or ambient)", kind)
+		return "", fmt.Errorf("unknown policy kind %q (want dispatch, toolgate, ambient, or ambient_next_action)", kind)
 	}
 }
 

@@ -23,10 +23,14 @@ import (
 	"m31labs.dev/arbiter/govern"
 	"m31labs.dev/arbiter/vm"
 	"m31labs.dev/tiller/internal/adapter/claudecode"
+	"m31labs.dev/tiller/internal/adapter/codex"
+	"m31labs.dev/tiller/internal/ambientgate"
 	"m31labs.dev/tiller/internal/auditlog"
+	"m31labs.dev/tiller/internal/harness"
 	"m31labs.dev/tiller/internal/policy"
 	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/scratch/fsstore"
+	"m31labs.dev/tiller/internal/tier"
 )
 
 // HookEvent is the JSON stdin payload from Claude Code.
@@ -48,9 +52,11 @@ type HookEvent struct {
 type ToolInput struct {
 	// Bash
 	Command string `json:"command"`
+	Cmd     string `json:"cmd"`
 
 	// File tools (Read, Write, Edit, Glob, Grep, NotebookEdit)
 	FilePath string `json:"file_path"`
+	Path     string `json:"path"`
 
 	// Write: new file content.
 	Content string `json:"content"`
@@ -64,7 +70,14 @@ type ToolInput struct {
 
 	// Task / Agent: subagent dispatch fields.
 	SubagentType string `json:"subagent_type"` // e.g. "tiller-worker", "general-purpose", ""
+	AgentType    string `json:"agent_type"`    // Codex SubagentStart / spawn_agent payload
 	Model        string `json:"model"`         // explicit model override; "" means inherit
+	Description  string `json:"description"`
+	Prompt       string `json:"prompt"`
+	Message      string `json:"message"`
+	Items        []struct {
+		Text string `json:"text"`
+	} `json:"items"`
 }
 
 // ToolResponse holds the structured response for PostToolUse.
@@ -76,14 +89,22 @@ type ToolResponse struct {
 // PreToolOutput is the hookSpecificOutput for PreToolUse.
 type PreToolOutput struct {
 	HookEventName            string `json:"hookEventName"`
-	PermissionDecision       string `json:"permissionDecision"`
-	PermissionDecisionReason string `json:"permissionDecisionReason"`
+	PermissionDecision       string `json:"permissionDecision,omitempty"`
+	PermissionDecisionReason string `json:"permissionDecisionReason,omitempty"`
+	AdditionalContext        string `json:"additionalContext,omitempty"`
 }
 
 // HookSpecificOutputWrapper wraps the output per Claude Code protocol.
 type HookSpecificOutputWrapper struct {
 	HookSpecificOutput PreToolOutput `json:"hookSpecificOutput"`
 }
+
+type ambientOutputProtocol string
+
+const (
+	ambientOutputClaude ambientOutputProtocol = "claude-code"
+	ambientOutputCodex  ambientOutputProtocol = "codex"
+)
 
 // Identity holds the agent identity derived exclusively from environment.
 type Identity struct {
@@ -241,8 +262,13 @@ func HandlePreToolUse(id Identity, event HookEvent, workspaceDir string) ([]byte
 		}
 	}
 
+	filePath := input.FilePath
+	if filePath == "" {
+		filePath = input.Path
+	}
+
 	// Compute path containment facts in Go (never in policy).
-	inScratch, inWorkspace := computePathFacts(input.FilePath, id.RunDir, workspaceDir)
+	inScratch, inWorkspace := computePathFacts(filePath, id.RunDir, workspaceDir)
 
 	req := policy.ToolCallRequest{
 		Role:        id.Role,
@@ -250,7 +276,7 @@ func HandlePreToolUse(id Identity, event HookEvent, workspaceDir string) ([]byte
 		DispatchID:  id.DispatchID,
 		Tool:        event.ToolName,
 		Command:     input.Command,
-		FilePath:    input.FilePath,
+		FilePath:    filePath,
 		InScratch:   inScratch,
 		InWorkspace: inWorkspace,
 		RunID:       id.RunID,
@@ -372,26 +398,30 @@ func canonPath(p string) string {
 
 // HookEventFull is a superset HookEvent that also captures ambient-mode fields.
 type HookEventFull struct {
-	HookEventName  string          `json:"hook_event_name"`
-	ToolName       string          `json:"tool_name"`
-	ToolInput      json.RawMessage `json:"tool_input"`
-	ToolResponse   json.RawMessage `json:"tool_response"`
-	TranscriptPath string          `json:"transcript_path"`
-	AgentID        string          `json:"agent_id"`
+	HookEventName        string              `json:"hook_event_name"`
+	ToolName             string              `json:"tool_name"`
+	ToolInput            json.RawMessage     `json:"tool_input"`
+	ToolResponse         json.RawMessage     `json:"tool_response"`
+	TranscriptPath       string              `json:"transcript_path"`
+	AgentID              string              `json:"agent_id"`
+	AgentType            string              `json:"agent_type"`
+	Model                string              `json:"model"`
+	Effort               string              `json:"effort"`
+	ReasoningEffort      string              `json:"reasoning_effort"`
+	ModelReasoningEffort string              `json:"model_reasoning_effort"`
+	Usage                *scratch.TokenUsage `json:"usage,omitempty"`
+	TokenUsage           *scratch.TokenUsage `json:"token_usage,omitempty"`
 }
 
-// handleAmbientPreToolUse evaluates the ambient policy for a fable session.
+// handleAmbientPreToolUse evaluates the ambient policy for a governed ambient
+// root session.
 // Returns output JSON to write to stdout, or an error.
-//
-// TODO(ambient): Agent tool_input does not expose target model; cannot block
-// fable-for-execution subagents at the hook layer — relying on persona model
-// frontmatter + deny-reason nudge to steer the orchestrator toward the right
-// fb-* persona for each task type.
-func handleAmbientPreToolUse(event HookEvent, stdout io.Writer) error {
+func handleAmbientPreToolUse(event HookEvent, stdout io.Writer, workspaceDir string, ambient *tier.AmbientConfig, outputProtocol ambientOutputProtocol) error {
+	toolName := normalizeAmbientToolName(event.ToolName)
 	req := policy.ToolCallRequest{
 		Role:  "ambient-orchestrator",
 		Depth: 0,
-		Tool:  event.ToolName,
+		Tool:  toolName,
 	}
 	// Parse tool input for file_path / command / content.
 	var input ToolInput
@@ -399,32 +429,45 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer) error {
 		_ = json.Unmarshal(event.ToolInput, &input)
 	}
 	req.Command = input.Command
+	if req.Command == "" {
+		req.Command = input.Cmd
+	}
 	req.FilePath = input.FilePath
+	if req.FilePath == "" {
+		req.FilePath = input.Path
+	}
+	runDir := os.Getenv("TILLER_RUN_DIR")
+	if runDir != "" {
+		req.RunID = filepath.Base(runDir)
+	}
 
 	// Populate CommandClass for Bash calls (used by AllowPermittedBash rule,
-	// which covers both "readonly" and "self-uninstall" classes).
+	// which covers readonly and explicit escape-hatch classes).
 	//
 	// IsSelfUninstall takes priority: if the command is exactly
 	// "tiller uninstall [--print] [--project]", classify it as "self-uninstall"
 	// so AllowPermittedBash can fire.  This class is NOT "readonly" (the command
 	// mutates settings.json) — it is a distinct escape-hatch class.
 	// For all other commands, ClassifyCommand determines "readonly" or "other".
-	if event.ToolName == "Bash" {
-		if IsSelfUninstall(input.Command) {
+	if toolName == "Bash" || toolName == "exec_command" {
+		if IsSelfUninstall(req.Command) {
 			req.CommandClass = "self-uninstall"
+		} else if IsAmbientControl(req.Command) {
+			req.CommandClass = "ambient-control"
+		} else if IsCodexExec(req.Command) {
+			req.CommandClass = "codex-exec"
 		} else {
-			req.CommandClass = ClassifyCommand(input.Command)
+			req.CommandClass = ClassifyCommand(req.Command)
 		}
 	}
 
 	// Populate AgentType and AgentModelTier for Task/Agent calls.
-	// Vendor model IDs are resolved via the claudecode package to keep them confined.
-	if event.ToolName == "Task" || event.ToolName == "Agent" {
+	if toolName == "Task" || toolName == "Agent" {
 		req.AgentType = input.SubagentType
-		req.AgentModelTier = claudecode.ModelTier(input.Model)
+		req.AgentModelTier = ambient.ModelTier(input.Model)
 	}
 
-	loaded, err := policy.Load("ambient", "")
+	loaded, err := policy.Load("ambient", workspaceDir)
 	if err != nil {
 		return fmt.Errorf("load ambient policy: %w", err)
 	}
@@ -432,6 +475,12 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer) error {
 	result, err := policy.EvalToolCall(loaded, req)
 	if err != nil {
 		return fmt.Errorf("eval ambient policy: %w", err)
+	}
+	if runDir != "" {
+		requestID := fmt.Sprintf("ambient-root-%d", time.Now().UnixNano())
+		if auditErr := writeAuditEvent(runDir, requestID, loaded, req, result.Matched, result.Arbitrace); auditErr != nil {
+			fmt.Fprintf(os.Stderr, "tiller hook: ambient audit write error: %v\n", auditErr)
+		}
 	}
 
 	decision := "deny"
@@ -442,18 +491,24 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer) error {
 		decision = "ask"
 	}
 
-	toolName := event.ToolName
 	reason := result.Reason
 	if decision == "deny" {
 		// Substitute {tool.name} placeholder that the policy may embed.
-		if toolName != "" {
-			reason = strings.ReplaceAll(reason, "{tool.name}", toolName)
+		if event.ToolName != "" {
+			reason = strings.ReplaceAll(reason, "{tool.name}", event.ToolName)
 		}
 	}
 
 	decisionReason := fmt.Sprintf("RULE: %s: %s", result.Rule, reason)
 	if reason == "" {
 		decisionReason = fmt.Sprintf("RULE: %s", result.Rule)
+	}
+
+	if outputProtocol == ambientOutputCodex {
+		if decision == "allow" {
+			return nil
+		}
+		return writeCodexDeny(stdout, codexDenyReason(decisionReason))
 	}
 
 	out := HookSpecificOutputWrapper{
@@ -471,15 +526,114 @@ func handleAmbientPreToolUse(event HookEvent, stdout io.Writer) error {
 	return err
 }
 
+func normalizeAmbientToolName(toolName string) string {
+	if idx := strings.LastIndex(toolName, "."); idx >= 0 && idx+1 < len(toolName) {
+		return toolName[idx+1:]
+	}
+	if idx := strings.LastIndex(toolName, "__"); idx >= 0 && idx+2 < len(toolName) {
+		return toolName[idx+2:]
+	}
+	return toolName
+}
+
+func writeCodexDeny(stdout io.Writer, reason string) error {
+	if reason == "" {
+		reason = "tiller policy denied tool call"
+	}
+	out := HookSpecificOutputWrapper{
+		HookSpecificOutput: PreToolOutput{
+			HookEventName:            "PreToolUse",
+			PermissionDecision:       "deny",
+			PermissionDecisionReason: reason,
+		},
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return fmt.Errorf("marshal codex ambient output: %w", err)
+	}
+	_, err = fmt.Fprintf(stdout, "%s\n", data)
+	return err
+}
+
+func writeCodexAdditionalContext(stdout io.Writer, hookEventName, context string) error {
+	out := HookSpecificOutputWrapper{
+		HookSpecificOutput: PreToolOutput{
+			HookEventName:     hookEventName,
+			AdditionalContext: context,
+		},
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		return fmt.Errorf("marshal codex context output: %w", err)
+	}
+	_, err = fmt.Fprintf(stdout, "%s\n", data)
+	return err
+}
+
+func codexSessionStartContext(disabled bool) string {
+	if disabled {
+		return "Tiller ambient is temporarily disabled by .tiller/ambient.disabled or TILLER_AMBIENT_DISABLED. Normal Codex tools are allowed. Shared scratch remains .tiller/scratch/codex/ for terse notes when useful."
+	}
+	return "Tiller ambient is active. Root may read/search directly and use .tiller/scratch/codex/ for terse handoff notes, reports, and claims. When the current run has status.md beside ledger.jsonl, read status.md first for compact run state before raw ledger files; Task Descriptors, Distillation, Arbiter Next Action, Stale/Late Work, Recommended Next Actions, checkpoint candidates, and advisory Spend Budget bands are captured there when run context exists. Prioritize Arbiter Next Action and Distillation before raw ledger reads; keep Recommended Next Actions as legacy/fallback context. If spend is warn/over, choose whether to compact, checkpoint, or proceed before spending more premium output. Spend premium/reason-tier output on durable judgment artifacts: specs, plans, architecture notes, implementation docs, reviews, policy rationale, checkpoint decisions, distilled ambient state, and high-quality handoff briefs. Build a descriptor-backed task list: each task packet should be portable across Codex, Claude Code, OpenCode, Cursor, or future harnesses. Descriptor fields: id/title, role/profile, objective, context paths, constraints, expected outputs, verification target, budget tier/model ceiling, sandbox/permission needs, dependencies/blockers, checkpoint criteria, and report contract. Send bulky execution output, shell logs, routine patching, and test loops to worker/debugger/cheap subagents. Use tiller-summary for fast read-only Spark status/distillation/checkpoint/commit-prep, run ledger summaries, stale/late report triage, checkpoint candidate synthesis, and Arbiter next-action bookkeeping. Keep root output compact; write durable docs/plans when they compound. Queue/background independent descriptors and continue useful orchestration; wait only for descriptors that block the next integration decision; update descriptors from returned reports. Use Git/GitHub for VCS; use Graft for coordination, work claims, shared plans, and structural inspection when available. Checkpoint verified wins at natural boundaries: prefer the repo's configured checkpoint tool when present; otherwise use normal Git/GitHub, stage explicit paths, and never mix unrelated dirty work. Right-size agents: root handles ordinary reads/searches and routing; agent_type=\"tiller-scout\" uses gpt-5.4-mini for cheap bounded reconnaissance/inventory/simple summaries; agent_type=\"tiller-summary\" uses gpt-5.3-codex-spark high, read-only, for status/distillation/checkpoint/commit-prep, stale/late report triage, checkpoint candidate synthesis, and Arbiter next-action bookkeeping; agent_type=\"tiller-worker\" uses gpt-5.5 medium for bounded edits/builds/tests; \"tiller-debugger\" uses gpt-5.5 high for root-cause fixes; \"tiller-investigator\"/\"tiller-reviewer\" use gpt-5.5 xhigh read-only for deep tracing/adversarial review; \"tiller-architect\"/\"tiller-deep-report\" use gpt-5.5 xhigh for architecture/research synthesis. Use spawn_agent, then wait_agent/close_agent."
+}
+
+func codexSubagentStartContext(agentType string) string {
+	const scratch = " Read relevant .tiller/scratch/codex/ notes first when present, and write final reports or handoff notes there when useful. Use this descriptor-compatible report contract: Outcome; files changed or inspected; verification commands and results; caveats or residual risk; checkpoint candidate yes/no; recommended next action. Make the report easy for the parent to update task status and checkpoint decisions. Avoid pasting long logs unless needed; summarize and point at files/reports. Use Git/GitHub for VCS; use Graft coordination/work claims when available, without replacing normal Git/GitHub VCS. Do not perform VCS commits unless explicitly asked; report checkpointable wins with exact files, verification, and caveats so the parent/user can commit with the configured checkpoint tool or Git."
+	switch agentType {
+	case "tiller-scout":
+		return "Tiller scout agent: gpt-5.4-mini reconnaissance for bounded read-only inventories, file locating, docs/log snippets, and simple summaries. Do not edit files, run builds/tests, debug, review, or do architecture." + scratch
+	case "tiller-summary":
+		return "Tiller summary agent: gpt-5.3-codex-spark high, read-only, for fast Spark status/distillation/checkpoint/commit-prep across task descriptors, scratch notes, run ledgers, advisory spend budget bands, returned reports, stale/late report triage, checkpoint candidate synthesis, Distillation, and Arbiter Next Action. It may draft commit messages/checkpoint briefs and identify exact paths/verification when asked, but must not mutate files or perform VCS commits. Read status.md first when present in the run directory; prioritize Arbiter Next Action and Distillation, use Recommended Next Actions as legacy/fallback context, then selectively inspect raw records only as needed; if Spend Budget is warn/over, recommend compact/checkpoint/proceed. Do not edit files, run builds/tests, debug, review, or do architecture." + scratch
+	case "tiller-worker", "tiller-debugger":
+		return "Tiller execution agent: edit files, run focused builds/tests, and report changed files plus verification results." + scratch
+	case "tiller-investigator", "tiller-reviewer":
+		return "Tiller read-only scrutiny agent: inspect, trace, and verify claims without editing files or running mutation commands." + scratch
+	case "tiller-architect", "tiller-deep-report":
+		return "Tiller reasoning agent: produce architecture, design, research, or report output; avoid mechanical implementation work." + scratch
+	default:
+		if agentType != "" {
+			return fmt.Sprintf("Tiller subagent context for %s: stay within the delegated role, keep scope tight, and report concrete findings or changes.", agentType) + scratch
+		}
+		return "Tiller subagent context: stay within the delegated role, keep scope tight, and report concrete findings or changes." + scratch
+	}
+}
+
+func codexAgentType(full HookEventFull) string {
+	if full.AgentType != "" {
+		return full.AgentType
+	}
+	var input ToolInput
+	if len(full.ToolInput) > 0 {
+		_ = json.Unmarshal(full.ToolInput, &input)
+	}
+	if input.AgentType != "" {
+		return input.AgentType
+	}
+	return input.SubagentType
+}
+
+func codexDenyReason(reason string) string {
+	if !strings.Contains(reason, "DenyExecution") {
+		return reason
+	}
+	return "RULE: DenyExecution: tiller: root can read/search directly, but this tool is execution or mutation. Use spawn_agent with agent_type=\"tiller-summary\" for status compaction, agent_type=\"tiller-worker\" for code changes/builds/tests, agent_type=\"tiller-debugger\" for debugging, agent_type=\"tiller-investigator\" for investigation, or agent_type=\"tiller-reviewer\" for review, then use wait_agent/close_agent to check in and finish."
+}
+
 // Run is the main entry point for `tiller hook`.
 // Reads stdin, dispatches on hook_event_name, writes output and exits.
 // On internal error it writes to stderr and returns an error (caller exits 2).
 // Missing TILLER_ROLE exits 0 silently.
 func Run(stdin io.Reader, stdout io.Writer, workspaceDir string) error {
+	return RunWithBackend(stdin, stdout, workspaceDir, "claude-code")
+}
+
+// RunWithBackend is Run with an explicit ambient backend. Managed tiller runs
+// still use TILLER_ROLE identity and ignore this backend setting.
+func RunWithBackend(stdin io.Reader, stdout io.Writer, workspaceDir, backend string) error {
 	id, ok := ReadIdentity()
 	if !ok {
 		// Not a managed tiller session — check ambient mode.
-		return runAmbient(stdin, stdout)
+		return runAmbient(stdin, stdout, workspaceDir, backend)
 	}
 
 	data, err := io.ReadAll(stdin)
@@ -521,11 +675,11 @@ func Run(stdin io.Reader, stdout io.Writer, workspaceDir string) error {
 	}
 }
 
-// runAmbient handles the case where TILLER_ROLE is unset: ambient mode.
-// For PreToolUse, it checks the transcript model and enforces orchestrator-only
-// policy if and only if the model is fable. For all other events or models,
-// it exits 0 (passthrough / fail open).
-func runAmbient(stdin io.Reader, stdout io.Writer) error {
+// runAmbient handles the case where TILLER_ROLE is unset: ambient mode. For
+// PreToolUse, it checks the backend transcript model and enforces
+// orchestrator-only policy if the model maps to a governed tier. For all other
+// events or models, it exits 0 (passthrough / fail open).
+func runAmbient(stdin io.Reader, stdout io.Writer, workspaceDir, backend string) error {
 	data, err := io.ReadAll(stdin)
 	if err != nil {
 		// Fail open — don't block on read error.
@@ -539,9 +693,30 @@ func runAmbient(stdin io.Reader, stdout io.Writer) error {
 		return nil
 	}
 
+	if backend == "codex" {
+		switch full.HookEventName {
+		case "SessionStart":
+			if !codexAmbientGoverned(full, workspaceDir) {
+				return nil
+			}
+			appendCodexLifecycleRecord(full, workspaceDir)
+			return writeCodexAdditionalContext(stdout, "SessionStart", codexSessionStartContext(ambientgate.IsDisabled(workspaceDir)))
+		case "SubagentStart":
+			if !isTillerCodexAgentType(codexAgentType(full)) {
+				return nil
+			}
+			appendCodexLifecycleRecord(full, workspaceDir)
+			return writeCodexAdditionalContext(stdout, "SubagentStart", codexSubagentStartContext(codexAgentType(full)))
+		}
+	}
+
+	if full.HookEventName == "PostToolUse" {
+		reconcileAmbientPostToolUse(full, workspaceDir, backend)
+		return nil
+	}
+
 	// Only gate PreToolUse events.
 	if full.HookEventName != "PreToolUse" {
-		// PostToolUse in ambient mode: no run dir, skip trace, exit 0.
 		return nil
 	}
 
@@ -550,12 +725,45 @@ func runAmbient(stdin io.Reader, stdout io.Writer) error {
 		return nil
 	}
 
-	// Determine model tier from transcript (vendor model IDs confined to claudecode package).
-	tier, isFable := claudecode.DetectTier(full.TranscriptPath)
-	_ = tier // tier is "reason" when isFable is true; reserved for future use
-	if !isFable {
-		// Not fable — ambient mode is invisible.
+	if ambientgate.IsDisabled(workspaceDir) {
 		return nil
+	}
+
+	ambient := loadAmbientConfig(workspaceDir, backend)
+	if ambient == nil {
+		return nil
+	}
+
+	outputProtocol := ambientOutputClaude
+	var (
+		tierName string
+		governed bool
+	)
+	switch ambient.Detector {
+	case "claude-jsonl-transcript":
+		tierName, governed = claudecode.DetectTierWithConfig(full.TranscriptPath, ambient)
+	case "codex-jsonl-transcript":
+		tierName, governed = codex.DetectTierWithEvidenceConfig(codexModelEvidence(full), full.TranscriptPath, ambient)
+		outputProtocol = ambientOutputCodex
+	default:
+		return nil
+	}
+
+	// Determine model tier from transcript using backend config.
+	_ = tierName // currently the ambient policy is shared across governed tiers.
+	if !governed {
+		// Not governed — ambient mode is invisible.
+		return nil
+	}
+
+	if backend == "claude-code" {
+		appendClaudeAmbientUsageLedger(full)
+	}
+
+	appendAmbientTaskDescriptor(full, backend)
+
+	if backend == "codex" && isCodexMultiAgentLifecycleTool(full.ToolName) {
+		appendCodexLifecycleRecord(full, workspaceDir)
 	}
 
 	// D4 observe-only: when the gated tool is Task or Agent AND a run context
@@ -573,7 +781,54 @@ func runAmbient(stdin io.Reader, stdout io.Writer) error {
 		ToolInput:     full.ToolInput,
 		ToolResponse:  full.ToolResponse,
 	}
-	return handleAmbientPreToolUse(event, stdout)
+	return handleAmbientPreToolUse(event, stdout, workspaceDir, ambient, outputProtocol)
+}
+
+func codexModelEvidence(full HookEventFull) harness.ModelEvidence {
+	effort := strings.TrimSpace(full.Effort)
+	if effort == "" {
+		effort = strings.TrimSpace(full.ReasoningEffort)
+	}
+	if effort == "" {
+		effort = strings.TrimSpace(full.ModelReasoningEffort)
+	}
+	return harness.ModelEvidence{
+		Model:     full.Model,
+		Effort:    effort,
+		Detection: harness.ModelDetectionPayload,
+	}
+}
+
+func codexAmbientGoverned(full HookEventFull, workspaceDir string) bool {
+	ambient := loadAmbientConfig(workspaceDir, "codex")
+	if ambient == nil {
+		return false
+	}
+	_, governed := codex.DetectTierWithEvidenceConfig(codexModelEvidence(full), full.TranscriptPath, ambient)
+	return governed
+}
+
+func isTillerCodexAgentType(agentType string) bool {
+	return strings.HasPrefix(agentType, "tiller-")
+}
+
+func loadAmbientConfig(projectDir, backend string) *tier.AmbientConfig {
+	cfg, err := tier.Load(projectDir)
+	if err != nil {
+		cfg, err = tier.Load("")
+		if err != nil {
+			return nil
+		}
+	}
+	ambient := cfg.AmbientConfig(backend)
+	if ambient == nil {
+		fallback, err := tier.Load("")
+		if err != nil {
+			return nil
+		}
+		ambient = fallback.AmbientConfig(backend)
+	}
+	return ambient
 }
 
 // appendAmbientDispatchTrace appends a kind:"dispatch" TraceEvent when a
@@ -647,6 +902,9 @@ func inputSummary(toolName string, input ToolInput) string {
 		}
 	default:
 		s = input.FilePath
+		if s == "" {
+			s = input.Path
+		}
 	}
 	if len(s) > 256 {
 		s = s[:256]
@@ -664,8 +922,8 @@ func toolStatus(resp ToolResponse) string {
 
 // isReadTool returns true for tools that produce context reads.
 func isReadTool(toolName string) bool {
-	switch toolName {
-	case "Read", "Glob", "Grep":
+	switch normalizeAmbientToolName(toolName) {
+	case "Read", "Glob", "Grep", "view_image":
 		return true
 	}
 	return false

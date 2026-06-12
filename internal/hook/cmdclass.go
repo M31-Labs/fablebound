@@ -36,9 +36,12 @@ import (
 //	find, tree, file, stat, du, sort, uniq, cut, pwd, which, echo, diff,
 //	jq, column.
 //
+//	Process/port diagnostics: ps, pgrep, pidof, lsof, netstat, and ss except
+//	for known mutating/write flags.
+//
 //	git: status, log, show, diff, blame, rev-parse, ls-files, describe,
-//	shortlog, grep, and bare "git branch" or "git branch --list" / "-l"
-//	forms only (any other branch args → other).
+//	shortlog, grep, and bare "git branch", "git branch --show-current", or
+//	"git branch --list" / "-l" forms only (any other branch args → other).
 //
 //	go: doc, list, version, vet.
 //
@@ -46,7 +49,8 @@ import (
 //
 //	hypha: all subcommands EXCEPT "mcp serve" and "hub serve" → other.
 //
-//	tiller: runs, poll, version subcommands only.
+//	tiller: runs, poll, version subcommands only. Self-uninstall and ambient
+//	control escape hatches are classified separately.
 func ClassifyCommand(cmd string) string {
 	if cmd == "" {
 		return "other"
@@ -120,6 +124,7 @@ func splitSegmentsQuoteAware(cmd string) ([]string, bool) {
 		case stateSingle:
 			// Inside single quotes everything is literal — no escapes at all.
 			if c == '\'' {
+				current.WriteByte(c)
 				state = stateUnquoted
 			} else {
 				current.WriteByte(c)
@@ -129,6 +134,7 @@ func splitSegmentsQuoteAware(cmd string) ([]string, bool) {
 		case stateDouble:
 			switch c {
 			case '"':
+				current.WriteByte(c)
 				state = stateUnquoted
 				i++
 			case '\\':
@@ -153,10 +159,12 @@ func splitSegmentsQuoteAware(cmd string) ([]string, bool) {
 		case stateUnquoted:
 			switch c {
 			case '\'':
+				current.WriteByte(c)
 				state = stateSingle
 				i++
 
 			case '"':
+				current.WriteByte(c)
 				state = stateDouble
 				i++
 
@@ -266,12 +274,93 @@ func isVarAssignment(tok string) bool {
 	return true
 }
 
+func shellFields(seg string) ([]string, bool) {
+	const (
+		stateUnquoted = iota
+		stateSingle
+		stateDouble
+		stateEscapeUnquoted
+		stateEscapeDouble
+	)
+
+	state := stateUnquoted
+	var fields []string
+	var current strings.Builder
+
+	flush := func() {
+		if current.Len() > 0 {
+			fields = append(fields, current.String())
+			current.Reset()
+		}
+	}
+
+	for i := 0; i < len(seg); {
+		c := seg[i]
+		switch state {
+		case stateEscapeUnquoted:
+			current.WriteByte(c)
+			state = stateUnquoted
+			i++
+		case stateEscapeDouble:
+			current.WriteByte(c)
+			state = stateDouble
+			i++
+		case stateSingle:
+			if c == '\'' {
+				state = stateUnquoted
+			} else {
+				current.WriteByte(c)
+			}
+			i++
+		case stateDouble:
+			switch c {
+			case '"':
+				state = stateUnquoted
+				i++
+			case '\\':
+				state = stateEscapeDouble
+				i++
+			default:
+				current.WriteByte(c)
+				i++
+			}
+		case stateUnquoted:
+			switch c {
+			case ' ', '\t', '\r', '\n':
+				flush()
+				i++
+			case '\'':
+				state = stateSingle
+				i++
+			case '"':
+				state = stateDouble
+				i++
+			case '\\':
+				state = stateEscapeUnquoted
+				i++
+			default:
+				current.WriteByte(c)
+				i++
+			}
+		}
+	}
+
+	if state == stateSingle || state == stateDouble || state == stateEscapeUnquoted || state == stateEscapeDouble {
+		return nil, false
+	}
+	flush()
+	return fields, true
+}
+
 // classifySegment classifies a single shell segment (already split and
 // trimmed) as "readonly" or "other".
 func classifySegment(seg string) string {
 	// Any leading VAR=val assignment is treated as unsafe (could override PATH,
 	// LD_PRELOAD, etc. to subvert the command being classified).
-	fields := strings.Fields(seg)
+	fields, ok := shellFields(seg)
+	if !ok {
+		return "other"
+	}
 	if len(fields) == 0 {
 		return "readonly" // empty segment is harmless
 	}
@@ -289,8 +378,17 @@ func classifySegment(seg string) string {
 	// ── General read-only utilities ──────────────────────────────────────────
 	case "ls", "cat", "head", "tail", "wc", "grep", "rg", "find", "tree",
 		"file", "stat", "du", "sort", "uniq", "cut", "pwd", "which",
-		"echo", "diff", "jq", "column":
+		"echo", "diff", "jq", "column", "nl":
 		return "readonly"
+
+	case "sed":
+		return classifySed(argv)
+
+	case "ps", "pgrep", "pidof", "lsof", "netstat":
+		return "readonly"
+
+	case "ss":
+		return classifySS(argv)
 
 	// ── git ──────────────────────────────────────────────────────────────────
 	case "git":
@@ -308,6 +406,9 @@ func classifySegment(seg string) string {
 	case "gts":
 		return "readonly"
 
+	case "canopy":
+		return classifyCanopy(sub)
+
 	// ── hypha (all except mcp serve / hub serve) ─────────────────────────────
 	case "hypha":
 		return classifyHypha(sub, argv)
@@ -324,10 +425,100 @@ func classifySegment(seg string) string {
 	return "other"
 }
 
+func classifySed(argv []string) string {
+	if len(argv) < 2 {
+		return "other"
+	}
+	sawPrintOnly := false
+	sawScript := false
+	for _, arg := range argv[1:] {
+		if arg == "-i" || arg == "--in-place" || strings.HasPrefix(arg, "-i") || strings.HasPrefix(arg, "--in-place=") {
+			return "other"
+		}
+		if arg == "-n" || arg == "--quiet" || arg == "--silent" {
+			sawPrintOnly = true
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			return "other"
+		}
+		if !sawScript {
+			if !sedScriptReadOnly(arg) {
+				return "other"
+			}
+			sawScript = true
+		}
+	}
+	if !sawPrintOnly || !sawScript {
+		return "other"
+	}
+	return "readonly"
+}
+
+func sedScriptReadOnly(script string) bool {
+	script = trimShellToken(script)
+	if script == "" || strings.ContainsAny(script, ";\n{}") {
+		return false
+	}
+	if sedLinePrintScript(script) {
+		return true
+	}
+	if strings.HasPrefix(script, "/") && strings.HasSuffix(script, "/p") && len(script) > 3 {
+		return true
+	}
+	return false
+}
+
+func sedLinePrintScript(script string) bool {
+	if !strings.HasSuffix(script, "p") {
+		return false
+	}
+	body := strings.TrimSuffix(script, "p")
+	if body == "" {
+		return false
+	}
+	for _, r := range body {
+		switch {
+		case r >= '0' && r <= '9':
+		case r == ',' || r == '$':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func classifySS(argv []string) string {
+	for _, arg := range argv[1:] {
+		if arg == "-K" || arg == "--kill" || arg == "-D" ||
+			strings.HasPrefix(arg, "--kill=") ||
+			arg == "--diag" || strings.HasPrefix(arg, "--diag=") {
+			return "other"
+		}
+		if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") {
+			flags := strings.TrimPrefix(arg, "-")
+			if strings.ContainsAny(flags, "KD") {
+				return "other"
+			}
+		}
+	}
+	return "readonly"
+}
+
+func classifyCanopy(sub string) string {
+	switch sub {
+	case "search", "graph", "analyze", "help":
+		return "readonly"
+	default:
+		return "other"
+	}
+}
+
 // classifyGit classifies a git invocation by subcommand.
 // Allowed: status, log, show, diff, blame, rev-parse, ls-files, describe,
 //
-//	shortlog, grep, and bare "git branch" or "git branch --list" / "-l".
+//	shortlog, grep, and bare "git branch", "git branch --show-current",
+//	or "git branch --list" / "-l".
 //
 // Any other branch args → other.
 func classifyGit(sub string, argv []string) string {
@@ -342,6 +533,9 @@ func classifyGit(sub string, argv []string) string {
 		// argv is [git, branch, ...args]; extra args start at index 2.
 		if len(argv) <= 2 {
 			return "readonly" // bare "git branch"
+		}
+		if len(argv) == 3 && argv[2] == "--show-current" {
+			return "readonly"
 		}
 		// Scan flags: only --list / -l are permitted option flags; at most one
 		// optional non-option pattern argument is allowed after a list flag.
@@ -372,8 +566,8 @@ func classifyGit(sub string, argv []string) string {
 }
 
 // IsSelfUninstall returns true if cmd is exactly "tiller uninstall" with only
-// the optional --print and/or --project flags and no other arguments, no
-// chaining, no redirects, and no command substitution.
+// the optional --print, --project, and --backend flags and no other arguments,
+// no chaining, no redirects, and no command substitution.
 //
 // Allowed forms (any order of flags):
 //
@@ -382,6 +576,8 @@ func classifyGit(sub string, argv []string) string {
 //	tiller uninstall --project
 //	tiller uninstall --print --project
 //	tiller uninstall --project --print
+//	tiller uninstall --backend codex --project
+//	tiller uninstall --backend=claude-code --print
 //
 // Any chaining operator (;, &&, ||, |, &), redirect (>, <), or substitution
 // causes the function to return false immediately.
@@ -395,7 +591,10 @@ func IsSelfUninstall(cmd string) bool {
 	if len(segments) != 1 {
 		return false
 	}
-	fields := strings.Fields(segments[0])
+	fields, ok := shellFields(segments[0])
+	if !ok {
+		return false
+	}
 	if len(fields) == 0 {
 		return false
 	}
@@ -414,25 +613,317 @@ func IsSelfUninstall(cmd string) bool {
 	if argv[1] != "uninstall" {
 		return false
 	}
-	// All remaining args must be --print or --project, each at most once.
-	seenPrint, seenProject := false, false
-	for _, arg := range argv[2:] {
-		switch arg {
-		case "--print":
+	// All remaining args must be --print, --project, or --backend
+	// codex|claude-code, each at most once.
+	seenPrint, seenProject, seenBackend := false, false, false
+	for i := 2; i < len(argv); i++ {
+		arg := argv[i]
+		switch {
+		case arg == "--print":
 			if seenPrint {
 				return false // duplicate
 			}
 			seenPrint = true
-		case "--project":
+		case arg == "--project":
 			if seenProject {
 				return false // duplicate
 			}
 			seenProject = true
+		case arg == "--backend":
+			if seenBackend || i+1 >= len(argv) {
+				return false
+			}
+			i++
+			if !isAllowedSelfUninstallBackend(argv[i]) {
+				return false
+			}
+			seenBackend = true
+		case strings.HasPrefix(arg, "--backend="):
+			if seenBackend {
+				return false
+			}
+			if !isAllowedSelfUninstallBackend(strings.TrimPrefix(arg, "--backend=")) {
+				return false
+			}
+			seenBackend = true
 		default:
 			return false // unknown arg
 		}
 	}
 	return true
+}
+
+func isAllowedSelfUninstallBackend(backend string) bool {
+	switch backend {
+	case "claude-code", "codex":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsAmbientControl returns true if cmd is exactly one of the permitted
+// "tiller ambient" control commands with no extra arguments, chaining,
+// redirects, or command substitution. The only multi-word control shape is
+// "tiller ambient step --dry-run"; bare "step" is intentionally denied because
+// it would imply execution semantics that do not exist yet.
+func IsAmbientControl(cmd string) bool {
+	segments, ok := splitSegmentsQuoteAware(cmd)
+	if !ok || len(segments) != 1 {
+		return false
+	}
+	fields, ok := shellFields(segments[0])
+	if !ok {
+		return false
+	}
+	if len(fields) != 3 && len(fields) != 4 {
+		return false
+	}
+	if isVarAssignment(fields[0]) {
+		return false
+	}
+	if filepath.Base(fields[0]) != "tiller" || fields[1] != "ambient" {
+		return false
+	}
+	if fields[2] == "step" {
+		return len(fields) == 4 && fields[3] == "--dry-run"
+	}
+	if len(fields) != 3 {
+		return false
+	}
+	switch fields[2] {
+	case "disable", "enable", "status", "next", "doctor", "off", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+type codexExecOptions struct {
+	model   string
+	effort  string
+	sandbox string
+}
+
+// IsCodexExec returns true for narrowly constrained Codex CLI delegation from
+// an ambient reason-tier orchestrator. It requires an explicit gpt-5.5 model and
+// explicit model_reasoning_effort. xhigh is permitted only with read-only
+// sandboxing; high and medium are permitted for execution. Dangerous sandbox
+// bypass flags and broad config overrides are denied.
+func IsCodexExec(cmd string) bool {
+	segments, ok := splitSegmentsQuoteAware(cmd)
+	if !ok || len(segments) != 1 {
+		return false
+	}
+	fields, ok := shellFields(segments[0])
+	if !ok {
+		return false
+	}
+	if len(fields) < 3 {
+		return false
+	}
+	if isVarAssignment(fields[0]) {
+		return false
+	}
+	if filepath.Base(fields[0]) != "codex" {
+		return false
+	}
+	if fields[1] != "exec" && fields[1] != "e" {
+		return false
+	}
+
+	opts := codexExecOptions{}
+	for i := 2; i < len(fields); i++ {
+		arg := trimShellToken(fields[i])
+		if arg == "--" || arg == "-" || !strings.HasPrefix(arg, "-") {
+			break
+		}
+
+		switch {
+		case arg == "-m" || arg == "--model":
+			i++
+			if i >= len(fields) || !setCodexExecModel(&opts, fields[i]) {
+				return false
+			}
+		case strings.HasPrefix(arg, "--model="):
+			if !setCodexExecModel(&opts, strings.TrimPrefix(arg, "--model=")) {
+				return false
+			}
+		case arg == "-c" || arg == "--config":
+			i++
+			if i >= len(fields) || !applyCodexExecConfig(&opts, fields[i]) {
+				return false
+			}
+		case strings.HasPrefix(arg, "--config="):
+			if !applyCodexExecConfig(&opts, strings.TrimPrefix(arg, "--config=")) {
+				return false
+			}
+		case arg == "-s" || arg == "--sandbox":
+			i++
+			if i >= len(fields) || !setCodexExecSandbox(&opts, fields[i]) {
+				return false
+			}
+		case strings.HasPrefix(arg, "--sandbox="):
+			if !setCodexExecSandbox(&opts, strings.TrimPrefix(arg, "--sandbox=")) {
+				return false
+			}
+		case arg == "-C" || arg == "--cd":
+			i++
+			if i >= len(fields) || !allowedCodexRelativePath(fields[i]) {
+				return false
+			}
+		case strings.HasPrefix(arg, "--cd="):
+			if !allowedCodexRelativePath(strings.TrimPrefix(arg, "--cd=")) {
+				return false
+			}
+		case arg == "--color":
+			i++
+			if i >= len(fields) || !allowedCodexColor(fields[i]) {
+				return false
+			}
+		case strings.HasPrefix(arg, "--color="):
+			if !allowedCodexColor(strings.TrimPrefix(arg, "--color=")) {
+				return false
+			}
+		case arg == "-o" || arg == "--output-last-message":
+			i++
+			if i >= len(fields) || !allowedCodexOutputPath(fields[i]) {
+				return false
+			}
+		case strings.HasPrefix(arg, "--output-last-message="):
+			if !allowedCodexOutputPath(strings.TrimPrefix(arg, "--output-last-message=")) {
+				return false
+			}
+		case arg == "--json" || arg == "--ephemeral" || arg == "--skip-git-repo-check" ||
+			arg == "--strict-config" || arg == "--ignore-user-config":
+			continue
+		default:
+			return false
+		}
+	}
+
+	return codexExecAllowed(opts)
+}
+
+func setCodexExecModel(opts *codexExecOptions, raw string) bool {
+	model := trimShellToken(raw)
+	if !allowedCodexExecModel(model) {
+		return false
+	}
+	opts.model = model
+	return true
+}
+
+func applyCodexExecConfig(opts *codexExecOptions, raw string) bool {
+	raw = trimShellToken(raw)
+	idx := strings.IndexByte(raw, '=')
+	if idx <= 0 {
+		return false
+	}
+	key := strings.TrimSpace(raw[:idx])
+	value := trimShellToken(raw[idx+1:])
+	switch key {
+	case "model":
+		return setCodexExecModel(opts, value)
+	case "model_reasoning_effort", "reasoning_effort":
+		effort := normalizeCodexEffort(value)
+		if !allowedCodexExecEffort(effort) {
+			return false
+		}
+		opts.effort = effort
+		return true
+	case "sandbox_mode":
+		return setCodexExecSandbox(opts, value)
+	default:
+		return false
+	}
+}
+
+func setCodexExecSandbox(opts *codexExecOptions, raw string) bool {
+	sandbox := trimShellToken(raw)
+	switch sandbox {
+	case "read-only", "workspace-write":
+		opts.sandbox = sandbox
+		return true
+	default:
+		return false
+	}
+}
+
+func codexExecAllowed(opts codexExecOptions) bool {
+	if !allowedCodexExecModel(opts.model) || !allowedCodexExecEffort(opts.effort) {
+		return false
+	}
+	if opts.effort == "xhigh" {
+		return opts.sandbox == "read-only"
+	}
+	return opts.sandbox == "" || opts.sandbox == "read-only" || opts.sandbox == "workspace-write"
+}
+
+func allowedCodexExecModel(model string) bool {
+	switch trimShellToken(model) {
+	case "gpt-5.5":
+		return true
+	default:
+		return false
+	}
+}
+
+func allowedCodexExecEffort(effort string) bool {
+	switch normalizeCodexEffort(effort) {
+	case "xhigh", "high", "medium":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeCodexEffort(effort string) string {
+	effort = strings.ToLower(trimShellToken(effort))
+	if effort == "med" {
+		return "medium"
+	}
+	return effort
+}
+
+func allowedCodexColor(raw string) bool {
+	switch trimShellToken(raw) {
+	case "always", "never", "auto":
+		return true
+	default:
+		return false
+	}
+}
+
+func allowedCodexOutputPath(raw string) bool {
+	p := trimShellToken(raw)
+	if !allowedCodexRelativePath(p) {
+		return false
+	}
+	clean := filepath.Clean(p)
+	return clean == ".tiller" || strings.HasPrefix(clean, ".tiller"+string(filepath.Separator))
+}
+
+func allowedCodexRelativePath(raw string) bool {
+	p := trimShellToken(raw)
+	if p == "" || filepath.IsAbs(p) {
+		return false
+	}
+	clean := filepath.Clean(p)
+	return clean == "." || (clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator)))
+}
+
+func trimShellToken(s string) string {
+	s = strings.TrimSpace(s)
+	for {
+		if len(s) >= 2 {
+			if (s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '"' && s[len(s)-1] == '"') {
+				s = strings.TrimSpace(s[1 : len(s)-1])
+				continue
+			}
+		}
+		return s
+	}
 }
 
 // classifyHypha classifies a hypha invocation.

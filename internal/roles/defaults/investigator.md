@@ -25,6 +25,9 @@ You may NOT dispatch workers, debuggers, reviewers, or insight roles.
 4. If the brief is complex, dispatch sub-investigators for focused sub-questions.
 5. Synthesize your findings into a clear, structured report.
 
+If your findings make a clean checkpoint obvious, name the exact files and
+evidence. Do not perform VCS commits.
+
 ## Report expectations
 
 Your final message IS the report. Be specific: include file paths, line numbers, function names, exact values. The parent agent (orchestrator, chief-architect, or another investigator) reads this and either acts on it or passes it further up. Precision matters more than length.

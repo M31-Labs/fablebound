@@ -26,6 +26,11 @@ You have broad execution access: Read, Write, Edit, Bash. Restrictions:
 4. If you encounter complex bugs, dispatch a debugger. For research questions, dispatch an investigator.
 5. Report what you did in your final message.
 
+Do not perform VCS commits unless explicitly asked. If the work is a coherent
+verified win, call it out as a checkpoint candidate with exact files,
+verification, and caveats so the orchestrator/user can commit with the
+configured checkpoint tool or Git.
+
 ## Report expectations
 
 Your final message IS the report. Include: what you changed and why, files modified (with paths), test results, any caveats or follow-up items. The orchestrator reads this to verify completion.

@@ -56,6 +56,7 @@ import (
 	"m31labs.dev/tiller/internal/auditlog"
 	"m31labs.dev/tiller/internal/policy"
 	"m31labs.dev/tiller/internal/run"
+	"m31labs.dev/tiller/internal/sandbox"
 	"m31labs.dev/tiller/internal/scratch"
 )
 
@@ -358,12 +359,6 @@ func (p *Pool) executeDispatch(ctx context.Context, inv workflow.WorkerInvocatio
 		return workflow.WorkerExecution{}, fmt.Errorf("pool: read dispatch %s/%s: %w", runID, dispatchID, err)
 	}
 
-	// Transition status to "running".
-	d.Status = "running"
-	if writeErr := p.store.WriteDispatch(runID, d); writeErr != nil {
-		log.Printf("pool: write running %s/%s: %v", runID, dispatchID, writeErr)
-	}
-
 	// ── Resolve adapter and compute workDir ──────────────────────────────────
 	if adapterName == "" {
 		adapterName = d.Adapter
@@ -372,6 +367,14 @@ func (p *Pool) executeDispatch(ctx context.Context, inv workflow.WorkerInvocatio
 	if adptErr != nil {
 		p.releaseDispatch(runID, dispatchID, executor, "failed")
 		return workflow.WorkerExecution{}, fmt.Errorf("pool: adapter %q not found: %w", adapterName, adptErr)
+	}
+
+	// Transition status to "running" after re-deriving effective enforcement
+	// from the adapter and the persisted sandbox record.
+	d.Status = "running"
+	d.Enforcement = sandbox.EffectiveEnforcement(adpt.Enforcement(), d.Sandbox)
+	if writeErr := p.store.WriteDispatch(runID, d); writeErr != nil {
+		log.Printf("pool: write running %s/%s: %v", runID, dispatchID, writeErr)
 	}
 
 	spec := buildDispatchSpec(p.store, p.runsBase, runID, d)
@@ -503,30 +506,37 @@ func (p *Pool) evalGate(_ context.Context, runID, dispatchID string) (bool, gate
 	// that path will fail later in executeDispatch with a clear error, so the
 	// gate behaviour is otherwise identical to today.
 	adapterNameForGate := d.Adapter
-	enforcement := d.Enforcement
+	adapterEnforcement := d.Enforcement
 	if adpt, adptErr := p.adapterRegistry.Get(adapterNameForGate); adptErr == nil {
-		enforcement = adpt.Enforcement()
-	} else if enforcement == "" {
+		adapterEnforcement = adpt.Enforcement()
+	} else if adapterEnforcement == "" {
 		// Unknown adapter AND no record value: default to "full" so pre-v2
 		// records continue to work; executeDispatch will surface the real error.
-		enforcement = "full"
+		adapterEnforcement = "full"
 	}
+	enforcement := sandbox.EffectiveEnforcement(adapterEnforcement, d.Sandbox)
 
 	req := policy.DispatchRequest{
-		Role:         d.Role,
-		Tier:         d.Tier,
-		Background:   false,
-		BriefBytes:   0,
-		Queued:       true, // pool always uses queued semantics — DenyDirectSpawnAtDepth must not fire
-		Enforcement:  enforcement,
-		CallerRole:   "orchestrator",
-		CallerDepth:  callerDepth,
-		CallerID:     d.Parent,
-		RunID:        runID,
-		ActiveCount:  activeRunning,
-		ReasonCount:  facts.ReasonCount,
-		ReasonBudget: reasonBudget,
-		MaxDepth:     maxDepth,
+		Role:        d.Role,
+		Tier:        d.Tier,
+		Background:  false,
+		BriefBytes:  0,
+		Queued:      true, // pool always uses queued semantics — DenyDirectSpawnAtDepth must not fire
+		Enforcement: enforcement,
+		SandboxMode: sandboxMode(d.Sandbox),
+		SandboxProfile: sandboxProfile(
+			d.Sandbox,
+			d.Profile,
+		),
+		HorizonManifests: sandboxHorizonManifests(d.Sandbox),
+		CallerRole:       "orchestrator",
+		CallerDepth:      callerDepth,
+		CallerID:         d.Parent,
+		RunID:            runID,
+		ActiveCount:      activeRunning,
+		ReasonCount:      facts.ReasonCount,
+		ReasonBudget:     reasonBudget,
+		MaxDepth:         maxDepth,
 	}
 
 	res, err := policy.EvalDispatch(p.dispatchPolicy, req)
@@ -608,6 +618,27 @@ func buildDispatchSpec(store scratch.Store, runsBase, runID string, d *scratch.D
 		WorkDir:    workDir,
 		Sandbox:    d.Sandbox,
 	}
+}
+
+func sandboxMode(rec *sandbox.Record) string {
+	if rec == nil {
+		return ""
+	}
+	return string(rec.Mode)
+}
+
+func sandboxProfile(rec *sandbox.Record, fallback string) string {
+	if rec != nil && rec.Profile != "" {
+		return rec.Profile
+	}
+	return fallback
+}
+
+func sandboxHorizonManifests(rec *sandbox.Record) int {
+	if rec == nil {
+		return 0
+	}
+	return len(rec.Horizon)
 }
 
 // dispatchToFact converts a pending Dispatch to a PendingDispatch expert.Fact.

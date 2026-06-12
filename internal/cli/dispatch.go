@@ -18,6 +18,7 @@ import (
 	"m31labs.dev/tiller/internal/hyphae"
 	"m31labs.dev/tiller/internal/policy"
 	"m31labs.dev/tiller/internal/run"
+	"m31labs.dev/tiller/internal/sandbox"
 	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/spawn"
 	"m31labs.dev/tiller/internal/storeutil"
@@ -149,22 +150,31 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 		}
 	}
 
+	sandboxForReq := sandbox.Plan(roleToDefaultProfile(*role), enforcementForReq)
+	enforcementForReq = sandbox.EffectiveEnforcement(enforcementForReq, sandboxForReq)
+
 	// Build dispatch request.
 	req := policy.DispatchRequest{
-		Role:         *role,
-		Tier:         *tierFlag,
-		Background:   *background,
-		BriefBytes:   len(briefContent),
-		Queued:       *queue,
-		Enforcement:  enforcementForReq,
-		CallerRole:   callerRole,
-		CallerDepth:  callerDepth,
-		CallerID:     callerID,
-		RunID:        runID,
-		ActiveCount:  facts.Active,
-		ReasonCount:  facts.ReasonCount,
-		ReasonBudget: reasonBudget,
-		MaxDepth:     maxDepth,
+		Role:        *role,
+		Tier:        *tierFlag,
+		Background:  *background,
+		BriefBytes:  len(briefContent),
+		Queued:      *queue,
+		Enforcement: enforcementForReq,
+		SandboxMode: sandboxMode(sandboxForReq),
+		SandboxProfile: sandboxProfile(
+			sandboxForReq,
+			roleToDefaultProfile(*role),
+		),
+		HorizonManifests: sandboxHorizonManifests(sandboxForReq),
+		CallerRole:       callerRole,
+		CallerDepth:      callerDepth,
+		CallerID:         callerID,
+		RunID:            runID,
+		ActiveCount:      facts.Active,
+		ReasonCount:      facts.ReasonCount,
+		ReasonBudget:     reasonBudget,
+		MaxDepth:         maxDepth,
 	}
 
 	// Load and evaluate dispatch policy.
@@ -252,6 +262,8 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 	if err != nil {
 		return fmt.Errorf("dispatch: resolve adapter %q: %w", candidate.Adapter, err)
 	}
+	sandboxRec := sandbox.Plan(result.Route.Profile, adp.Enforcement())
+	effectiveEnforcement := sandbox.EffectiveEnforcement(adp.Enforcement(), sandboxRec)
 
 	// Build the DispatchSpec for the adapter.
 	childDepth := callerDepth + 1
@@ -268,6 +280,7 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 		Depth:      childDepth,
 		MaxTurns:   result.Route.MaxTurns,
 		Timeout:    time.Duration(result.Route.TimeoutMinutes) * time.Minute,
+		Sandbox:    sandboxRec,
 	}
 
 	// --queue: write dispatch record as status:pending, skip adapter Prepare/Run.
@@ -289,7 +302,8 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 			Tier:           result.Route.Tier,
 			Provider:       candidate.Provider,
 			Adapter:        candidate.Adapter,
-			Enforcement:    adp.Enforcement(),
+			Enforcement:    effectiveEnforcement,
+			Sandbox:        sandboxRec,
 		}
 		if err := st.WriteDispatch(runID, d); err != nil {
 			return fmt.Errorf("dispatch: write dispatch record: %w", err)
@@ -310,7 +324,8 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 	}
 
 	// Write dispatch record (status: running).
-	// Tier/Provider/Model/Adapter are set from tier.Resolve; Enforcement from the adapter.
+	// Tier/Provider/Model/Adapter are set from tier.Resolve; Enforcement is the
+	// adapter value adjusted by active constraining sandbox metadata.
 	now := time.Now()
 	d := &scratch.Dispatch{
 		ID:             dispatchID,
@@ -324,9 +339,10 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 		TimeoutMinutes: result.Route.TimeoutMinutes,
 		StartedAt:      now,
 		Tier:           spec.Tier,
-		Enforcement:    adp.Enforcement(),
+		Enforcement:    effectiveEnforcement,
 		Provider:       spec.Provider,
 		Adapter:        candidate.Adapter,
+		Sandbox:        sandboxRec,
 	}
 	if err := st.WriteDispatch(runID, d); err != nil {
 		return fmt.Errorf("dispatch: write dispatch record: %w", err)
@@ -477,4 +493,38 @@ func roleToDefaultTier(role string) string {
 	default:
 		return "execute"
 	}
+}
+
+func roleToDefaultProfile(role string) string {
+	switch role {
+	case "chief-architect", "deep-report":
+		return "insight"
+	case "investigator", "reviewer":
+		return "readonly"
+	case "worker", "debugger":
+		return "execution"
+	default:
+		return ""
+	}
+}
+
+func sandboxMode(rec *sandbox.Record) string {
+	if rec == nil {
+		return ""
+	}
+	return string(rec.Mode)
+}
+
+func sandboxProfile(rec *sandbox.Record, fallback string) string {
+	if rec != nil && rec.Profile != "" {
+		return rec.Profile
+	}
+	return fallback
+}
+
+func sandboxHorizonManifests(rec *sandbox.Record) int {
+	if rec == nil {
+		return 0
+	}
+	return len(rec.Horizon)
 }

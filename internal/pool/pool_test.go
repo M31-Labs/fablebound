@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"m31labs.dev/tiller/internal/adapter"
+	"m31labs.dev/tiller/internal/sandbox"
 	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/scratch/fsstore"
 )
@@ -403,4 +404,137 @@ func TestEvalGateEnforcementRederivation(t *testing.T) {
 		t.Error("dispatch DenyReason is empty; expected DenyDegradedInsight reason")
 	}
 	t.Logf("dispatch %s: status=%s deny_reason=%q", dispatchID, finalD.Status, finalD.DenyReason)
+}
+
+func TestEvalGateSandboxFactsDoNotPromoteRequestedProcessSandbox(t *testing.T) {
+	st, runsBase := openStore(t)
+	runID, err := st.CreateRun(&scratch.Run{
+		Task:         "requested sandbox facts test",
+		Workspace:    t.TempDir(),
+		Status:       "running",
+		ReasonBudget: 10,
+		MaxDepth:     8,
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	dispatchID, err := st.AllocDispatch(runID)
+	if err != nil {
+		t.Fatalf("AllocDispatch: %v", err)
+	}
+	d := &scratch.Dispatch{
+		ID:      dispatchID,
+		Role:    "investigator",
+		Model:   "stub-model",
+		Profile: "readonly",
+		Status:  "pending",
+		Depth:   1,
+		Tier:    "scrutiny",
+		Adapter: "degraded-stub",
+		Sandbox: &sandbox.Record{
+			Mode:    sandbox.ModeProcess,
+			Profile: "readonly",
+			Status:  sandbox.StatusRequested,
+			Runner:  "process",
+			Horizon: []sandbox.HorizonManifest{{Path: "observe.json"}},
+		},
+	}
+	if err := st.WriteDispatch(runID, d); err != nil {
+		t.Fatalf("WriteDispatch: %v", err)
+	}
+
+	reg := adapter.NewRegistry()
+	reg.Register(&degradedStubAdapter{})
+	p, err := New(Options{
+		Store:           st,
+		RunsBase:        runsBase,
+		AdapterRegistry: reg,
+		LeaseDuration:   5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("pool.New: %v", err)
+	}
+
+	allowed, gr, err := p.evalGate(context.Background(), runID, dispatchID)
+	if err != nil {
+		t.Fatalf("evalGate: %v", err)
+	}
+	if allowed {
+		t.Fatal("evalGate allowed scrutiny degraded adapter with requested process sandbox")
+	}
+	if gr.req.Enforcement != "degraded" {
+		t.Errorf("DispatchRequest.Enforcement=%q, want degraded", gr.req.Enforcement)
+	}
+	if gr.req.SandboxMode != "process" {
+		t.Errorf("DispatchRequest.SandboxMode=%q, want process", gr.req.SandboxMode)
+	}
+	if gr.req.SandboxProfile != "readonly" {
+		t.Errorf("DispatchRequest.SandboxProfile=%q, want readonly", gr.req.SandboxProfile)
+	}
+	if gr.req.HorizonManifests != 1 {
+		t.Errorf("DispatchRequest.HorizonManifests=%d, want 1", gr.req.HorizonManifests)
+	}
+}
+
+func TestEvalGatePromotesOnlyConstrainingActiveSandbox(t *testing.T) {
+	st, runsBase := openStore(t)
+	runID, err := st.CreateRun(&scratch.Run{
+		Task:         "active sandbox facts test",
+		Workspace:    t.TempDir(),
+		Status:       "running",
+		ReasonBudget: 10,
+		MaxDepth:     8,
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	dispatchID, err := st.AllocDispatch(runID)
+	if err != nil {
+		t.Fatalf("AllocDispatch: %v", err)
+	}
+	d := &scratch.Dispatch{
+		ID:      dispatchID,
+		Role:    "investigator",
+		Model:   "stub-model",
+		Profile: "readonly",
+		Status:  "pending",
+		Depth:   1,
+		Tier:    "scrutiny",
+		Adapter: "degraded-stub",
+		Sandbox: &sandbox.Record{
+			Mode:    sandbox.ModeContainer,
+			Profile: "readonly",
+			Status:  sandbox.StatusActive,
+			Runner:  "bubblewrap",
+		},
+	}
+	if err := st.WriteDispatch(runID, d); err != nil {
+		t.Fatalf("WriteDispatch: %v", err)
+	}
+
+	reg := adapter.NewRegistry()
+	reg.Register(&degradedStubAdapter{})
+	p, err := New(Options{
+		Store:           st,
+		RunsBase:        runsBase,
+		AdapterRegistry: reg,
+		LeaseDuration:   5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("pool.New: %v", err)
+	}
+
+	allowed, gr, err := p.evalGate(context.Background(), runID, dispatchID)
+	if err != nil {
+		t.Fatalf("evalGate: %v", err)
+	}
+	if !allowed {
+		t.Fatalf("evalGate denied active constraining sandbox: %s", gr.reason)
+	}
+	if gr.req.Enforcement != "sandboxed" {
+		t.Errorf("DispatchRequest.Enforcement=%q, want sandboxed", gr.req.Enforcement)
+	}
+	if gr.req.SandboxMode != "container" {
+		t.Errorf("DispatchRequest.SandboxMode=%q, want container", gr.req.SandboxMode)
+	}
 }

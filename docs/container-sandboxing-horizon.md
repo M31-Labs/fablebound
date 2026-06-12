@@ -37,6 +37,12 @@ Only `status=active` is a hard isolation claim. `requested` records policy
 intent before a runner exists, and `unavailable` or `bypassed` make escape
 hatches auditable while this is still experimental.
 
+The initial process runner is advisory metadata only: it records
+`mode=process`, `runner=process`, and `status=requested` so policy and audit can
+see sandbox intent, but it does not claim containment and does not promote a
+`degraded` adapter to `sandboxed`. Effective enforcement becomes `sandboxed`
+only when a record is active and backed by a declared constraining mode/runner.
+
 ## Horizon Integration
 
 Horizon should enter through capability manifests, not by making Tiller depend

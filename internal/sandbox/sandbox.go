@@ -5,7 +5,10 @@
 // hard guarantee must check Status == "active" and the recorded runner details.
 package sandbox
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // Mode identifies the isolation mechanism selected for a dispatch.
 type Mode string
@@ -87,6 +90,99 @@ type Record struct {
 	Limits    Limits            `json:"limits,omitempty"`
 	Horizon   []HorizonManifest `json:"horizon,omitempty"`
 	Reason    string            `json:"reason,omitempty"`
+}
+
+// Spec describes a requested sandbox activation. The first implementation is
+// intentionally advisory: it records intent without claiming hard isolation.
+type Spec struct {
+	Mode    Mode
+	Profile string
+	Horizon []HorizonManifest
+}
+
+// Runner activates or records the requested sandbox state for a dispatch.
+type Runner interface {
+	Activate(ctx context.Context, spec Spec) (*Record, error)
+}
+
+// ProcessRunner records process-level sandbox intent. It does not install a
+// constraining runtime, so its records remain requested and do not promote
+// degraded adapters to sandboxed enforcement.
+type ProcessRunner struct{}
+
+// Activate returns a deterministic advisory process sandbox record.
+func (ProcessRunner) Activate(_ context.Context, spec Spec) (*Record, error) {
+	mode := spec.Mode
+	if mode == "" {
+		mode = ModeProcess
+	}
+	rec := &Record{
+		Mode:      mode,
+		Profile:   spec.Profile,
+		Status:    StatusRequested,
+		Runner:    "process",
+		Workspace: WorkspaceWritable,
+		Network:   NetworkInherit,
+		Horizon:   append([]HorizonManifest(nil), spec.Horizon...),
+		Reason:    "process runner records sandbox intent only; no constraining sandbox is active",
+	}
+	return rec, rec.Validate()
+}
+
+// Plan returns the default sandbox intent for an adapter/profile pair. Today
+// degraded adapters get an advisory process record; full/sandboxed adapters do
+// not need extra metadata from this foundation slice.
+func Plan(profile string, adapterEnforcement string) *Record {
+	if adapterEnforcement != "degraded" {
+		return nil
+	}
+	rec, _ := ProcessRunner{}.Activate(context.Background(), Spec{
+		Mode:    ModeProcess,
+		Profile: profile,
+	})
+	return rec
+}
+
+// EffectiveEnforcement combines adapter-reported enforcement with runtime
+// sandbox metadata. It only promotes degraded adapters when a sandbox record is
+// active and materially constraining; requested, unavailable, bypassed, noop,
+// and advisory process records preserve the adapter's raw enforcement.
+func EffectiveEnforcement(adapterEnforcement string, rec *Record) string {
+	if adapterEnforcement != "degraded" {
+		return adapterEnforcement
+	}
+	if IsConstrainingActive(rec) {
+		return "sandboxed"
+	}
+	return adapterEnforcement
+}
+
+// IsConstrainingActive reports whether a record can be treated as active
+// runtime isolation for enforcement purposes.
+func IsConstrainingActive(rec *Record) bool {
+	if rec == nil || rec.Status != StatusActive {
+		return false
+	}
+	switch rec.Runner {
+	case "", "noop", "no-op", "process":
+		return false
+	}
+	switch rec.Mode {
+	case ModeContainer:
+		return true
+	case ModeProcess:
+		return rec.Workspace == WorkspaceReadOnly ||
+			rec.Workspace == WorkspaceOverlay ||
+			rec.Network == NetworkDisabled ||
+			rec.Network == NetworkLoopback ||
+			rec.Limits.CPUs != "" ||
+			rec.Limits.MemoryBytes > 0 ||
+			rec.Limits.PIDs > 0 ||
+			rec.Limits.TimeoutSeconds > 0 ||
+			rec.HorizonEnabled()
+	default:
+		return false
+	}
 }
 
 // Validate checks that a record uses known enum values. Empty fields are allowed

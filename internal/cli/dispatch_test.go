@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"m31labs.dev/tiller/internal/adapter"
+	"m31labs.dev/tiller/internal/sandbox"
 	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/scratch/fsstore"
 )
@@ -336,6 +337,71 @@ func TestDispatchQueue_WritesPendingRecord(t *testing.T) {
 	}
 	if string(briefData) != briefText {
 		t.Errorf("brief = %q, want %q", briefData, briefText)
+	}
+}
+
+func TestDispatchQueue_DegradedCommandPersistsRequestedSandboxIntent(t *testing.T) {
+	projectDir, runDir, runID, st := makeDispatchTestEnv(t)
+	tillerDir := filepath.Join(projectDir, ".tiller")
+	if err := os.MkdirAll(tillerDir, 0o755); err != nil {
+		t.Fatalf("mkdir .tiller: %v", err)
+	}
+	models := `
+[tiers.execute]
+candidates = ["command:test-agent/-"]
+`
+	if err := os.WriteFile(filepath.Join(tillerDir, "models.toml"), []byte(models), 0o644); err != nil {
+		t.Fatalf("write models.toml: %v", err)
+	}
+
+	reg := adapter.NewRegistry()
+	fa := newFakeAdapter("command", "degraded")
+	reg.Register(fa)
+
+	t.Setenv("TILLER_RUN_DIR", runDir)
+	t.Setenv("TILLER_ROLE", "user")
+	t.Setenv("TILLER_DEPTH", "0")
+	t.Setenv("TILLER_DISPATCH_ID", "")
+
+	err := runDispatchWithRegistry([]string{
+		"--role", "worker",
+		"--tier", "execute",
+		"--brief", "run degraded command adapter",
+		"--queue",
+	}, reg)
+	if err != nil {
+		t.Fatalf("runDispatchWithRegistry --queue: %v", err)
+	}
+
+	dispatches, err := listDispatchesFromStore(t, st, runID)
+	if err != nil {
+		t.Fatalf("listDispatches: %v", err)
+	}
+	if len(dispatches) != 1 {
+		t.Fatalf("expected 1 dispatch, got %d", len(dispatches))
+	}
+
+	d := dispatches[0]
+	if d.Adapter != "command" {
+		t.Fatalf("Adapter=%q, want command", d.Adapter)
+	}
+	if d.Enforcement != "degraded" {
+		t.Fatalf("Enforcement=%q, want degraded for advisory process sandbox", d.Enforcement)
+	}
+	if d.Sandbox == nil {
+		t.Fatal("Sandbox=nil, want requested process sandbox intent")
+	}
+	if d.Sandbox.Mode != sandbox.ModeProcess {
+		t.Errorf("Sandbox.Mode=%q, want process", d.Sandbox.Mode)
+	}
+	if d.Sandbox.Status != sandbox.StatusRequested {
+		t.Errorf("Sandbox.Status=%q, want requested", d.Sandbox.Status)
+	}
+	if d.Sandbox.Runner != "process" {
+		t.Errorf("Sandbox.Runner=%q, want process", d.Sandbox.Runner)
+	}
+	if d.Sandbox.Profile != "execution" {
+		t.Errorf("Sandbox.Profile=%q, want execution", d.Sandbox.Profile)
 	}
 }
 

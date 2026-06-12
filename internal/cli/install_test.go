@@ -710,7 +710,7 @@ func TestInstallOpenCodeAgents_FreshDir(t *testing.T) {
 		t.Fatalf("read tiller-orchestrator.md: %v", err)
 	}
 	content := string(data)
-	for _, want := range []string{"mode: primary", "edit: deny", "task:", "tiller-*", ".tiller/scratch/opencode/", "checkpoint tool"} {
+	for _, want := range []string{"mode: primary", "edit: deny", "task:", "tiller-*", ".tiller/scratch/opencode/", "checkpoint tool", "descriptor-backed task list", "Cursor", "Descriptor fields", "descriptor-compatible subagent reports"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("OpenCode orchestrator missing %q:\n%s", want, content)
 		}
@@ -721,7 +721,7 @@ func TestInstallOpenCodeAgents_FreshDir(t *testing.T) {
 		t.Fatalf("read tiller-worker.md: %v", err)
 	}
 	content = string(data)
-	for _, want := range []string{"mode: subagent", "edit: allow", "bash: allow", "checkpoint candidate"} {
+	for _, want := range []string{"mode: subagent", "edit: allow", "bash: allow", "descriptor-compatible report contract", "checkpoint candidate"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("OpenCode worker missing %q:\n%s", want, content)
 		}
@@ -903,7 +903,7 @@ func TestRunInstallCodexProject(t *testing.T) {
 		t.Fatalf("read AGENTS.md: %v", err)
 	}
 	notes := string(notesData)
-	for _, want := range []string{tillerCodexNotesBegin, "SessionStart adds this context", ".tiller/scratch/codex/", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "Do not run implementation shell commands", "Right-sizing matrix", "`tiller-scout`", "`gpt-5.4-mini`", "`gpt-5.5 medium`", "`gpt-5.5 high`", "`gpt-5.5 xhigh`", "agent_type", "wait_agent", "using-sirena", "terse, direct, explicit"} {
+	for _, want := range []string{tillerCodexNotesBegin, "SessionStart adds this context", ".tiller/scratch/codex/", "premium/reason-tier output", "descriptor-backed task list", "Codex, Claude Code", "OpenCode, Cursor", "Descriptor fields", "budget tier/model", "Queue/background independent descriptors", "returned reports", "descriptor-compatible subagent reports", "update task status and checkpoint decisions", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "Do not run implementation shell commands", "Right-sizing matrix", "`tiller-scout`", "`gpt-5.4-mini`", "`gpt-5.5 medium`", "`gpt-5.5 high`", "`gpt-5.5 xhigh`", "agent_type", "wait_agent", "using-sirena", "terse, direct, explicit"} {
 		if !strings.Contains(notes, want) {
 			t.Fatalf("Codex operating notes missing %q:\n%s", want, notes)
 		}
@@ -914,7 +914,7 @@ func TestRunInstallCodexProject(t *testing.T) {
 		t.Fatalf("read Codex Tiller skill: %v", err)
 	}
 	skill := string(skillData)
-	for _, want := range []string{"name: using-tiller", "SessionStart makes this visible", ".tiller/scratch/codex/", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "Root Workflow", "Right-Sizing Matrix", "hypha recall", "tiller-scout", "gpt-5.4-mini", "gpt-5.5 medium", "gpt-5.5 high", "gpt-5.5 xhigh", "tiller-worker", "wait_agent", "using-sirena", "terse, direct, explicit"} {
+	for _, want := range []string{"name: using-tiller", "SessionStart makes this visible", ".tiller/scratch/codex/", "premium/reason-tier output", "descriptor-backed task list", "Codex, Claude Code, OpenCode, Cursor", "Descriptor fields", "budget tier/model ceiling", "Queue/background independent descriptors", "returned reports", "descriptor-compatible subagent reports", "update task status and checkpoint decisions", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "Root Workflow", "Right-Sizing Matrix", "hypha recall", "tiller-scout", "gpt-5.4-mini", "gpt-5.5 medium", "gpt-5.5 high", "gpt-5.5 xhigh", "tiller-worker", "wait_agent", "using-sirena", "terse, direct, explicit"} {
 		if !strings.Contains(skill, want) {
 			t.Fatalf("Codex Tiller skill missing %q:\n%s", want, skill)
 		}
@@ -964,7 +964,7 @@ func TestRunInstallOpenCodeProject(t *testing.T) {
 		t.Fatalf("read OpenCode notes: %v", err)
 	}
 	notes := string(notesData)
-	for _, want := range []string{tillerOpenCodeNotesBegin, "tiller-orchestrator", ".tiller/scratch/opencode/", "Git/GitHub for VCS", "Graft", "checkpoint tool", "Right-sizing matrix", "`tiller-worker`"} {
+	for _, want := range []string{tillerOpenCodeNotesBegin, "tiller-orchestrator", ".tiller/scratch/opencode/", "premium/reason-tier output", "descriptor-backed task list", "Codex, Claude Code", "OpenCode, Cursor", "Descriptor fields", "budget tier/model", "Queue/background independent descriptors", "returned reports", "descriptor-compatible subagent reports", "update task status and checkpoint decisions", "Git/GitHub for VCS", "Graft", "checkpoint tool", "Right-sizing matrix", "`tiller-worker`"} {
 		if !strings.Contains(notes, want) {
 			t.Fatalf("OpenCode notes missing %q:\n%s", want, notes)
 		}
@@ -974,7 +974,7 @@ func TestRunInstallOpenCodeProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read OpenCode orchestrator: %v", err)
 	}
-	for _, want := range []string{"mode: primary", "permission:", "task:", "tiller-*"} {
+	for _, want := range []string{"mode: primary", "permission:", "task:", "tiller-*", "descriptor-backed task list", "Cursor", "Descriptor fields", "descriptor-compatible subagent reports"} {
 		if !strings.Contains(string(orchestrator), want) {
 			t.Fatalf("OpenCode orchestrator missing %q:\n%s", want, string(orchestrator))
 		}

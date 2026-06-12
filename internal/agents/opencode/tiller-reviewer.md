@@ -31,6 +31,8 @@ not modify workspace files or run mutating commands.
 
 Prioritize bugs, security risks, behavior regressions, and missing tests.
 Findings must come first, ordered by severity, with file and line references.
-If no issues are found, say so clearly and note residual test gaps or risks. If
-the reviewed change is ready to checkpoint, say that explicitly; do not perform
-VCS commits.
+Use this descriptor-compatible report contract: Outcome; files inspected; verification commands and
+results; caveats or residual risk; checkpoint candidate yes/no; recommended
+next action. Avoid pasting long logs unless needed; summarize and point at
+files/reports. If no issues are found, say so clearly and note residual test
+gaps or risks. Do not perform VCS commits.

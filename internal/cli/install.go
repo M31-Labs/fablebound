@@ -1064,7 +1064,7 @@ func codexOperatingNotesSnippet() string {
 	return tillerCodexNotesBegin + `
 When Tiller ambient mode is active, the root Codex session is the orchestrator.
 SessionStart adds this context up front; denied execution calls also point back
-to Codex-native lifecycle tools.
+to this backend's lifecycle tools.
 Use ` + "`.tiller/scratch/codex/`" + ` for terse shared handoff notes, reports, and
 claims when useful.
 Use Git/GitHub for VCS. Use Graft for coordination, work claims, shared
@@ -1077,12 +1077,28 @@ Root Codex session:
 - Read enough context yourself to route the work and make integration
   decisions. Do not spawn a subagent just to read a file, search the tree, or
   inspect ordinary context.
+- Spend premium/reason-tier output on durable judgment artifacts: specs, plans,
+  architecture notes, implementation docs, reviews, policy rationale,
+  checkpoint decisions, and high-quality handoff briefs.
+- Maintain a descriptor-backed task list. Each descriptor should look like a
+  portable subagent/task packet that can be mapped to Codex, Claude Code,
+  OpenCode, Cursor, or future harnesses.
+- Descriptor fields: id/title, role/profile, objective, context paths,
+  constraints, expected outputs, verification target, budget tier/model
+  ceiling, sandbox/permission needs, dependencies/blockers, checkpoint
+  criteria, and report contract.
+- Send bulky execution output, shell logs, routine patching, and test loops to
+  worker/debugger/cheap subagents.
+- Keep root output compact; write durable docs/plans when they compound.
+- Queue/background independent descriptors and continue useful orchestration.
+  Wait only for descriptors that block the next integration decision. Update
+  descriptors from returned reports.
 - Use root read/search tools and safe read-only shell commands for lightweight
   inspection.
 - Load relevant skills directly when a domain-specific workflow applies. For
   Sirena diagram work, use ` + "`using-sirena`" + `.
 - Do not run implementation shell commands, build/test commands, edit source
-  files, or apply patches from the root ` + "`xhigh`" + ` session.
+  files, or apply patches from the root premium/reason-tier session.
 
 Right-sizing matrix:
 - root: direct reads/searches and routing decisions; no subagent needed for
@@ -1105,6 +1121,12 @@ Codex delegation mechanics:
   expected output, and verification target when known.
 - Continue useful orchestration while agents run. When a result returns, review
   it, integrate it, and close the agent.
+- Require descriptor-compatible subagent reports to cover: Outcome; files
+  changed or inspected; verification commands and results; caveats or residual
+  risk; checkpoint candidate yes/no; recommended next action. Use returned
+  reports to update task status and checkpoint decisions. Ask subagents to
+  summarize long logs and point at files/reports instead of pasting bulky
+  output.
 - Treat coherent verified slices as checkpoint candidates. Ask execution agents
   to report exact changed files, verification, and caveats so the checkpoint can
   be committed cleanly with the configured checkpoint tool or normal Git/GitHub.
@@ -1136,7 +1158,7 @@ func codexSkillSnippet() string {
 		"# Using Tiller",
 		"",
 		"When Tiller ambient mode is active, the root Codex session is the orchestrator.",
-		"SessionStart makes this visible up front; DenyExecution messages use Codex-native `spawn_agent`, `wait_agent`, and `close_agent` guidance.",
+		"SessionStart makes this visible up front; DenyExecution messages use this backend's `spawn_agent`, `wait_agent`, and `close_agent` guidance.",
 		"Use `.tiller/scratch/codex/` for terse shared handoff notes, reports, and claims when useful.",
 		"Use Git/GitHub for VCS. Use Graft for coordination, work claims, shared plans/notes, coord checks, structural inspection/review/blame when available.",
 		"Checkpoint verified wins at natural boundaries. Prefer the repo's configured checkpoint tool when one is present; otherwise use normal Git/GitHub. Stage explicit paths, inspect the diff, and never include unrelated dirty work.",
@@ -1145,6 +1167,12 @@ func codexSkillSnippet() string {
 		"",
 		"- Read files, search the tree, inspect git state, use Hyphae recall/pulse, and load relevant skills directly from the root.",
 		"- Use read-only shell commands for inspection: `rg`, `cat`, `sed -n`, `nl`, `git status`, `git diff`, `git show`, `hypha recall`, `hypha pulse`, `canopy search`, `canopy graph`, and similar non-mutating commands.",
+		"- Spend premium/reason-tier output on durable judgment artifacts: specs, plans, architecture notes, implementation docs, reviews, policy rationale, checkpoint decisions, and high-quality handoff briefs.",
+		"- Maintain a descriptor-backed task list. Each descriptor should look like a portable subagent/task packet that can be mapped to Codex, Claude Code, OpenCode, Cursor, or future harnesses.",
+		"- Descriptor fields: id/title, role/profile, objective, context paths, constraints, expected outputs, verification target, budget tier/model ceiling, sandbox/permission needs, dependencies/blockers, checkpoint criteria, and report contract.",
+		"- Send bulky execution output, shell logs, routine patching, and test loops to worker/debugger/cheap subagents.",
+		"- Keep root output compact; write durable docs/plans when they compound.",
+		"- Queue/background independent descriptors and continue useful orchestration. Wait only for descriptors that block the next integration decision. Update descriptors from returned reports.",
 		"- Prefer terse, direct, explicit technical artifacts and documentation: concrete paths, commands, diagnostics, decisions, and next actions over broad prose.",
 		"- For Sirena diagrams, `.sir` files, `sirena.yaml`, Mermaid ingestion, mdpp Sirena fences, or diagram-baking work, use `using-sirena`.",
 		"- Do not edit files, apply patches, run builds/tests, or perform implementation shell work from the root reason-tier session.",
@@ -1169,6 +1197,8 @@ func codexSkillSnippet() string {
 		"- Use `tiller-investigator` for deep read-only tracing or claim verification.",
 		"- Use `tiller-reviewer` for adversarial review.",
 		"- Use `tiller-architect` and `tiller-deep-report` only for architecture, technical design, research synthesis, and high-consequence trade-off analysis.",
+		"- Require descriptor-compatible subagent reports to cover: Outcome; files changed or inspected; verification commands and results; caveats or residual risk; checkpoint candidate yes/no; recommended next action.",
+		"- Use returned reports to update task status and checkpoint decisions. Ask subagents to summarize long logs and point at files/reports instead of pasting bulky output.",
 		"- Tell execution subagents not to own VCS commits unless explicitly asked; they should report checkpointable wins with changed files, verification, and caveats.",
 		"",
 		"Use normal Codex multi-agent tools: `spawn_agent`, `wait_agent`, `send_input`, `resume_agent`, and `close_agent`.",
@@ -1215,6 +1245,22 @@ Root OpenCode session:
 - Read enough context yourself to route the work and make integration
   decisions. Do not spawn a subagent just to read a file, search the tree, or
   inspect ordinary context.
+- Spend premium/reason-tier output on durable judgment artifacts: specs, plans,
+  architecture notes, implementation docs, reviews, policy rationale,
+  checkpoint decisions, and high-quality handoff briefs.
+- Maintain a descriptor-backed task list. Each descriptor should look like a
+  portable subagent/task packet that can be mapped to Codex, Claude Code,
+  OpenCode, Cursor, or future harnesses.
+- Descriptor fields: id/title, role/profile, objective, context paths,
+  constraints, expected outputs, verification target, budget tier/model
+  ceiling, sandbox/permission needs, dependencies/blockers, checkpoint
+  criteria, and report contract.
+- Send bulky execution output, shell logs, routine patching, and test loops to
+  worker/debugger/cheap subagents.
+- Keep root output compact; write durable docs/plans when they compound.
+- Queue/background independent descriptors and continue useful orchestration.
+  Wait only for descriptors that block the next integration decision. Update
+  descriptors from returned reports.
 - Use root read/search tools and safe read-only shell commands for lightweight
   inspection.
 - Do not run implementation shell commands, build/test commands, edit source
@@ -1231,6 +1277,12 @@ Right-sizing matrix:
   adversarial review, and high-stakes verification.
 - ` + "`tiller-architect`" + `/` + "`tiller-deep-report`" + `: architecture, research
   synthesis, and high-consequence tradeoffs.
+
+Require descriptor-compatible subagent reports to cover: Outcome; files changed
+or inspected; verification commands and results; caveats or residual risk;
+checkpoint candidate yes/no; recommended next action. Use returned reports to
+update task status and checkpoint decisions. Ask subagents to summarize long
+logs and point at files/reports instead of pasting bulky output.
 
 Prefer terse, direct, explicit technical artifacts and documentation: concrete
 paths, commands, diagnostics, decisions, and next actions over broad prose.

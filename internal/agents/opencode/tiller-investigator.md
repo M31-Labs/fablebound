@@ -31,7 +31,10 @@ Trace call paths, inspect history and tests, verify claims against source
 evidence, and surface contradictions. Do not modify workspace files or run
 mutating commands.
 
-Read relevant `.tiller/scratch/opencode/` notes first when present. Report
-findings with concrete file references, conclusions, confidence, contradictions,
-and unresolved questions. If a clean checkpoint is obvious, name the exact files
-and evidence; do not perform VCS commits.
+Read relevant `.tiller/scratch/opencode/` notes first when present. Use this
+descriptor-compatible report contract: Outcome; files inspected; verification
+commands and results; caveats or residual risk; checkpoint candidate yes/no;
+recommended next action. Make the report easy for the parent to update task
+status and checkpoint decisions. Include concrete file references, conclusions,
+confidence, contradictions, and unresolved questions. Avoid pasting long logs
+unless needed; summarize and point at files/reports. Do not perform VCS commits.

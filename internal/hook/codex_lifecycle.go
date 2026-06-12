@@ -3,6 +3,7 @@ package hook
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,11 +16,13 @@ import (
 )
 
 // appendCodexLifecycleRecord appends best-effort Codex lifecycle facts to the
-// run ledger. It intentionally uses only TILLER_RUN_DIR + fsstore.Open so the
-// ambient hook hot path never resolves/dials a configured store.
-func appendCodexLifecycleRecord(full HookEventFull) {
+// run ledger, or to the workspace scratch ledger when no TILLER_RUN_DIR exists.
+// It intentionally uses only TILLER_RUN_DIR + fsstore.Open so the ambient hook
+// hot path never resolves/dials a configured store.
+func appendCodexLifecycleRecord(full HookEventFull, workspaceDir string) {
 	runDir := os.Getenv("TILLER_RUN_DIR")
 	if runDir == "" {
+		appendCodexAmbientFallbackLifecycleRecord(full, workspaceDir)
 		return
 	}
 	runID := filepath.Base(runDir)
@@ -59,6 +62,47 @@ func appendCodexLifecycleRecord(full HookEventFull) {
 	}
 	_ = st.AppendLedgerEvent(runID, ev)
 	refreshAmbientStatusSnapshot(runDir, now)
+}
+
+func appendCodexAmbientFallbackLifecycleRecord(full HookEventFull, workspaceDir string) {
+	workspace := workspaceDir
+	if workspace == "" {
+		var err error
+		workspace, err = os.Getwd()
+		if err != nil {
+			return
+		}
+	}
+	workspace = filepath.Clean(workspace)
+	if workspace == "." || workspace == "" {
+		return
+	}
+
+	now := time.Now().UTC()
+	ev := scratch.LedgerEvent{
+		ID:         codexLedgerEventID(full, now),
+		Backend:    "codex",
+		Kind:       codexLedgerKind(full),
+		Status:     codexLifecycleStatus(full),
+		At:         now,
+		TokenUsage: codexTokenUsage(full),
+		Summary:    codexLifecycleSummary(full),
+		Refs:       codexLifecycleRefs(full),
+	}
+	if full.HookEventName == "SubagentStart" && full.AgentID != "" {
+		ev.AgentRunID = codexAgentRunID(full.AgentID)
+	}
+
+	path := filepath.Join(workspace, ".tiller", "scratch", "codex", "ambient-ledger.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_ = json.NewEncoder(f).Encode(ev)
 }
 
 func isCodexMultiAgentLifecycleTool(toolName string) bool {

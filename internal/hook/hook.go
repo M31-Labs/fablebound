@@ -699,13 +699,13 @@ func runAmbient(stdin io.Reader, stdout io.Writer, workspaceDir, backend string)
 			if !codexAmbientGoverned(full, workspaceDir) {
 				return nil
 			}
-			appendCodexLifecycleRecord(full)
+			appendCodexLifecycleRecord(full, workspaceDir)
 			return writeCodexAdditionalContext(stdout, "SessionStart", codexSessionStartContext(ambientgate.IsDisabled(workspaceDir)))
 		case "SubagentStart":
 			if !isTillerCodexAgentType(codexAgentType(full)) {
 				return nil
 			}
-			appendCodexLifecycleRecord(full)
+			appendCodexLifecycleRecord(full, workspaceDir)
 			return writeCodexAdditionalContext(stdout, "SubagentStart", codexSubagentStartContext(codexAgentType(full)))
 		}
 	}
@@ -763,7 +763,7 @@ func runAmbient(stdin io.Reader, stdout io.Writer, workspaceDir, backend string)
 	appendAmbientTaskDescriptor(full, backend)
 
 	if backend == "codex" && isCodexMultiAgentLifecycleTool(full.ToolName) {
-		appendCodexLifecycleRecord(full)
+		appendCodexLifecycleRecord(full, workspaceDir)
 	}
 
 	// D4 observe-only: when the gated tool is Task or Agent AND a run context

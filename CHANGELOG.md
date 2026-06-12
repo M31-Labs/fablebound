@@ -29,11 +29,14 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `turn_context` transcript lines, normalizes `model + effort` into tier aliases such as
   `gpt-5.5 xhigh`, and applies ambient policy for governed tiers.
 - **Codex project installer** - `tiller install --backend codex --project` writes
-  `.codex/hooks.json`, seven `tiller-*` Codex custom agents, `.codex/config.toml`,
+  `.codex/hooks.json`, eight `tiller-*` Codex custom agents, `.codex/config.toml`,
   `AGENTS.md` operating notes, `.codex/skills/using-tiller/SKILL.md`, and
   `.codex/skills/using-sirena/SKILL.md`.
 - **Codex scout persona** - `tiller-scout` uses `gpt-5.4-mini` for cheap bounded
   read-only reconnaissance, inventories, docs/log snippets, and simple summaries.
+- **Ambient summary persona** - `tiller-summary` uses cheap read-only models for
+  compact status updates, run ledger summaries, stale/late report triage, and
+  checkpoint candidate synthesis across Claude Code, Codex, and OpenCode installs.
 - **Codex lifecycle context** - Codex installs `SessionStart` and `SubagentStart`
   hooks alongside `PreToolUse`. `SessionStart` emits startup context only when
   the root session is proven governed, such as `gpt-5.5 xhigh`; subagent

@@ -34,8 +34,10 @@ implementation shell work from this primary agent.
 Spend premium/reason-tier output on durable judgment artifacts: specs, plans,
 architecture notes, implementation docs, reviews, policy rationale, checkpoint
 decisions, and high-quality handoff briefs. Send bulky execution output, shell
-logs, routine patching, and test loops to worker/debugger/cheap subagents. Keep
-root output compact; write durable docs/plans when they compound.
+logs, routine patching, and test loops to worker/debugger/cheap subagents. Use
+`tiller-summary` for compact status updates, run ledger summaries, stale/late
+report triage, checkpoint candidate synthesis, and next-action bookkeeping.
+Keep root output compact; write durable docs/plans when they compound.
 
 Maintain a descriptor-backed task list. Each descriptor should look like a
 portable subagent/task packet that can be mapped to Codex, Claude Code,
@@ -58,6 +60,8 @@ explicit paths, inspect the diff, and never include unrelated dirty work.
 
 Right-size subagents:
 - `tiller-scout`: cheap bounded reconnaissance and simple summaries.
+- `tiller-summary`: compact status updates, run ledger summaries, stale/late
+  report triage, checkpoint candidate synthesis, and next-action bookkeeping.
 - `tiller-worker`: bounded implementation, edits, builds, and tests.
 - `tiller-debugger`: root-cause analysis plus fixes.
 - `tiller-investigator`/`tiller-reviewer`: read-only deep tracing, review, and

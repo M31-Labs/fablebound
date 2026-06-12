@@ -241,6 +241,8 @@ func TestRunInstallWizard_Selection2InstallsCodexProject(t *testing.T) {
 		tillerCodexNotesBegin,
 		"the root Codex session is the orchestrator",
 		"`tiller-scout`",
+		"`tiller-summary`",
+		"stale/late report triage",
 		"`gpt-5.4-mini`",
 		"`gpt-5.5 medium`",
 		"`gpt-5.5 high`",
@@ -348,7 +350,7 @@ func TestInstallCodexSkill(t *testing.T) {
 			name:    "using-tiller",
 			path:    filepath.Join(t.TempDir(), ".codex", "skills", "using-tiller", "SKILL.md"),
 			content: codexSkillSnippet(),
-			want:    []string{"name: using-tiller", "Root Workflow", "Right-Sizing Matrix", "hypha recall", "tiller-scout", "gpt-5.4-mini", "gpt-5.5 medium", "gpt-5.5 high", "gpt-5.5 xhigh", "tiller-worker", "using-sirena", "terse, direct, explicit", "configured checkpoint tool", "checkpoint candidate"},
+			want:    []string{"name: using-tiller", "Root Workflow", "Right-Sizing Matrix", "hypha recall", "tiller-scout", "tiller-summary", "gpt-5.4-mini", "gpt-5.5 medium", "gpt-5.5 high", "gpt-5.5 xhigh", "tiller-worker", "using-sirena", "terse, direct, explicit", "configured checkpoint tool", "checkpoint candidate"},
 		},
 		{
 			name:    "using-sirena",
@@ -529,7 +531,7 @@ func TestInstallPreservesExistingKeys(t *testing.T) {
 
 // ── Agent file tests ──────────────────────────────────────────────────────────
 
-// TestInstallAgents_FreshDir verifies that installAgents writes all 6 tiller-* files
+// TestInstallAgents_FreshDir verifies that installAgents writes all tiller-* files
 // into an empty directory.
 func TestInstallAgents_FreshDir(t *testing.T) {
 	agentsDir := filepath.Join(t.TempDir(), "agents")
@@ -537,7 +539,7 @@ func TestInstallAgents_FreshDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("installAgents: %v", err)
 	}
-	const wantCount = 6
+	const wantCount = 7
 	if len(written) != wantCount {
 		t.Fatalf("expected %d files written, got %d: %v", wantCount, len(written), written)
 	}
@@ -588,6 +590,15 @@ func TestInstallAgents_ContentCheck(t *testing.T) {
 	if !strings.Contains(string(data), "model: sonnet") {
 		t.Errorf("tiller-worker.md missing 'model: sonnet'; content:\n%s", string(data))
 	}
+	data, err = os.ReadFile(filepath.Join(agentsDir, "tiller-summary.md"))
+	if err != nil {
+		t.Fatalf("tiller-summary.md not found: %v", err)
+	}
+	for _, want := range []string{"model: haiku", "status compaction", "stale/late report classification", "checkpoint candidate"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("tiller-summary.md missing %q; content:\n%s", want, string(data))
+		}
+	}
 }
 
 func TestInstallAgents_RenderConfiguredModels(t *testing.T) {
@@ -605,6 +616,7 @@ func TestInstallAgents_RenderConfiguredModels(t *testing.T) {
 	cases := map[string]string{
 		"tiller-worker.md":       "model: 5.5 medium",
 		"tiller-debugger.md":     "model: 5.5 medium",
+		"tiller-summary.md":      "model: 5.5 medium",
 		"tiller-investigator.md": "model: 5.5 xhigh",
 		"tiller-reviewer.md":     "model: 5.5 xhigh",
 		"tiller-architect.md":    "model: 5.5 xhigh",
@@ -649,8 +661,8 @@ func TestInstallCodexAgents_FreshDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("installCodexAgents: %v", err)
 	}
-	if len(written) != 7 {
-		t.Fatalf("expected 7 Codex agents written, got %d: %v", len(written), written)
+	if len(written) != 8 {
+		t.Fatalf("expected 8 Codex agents written, got %d: %v", len(written), written)
 	}
 
 	data, err := os.ReadFile(filepath.Join(agentsDir, "tiller-worker.toml"))
@@ -673,6 +685,17 @@ func TestInstallCodexAgents_FreshDir(t *testing.T) {
 	for _, want := range []string{`model = "gpt-5.4-mini"`, `model_reasoning_effort = "medium"`, `sandbox_mode = "read-only"`, "bounded read-only inventories"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("Codex scout missing %q:\n%s", want, content)
+		}
+	}
+
+	data, err = os.ReadFile(filepath.Join(agentsDir, "tiller-summary.toml"))
+	if err != nil {
+		t.Fatalf("read tiller-summary.toml: %v", err)
+	}
+	content = string(data)
+	for _, want := range []string{`model = "gpt-5.4-mini"`, `model_reasoning_effort = "medium"`, `sandbox_mode = "read-only"`, "status compaction", "stale/late report classification", "checkpoint candidate"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("Codex summary missing %q:\n%s", want, content)
 		}
 	}
 }
@@ -701,8 +724,8 @@ func TestInstallOpenCodeAgents_FreshDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("installOpenCodeAgents: %v", err)
 	}
-	if len(written) != 8 {
-		t.Fatalf("expected 8 OpenCode agents written, got %d: %v", len(written), written)
+	if len(written) != 9 {
+		t.Fatalf("expected 9 OpenCode agents written, got %d: %v", len(written), written)
 	}
 
 	data, err := os.ReadFile(filepath.Join(agentsDir, "tiller-orchestrator.md"))
@@ -710,7 +733,7 @@ func TestInstallOpenCodeAgents_FreshDir(t *testing.T) {
 		t.Fatalf("read tiller-orchestrator.md: %v", err)
 	}
 	content := string(data)
-	for _, want := range []string{"mode: primary", "edit: deny", "task:", "tiller-*", ".tiller/scratch/opencode/", "checkpoint tool", "descriptor-backed task list", "Cursor", "Descriptor fields", "descriptor-compatible subagent reports"} {
+	for _, want := range []string{"mode: primary", "edit: deny", "task:", "tiller-*", "tiller-summary", ".tiller/scratch/opencode/", "checkpoint tool", "descriptor-backed task list", "Cursor", "Descriptor fields", "descriptor-compatible subagent reports"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("OpenCode orchestrator missing %q:\n%s", want, content)
 		}
@@ -724,6 +747,17 @@ func TestInstallOpenCodeAgents_FreshDir(t *testing.T) {
 	for _, want := range []string{"mode: subagent", "edit: allow", "bash: allow", "descriptor-compatible report contract", "checkpoint candidate"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("OpenCode worker missing %q:\n%s", want, content)
+		}
+	}
+
+	data, err = os.ReadFile(filepath.Join(agentsDir, "tiller-summary.md"))
+	if err != nil {
+		t.Fatalf("read tiller-summary.md: %v", err)
+	}
+	content = string(data)
+	for _, want := range []string{"mode: subagent", "edit: deny", "status compaction", "stale/late report classification", "checkpoint candidate"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("OpenCode summary missing %q:\n%s", want, content)
 		}
 	}
 }
@@ -903,7 +937,7 @@ func TestRunInstallCodexProject(t *testing.T) {
 		t.Fatalf("read AGENTS.md: %v", err)
 	}
 	notes := string(notesData)
-	for _, want := range []string{tillerCodexNotesBegin, "SessionStart adds this context", ".tiller/scratch/codex/", "premium/reason-tier output", "descriptor-backed task list", "Codex, Claude Code", "OpenCode, Cursor", "Descriptor fields", "budget tier/model", "Queue/background independent descriptors", "returned reports", "descriptor-compatible subagent reports", "update task status and checkpoint decisions", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "Do not run implementation shell commands", "Right-sizing matrix", "`tiller-scout`", "`gpt-5.4-mini`", "`gpt-5.5 medium`", "`gpt-5.5 high`", "`gpt-5.5 xhigh`", "agent_type", "wait_agent", "using-sirena", "terse, direct, explicit"} {
+	for _, want := range []string{tillerCodexNotesBegin, "SessionStart adds this context", ".tiller/scratch/codex/", "premium/reason-tier output", "descriptor-backed task list", "Codex, Claude Code", "OpenCode, Cursor", "Descriptor fields", "budget tier/model", "Queue/background independent descriptors", "returned reports", "descriptor-compatible subagent reports", "update task status and checkpoint decisions", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "Do not run implementation shell commands", "Right-sizing matrix", "`tiller-scout`", "`tiller-summary`", "stale/late report triage", "`gpt-5.4-mini`", "`gpt-5.5 medium`", "`gpt-5.5 high`", "`gpt-5.5 xhigh`", "agent_type", "wait_agent", "using-sirena", "terse, direct, explicit"} {
 		if !strings.Contains(notes, want) {
 			t.Fatalf("Codex operating notes missing %q:\n%s", want, notes)
 		}
@@ -914,7 +948,7 @@ func TestRunInstallCodexProject(t *testing.T) {
 		t.Fatalf("read Codex Tiller skill: %v", err)
 	}
 	skill := string(skillData)
-	for _, want := range []string{"name: using-tiller", "SessionStart makes this visible", ".tiller/scratch/codex/", "premium/reason-tier output", "descriptor-backed task list", "Codex, Claude Code, OpenCode, Cursor", "Descriptor fields", "budget tier/model ceiling", "Queue/background independent descriptors", "returned reports", "descriptor-compatible subagent reports", "update task status and checkpoint decisions", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "Root Workflow", "Right-Sizing Matrix", "hypha recall", "tiller-scout", "gpt-5.4-mini", "gpt-5.5 medium", "gpt-5.5 high", "gpt-5.5 xhigh", "tiller-worker", "wait_agent", "using-sirena", "terse, direct, explicit"} {
+	for _, want := range []string{"name: using-tiller", "SessionStart makes this visible", ".tiller/scratch/codex/", "premium/reason-tier output", "descriptor-backed task list", "Codex, Claude Code, OpenCode, Cursor", "Descriptor fields", "budget tier/model ceiling", "Queue/background independent descriptors", "returned reports", "descriptor-compatible subagent reports", "update task status and checkpoint decisions", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "Root Workflow", "Right-Sizing Matrix", "hypha recall", "tiller-scout", "tiller-summary", "stale/late report triage", "gpt-5.4-mini", "gpt-5.5 medium", "gpt-5.5 high", "gpt-5.5 xhigh", "tiller-worker", "wait_agent", "using-sirena", "terse, direct, explicit"} {
 		if !strings.Contains(skill, want) {
 			t.Fatalf("Codex Tiller skill missing %q:\n%s", want, skill)
 		}
@@ -964,7 +998,7 @@ func TestRunInstallOpenCodeProject(t *testing.T) {
 		t.Fatalf("read OpenCode notes: %v", err)
 	}
 	notes := string(notesData)
-	for _, want := range []string{tillerOpenCodeNotesBegin, "tiller-orchestrator", ".tiller/scratch/opencode/", "premium/reason-tier output", "descriptor-backed task list", "Codex, Claude Code", "OpenCode, Cursor", "Descriptor fields", "budget tier/model", "Queue/background independent descriptors", "returned reports", "descriptor-compatible subagent reports", "update task status and checkpoint decisions", "Git/GitHub for VCS", "Graft", "checkpoint tool", "Right-sizing matrix", "`tiller-worker`"} {
+	for _, want := range []string{tillerOpenCodeNotesBegin, "tiller-orchestrator", ".tiller/scratch/opencode/", "premium/reason-tier output", "descriptor-backed task list", "Codex, Claude Code", "OpenCode, Cursor", "Descriptor fields", "budget tier/model", "Queue/background independent descriptors", "returned reports", "descriptor-compatible subagent reports", "update task status and checkpoint decisions", "Git/GitHub for VCS", "Graft", "checkpoint tool", "Right-sizing matrix", "`tiller-summary`", "stale/late", "report triage", "`tiller-worker`"} {
 		if !strings.Contains(notes, want) {
 			t.Fatalf("OpenCode notes missing %q:\n%s", want, notes)
 		}
@@ -974,7 +1008,7 @@ func TestRunInstallOpenCodeProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read OpenCode orchestrator: %v", err)
 	}
-	for _, want := range []string{"mode: primary", "permission:", "task:", "tiller-*", "descriptor-backed task list", "Cursor", "Descriptor fields", "descriptor-compatible subagent reports"} {
+	for _, want := range []string{"mode: primary", "permission:", "task:", "tiller-*", "tiller-summary", "descriptor-backed task list", "Cursor", "Descriptor fields", "descriptor-compatible subagent reports"} {
 		if !strings.Contains(string(orchestrator), want) {
 			t.Fatalf("OpenCode orchestrator missing %q:\n%s", want, string(orchestrator))
 		}
@@ -1155,8 +1189,8 @@ func TestFullInstallUninstall_WithAgents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("installAgents: %v", err)
 	}
-	if len(written) != 6 {
-		t.Fatalf("expected 6 agents written, got %d", len(written))
+	if len(written) != 7 {
+		t.Fatalf("expected 7 agents written, got %d", len(written))
 	}
 
 	// Install hooks.
@@ -1204,8 +1238,8 @@ func TestFullInstallUninstall_WithAgents(t *testing.T) {
 
 	// Uninstall agents.
 	agentFiles := tillerAgentFilesIn(agentsDir)
-	if len(agentFiles) != 6 {
-		t.Fatalf("expected 6 tiller-* files for removal, got %d", len(agentFiles))
+	if len(agentFiles) != 7 {
+		t.Fatalf("expected 7 tiller-* files for removal, got %d", len(agentFiles))
 	}
 	for _, name := range agentFiles {
 		os.Remove(filepath.Join(agentsDir, name))
@@ -1291,9 +1325,9 @@ func TestOwnedTillerAgentFiles_OnlyOwned(t *testing.T) {
 	}
 
 	owned := ownedTillerAgentFiles(agentsDir)
-	// Should be exactly 6.
-	if len(owned) != 6 {
-		t.Fatalf("expected 6 owned files, got %d: %v", len(owned), owned)
+	// Should be exactly 7.
+	if len(owned) != 7 {
+		t.Fatalf("expected 7 owned files, got %d: %v", len(owned), owned)
 	}
 	// Must not include user-created tiller-my-custom.md or my-agent.md.
 	for _, name := range owned {
@@ -1401,8 +1435,8 @@ func TestRunUninstall_PrintNoWrite(t *testing.T) {
 
 	// Agent files must still be present.
 	owned := ownedTillerAgentFiles(agentsDir)
-	if len(owned) != 6 {
-		t.Errorf("--print must not remove agents; expected 6, got %d", len(owned))
+	if len(owned) != 7 {
+		t.Errorf("--print must not remove agents; expected 7, got %d", len(owned))
 	}
 }
 

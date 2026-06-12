@@ -114,7 +114,7 @@ rule DenyImplicitReasonInheritance priority 9 {
         tool.agent_type in ["general-purpose", "claude", "Explore", "Plan", ""] and
         tool.agent_model_tier == ""
     }
-    then Deny { reason: "tiller: generic subagent types inherit the ambient reason-tier model when no explicit model is provided. Pass an explicit cheaper model or use a named tiller-* persona (tiller-worker, tiller-debugger, tiller-investigator, tiller-reviewer, tiller-architect, tiller-deep-report) whose frontmatter pins the model." }
+    then Deny { reason: "tiller: generic subagent types inherit the ambient reason-tier model when no explicit model is provided. Pass an explicit cheaper model or use a named tiller-* persona (tiller-scout, tiller-summary, tiller-worker, tiller-debugger, tiller-investigator, tiller-reviewer, tiller-architect, tiller-deep-report) whose frontmatter pins the model." }
 }
 
 # DenyHyphaDaemons — defense-in-depth: even if a future classifier change
@@ -180,5 +180,5 @@ rule AllowMarkdownAuthoring priority 15 {
 
 rule DenyExecution priority 20 {
     when segment denied_tools { true }
-    then Deny { reason: "tiller: ambient orchestrator runs in read/dispatch mode — delegate with the Task tool: code changes → tiller-worker, debugging → tiller-debugger, investigation → tiller-investigator, review → tiller-reviewer; reserve tiller-architect/tiller-deep-report for deep design and research. {tool.name} is not permitted for the root orchestrator agent." }
+    then Deny { reason: "tiller: ambient orchestrator runs in read/dispatch mode — delegate with the Task tool: status compaction → tiller-summary, code changes → tiller-worker, debugging → tiller-debugger, investigation → tiller-investigator, review → tiller-reviewer; reserve tiller-architect/tiller-deep-report for deep design and research. {tool.name} is not permitted for the root orchestrator agent." }
 }

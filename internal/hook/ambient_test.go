@@ -1039,7 +1039,7 @@ func TestCodexSessionStartAdditionalContext(t *testing.T) {
 		t.Fatalf("RunWithBackend error: %v", err)
 	}
 	ctx := parseAdditionalContext(t, bytes.TrimSpace(out.Bytes()))
-	for _, want := range []string{"Tiller ambient is active", "Root may read/search directly", ".tiller/scratch/codex/", "premium/reason-tier output", "descriptor-backed task list", "Codex, Claude Code, OpenCode, Cursor", "Descriptor fields", "budget tier/model ceiling", "Queue/background independent descriptors", "update descriptors from returned reports", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "spawn_agent", "agent_type=\"tiller-scout\"", "gpt-5.4-mini", "agent_type=\"tiller-worker\"", "gpt-5.5 medium", "gpt-5.5 high", "gpt-5.5 xhigh", "wait_agent/close_agent"} {
+	for _, want := range []string{"Tiller ambient is active", "Root may read/search directly", ".tiller/scratch/codex/", "premium/reason-tier output", "descriptor-backed task list", "Codex, Claude Code, OpenCode, Cursor", "Descriptor fields", "budget tier/model ceiling", "Queue/background independent descriptors", "update descriptors from returned reports", "Git/GitHub for VCS", "Graft", "Checkpoint verified wins", "configured checkpoint tool", "spawn_agent", "agent_type=\"tiller-scout\"", "agent_type=\"tiller-summary\"", "status compaction", "stale/late report triage", "gpt-5.4-mini", "agent_type=\"tiller-worker\"", "gpt-5.5 medium", "gpt-5.5 high", "gpt-5.5 xhigh", "wait_agent/close_agent"} {
 		if !strings.Contains(ctx, want) {
 			t.Fatalf("SessionStart context missing %q:\n%s", want, ctx)
 		}
@@ -1097,6 +1097,11 @@ func TestCodexSubagentStartAdditionalContext(t *testing.T) {
 			name:      "scout",
 			agentType: "tiller-scout",
 			want:      []string{"Tiller scout agent", "gpt-5.4-mini", "bounded read-only inventories", "simple summaries", "Do not edit files", "Read relevant .tiller/scratch/codex/ notes first", "descriptor-compatible report contract", "checkpoint candidate yes/no", "update task status and checkpoint decisions", "checkpointable wins", "configured checkpoint tool or Git"},
+		},
+		{
+			name:      "summary",
+			agentType: "tiller-summary",
+			want:      []string{"Tiller summary agent", "gpt-5.4-mini", "read-only status compaction", "stale/late report triage", "checkpoint candidate synthesis", "recommended next action", "Do not edit files", "Read relevant .tiller/scratch/codex/ notes first", "descriptor-compatible report contract", "checkpoint candidate yes/no", "update task status and checkpoint decisions", "checkpointable wins", "configured checkpoint tool or Git"},
 		},
 	}
 

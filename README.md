@@ -46,7 +46,7 @@ tiller ambient enable
 
 `tiller install` with no flags is intentionally project-local. It asks which agent harness config to install, then writes only under the current directory's agent config (`.codex/` or `.claude/`). Use explicit `--backend ... --global` only when you want user-scope install.
 
-For Codex, the project install writes `PreToolUse`, `SessionStart`, and `SubagentStart` hooks to `.codex/hooks.json`, the seven Codex custom agent personas to `.codex/agents/`, `.codex/config.toml` defaults of `features.multi_agent = true`, `[agents] max_threads = 12`, and `max_depth = 2`, plus project operating notes in `AGENTS.md` and Codex skills at `.codex/skills/using-tiller/SKILL.md` and `.codex/skills/using-sirena/SKILL.md`. Run `tiller codex doctor` from the project root after install to verify hooks, config, agents, skills, bypass state, and Codex hook smoke checks.
+For Codex, the project install writes `PreToolUse`, `SessionStart`, and `SubagentStart` hooks to `.codex/hooks.json`, the eight Codex custom agent personas to `.codex/agents/`, `.codex/config.toml` defaults of `features.multi_agent = true`, `[agents] max_threads = 12`, and `max_depth = 2`, plus project operating notes in `AGENTS.md` and Codex skills at `.codex/skills/using-tiller/SKILL.md` and `.codex/skills/using-sirena/SKILL.md`. Run `tiller codex doctor` from the project root after install to verify hooks, config, agents, skills, bypass state, and Codex hook smoke checks.
 
 For OpenCode, the project install writes `opencode.json` with a managed instruction reference, `.opencode/tiller.md` operating notes, and OpenCode markdown agents under `.opencode/agents/`. Use the `tiller-orchestrator` primary agent for the root orchestration path and the `tiller-*` subagents for execution, debugging, investigation, review, and synthesis.
 
@@ -104,6 +104,7 @@ When the reason-tier root delegates via the Agent/Task tool, these personas rout
 
 | Persona | Model | Tier | Use for |
 |---|---|---|---|
+| `tiller-summary` | haiku | execute | Status compaction, run ledger summaries, stale/late report triage, checkpoint candidate synthesis |
 | `tiller-worker` | sonnet | execute | Writing/editing code, running builds and tests, all file-mutating work |
 | `tiller-debugger` | sonnet | execute | Systematic debugging - root-cause, fix, verify |
 | `tiller-investigator` | opus | scrutiny | Deep read-only investigation, code tracing, adversarial verification |
@@ -122,6 +123,7 @@ Codex has the same shape: a root interactive thread, lifecycle hooks, custom age
 | Agent | Codex model settings | Tier | Use for |
 |---|---|---|---|
 | `tiller-scout` | `gpt-5.4-mini`, `model_reasoning_effort = "medium"`, read-only | scout | Cheap bounded reconnaissance, inventories, docs/log snippets, simple summaries |
+| `tiller-summary` | `gpt-5.4-mini`, `model_reasoning_effort = "medium"`, read-only | scrutiny | Compact status updates, run ledger summaries, stale/late report triage, checkpoint candidate synthesis |
 | `tiller-worker` | `gpt-5.5`, `model_reasoning_effort = "medium"` | execute | Bounded implementation, edits, builds, tests |
 | `tiller-debugger` | `gpt-5.5`, `model_reasoning_effort = "high"` | execute | Root-cause analysis, fixes, verification |
 | `tiller-investigator` | `gpt-5.5`, `model_reasoning_effort = "xhigh"`, read-only | reason | Deep investigation and adversarial verification |
@@ -129,9 +131,9 @@ Codex has the same shape: a root interactive thread, lifecycle hooks, custom age
 | `tiller-architect` | `gpt-5.5`, `model_reasoning_effort = "xhigh"` | reason | Architecture, design, trade-off analysis |
 | `tiller-deep-report` | `gpt-5.5`, `model_reasoning_effort = "xhigh"` | reason | Multi-source research and synthesis |
 
-The Codex operating rule is to right-size the agent before spending reasoning budget: root reads/searches directly and makes routing decisions; `tiller-scout` uses `gpt-5.4-mini` for cheap reconnaissance; `tiller-worker` uses `gpt-5.5 medium`; `tiller-debugger` uses `gpt-5.5 high`; investigator/reviewer/architect/deep-report use `gpt-5.5 xhigh` for high-stakes reasoning, review, and synthesis. `tiller hook --backend codex` reads Codex `turn_context` transcript lines, normalizes `model + effort` into aliases such as `gpt-5.5 xhigh`, and applies ambient policy only for governed tiers. For Codex `PreToolUse`, allow decisions are silent and deny decisions use Codex hook output with `spawn_agent`/`wait_agent`/`close_agent` guidance.
+The Codex operating rule is to right-size the agent before spending reasoning budget: root reads/searches directly and makes routing decisions; `tiller-scout` and `tiller-summary` use `gpt-5.4-mini` for cheap reconnaissance and status compaction; `tiller-worker` uses `gpt-5.5 medium`; `tiller-debugger` uses `gpt-5.5 high`; investigator/reviewer/architect/deep-report use `gpt-5.5 xhigh` for high-stakes reasoning, review, and synthesis. `tiller hook --backend codex` reads Codex `turn_context` transcript lines, normalizes `model + effort` into aliases such as `gpt-5.5 xhigh`, and applies ambient policy only for governed tiers. For Codex `PreToolUse`, allow decisions are silent and deny decisions use Codex hook output with `spawn_agent`/`wait_agent`/`close_agent` guidance.
 
-Codex `SessionStart` returns `additionalContext` before any denial is needed only when the session is proven governed. If ambient is active, it reminds the root that reads/searches are direct, cheap reconnaissance can go to `tiller-scout`, and execution routes through `spawn_agent`. If `.tiller/ambient.disabled` or `TILLER_AMBIENT_DISABLED=1` disables ambient, that governed startup context says normal tools are allowed. Without governed/xhigh proof, `SessionStart` exits silently so Codex ambient activation stays invisible to non-governed sessions. Codex `SubagentStart` returns role-specific `additionalContext` for scout, worker/debugger, investigator/reviewer, architect/deep-report, and unknown `tiller-*` agent types; it never blocks startup.
+Codex `SessionStart` returns `additionalContext` before any denial is needed only when the session is proven governed. If ambient is active, it reminds the root that reads/searches are direct, cheap reconnaissance can go to `tiller-scout`, status compaction can go to `tiller-summary`, and execution routes through `spawn_agent`. If `.tiller/ambient.disabled` or `TILLER_AMBIENT_DISABLED=1` disables ambient, that governed startup context says normal tools are allowed. Without governed/xhigh proof, `SessionStart` exits silently so Codex ambient activation stays invisible to non-governed sessions. Codex `SubagentStart` returns role-specific `additionalContext` for scout, summary, worker/debugger, investigator/reviewer, architect/deep-report, and unknown `tiller-*` agent types; it never blocks startup.
 
 Use `.tiller/scratch/codex/` as the shared ambient Codex scratch path for terse handoff notes, reports, and claims. Root may write notes there for subagents; subagents should read relevant notes first when present and write final reports or handoff notes there when useful.
 

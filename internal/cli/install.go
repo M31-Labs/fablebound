@@ -954,6 +954,8 @@ func ambientModelForAgent(name string, ambient *tier.AmbientConfig) string {
 		return ""
 	}
 	switch name {
+	case "tiller-summary.md":
+		return ambientCheapExecuteModel(ambient)
 	case "tiller-worker.md", "tiller-debugger.md":
 		return ambient.PreferredModel("execute")
 	case "tiller-investigator.md", "tiller-reviewer.md":
@@ -966,6 +968,18 @@ func ambientModelForAgent(name string, ambient *tier.AmbientConfig) string {
 	default:
 		return ""
 	}
+}
+
+func ambientCheapExecuteModel(ambient *tier.AmbientConfig) string {
+	if ambient == nil {
+		return ""
+	}
+	for _, model := range ambient.Models["execute"] {
+		if strings.Contains(strings.ToLower(model), "haiku") {
+			return model
+		}
+	}
+	return ambient.PreferredModel("execute")
 }
 
 // installCodexAgents writes the embedded tiller-*.toml custom agent files into
@@ -1105,6 +1119,9 @@ Right-sizing matrix:
   ordinary context.
 - ` + "`tiller-scout`" + `: ` + "`gpt-5.4-mini`" + ` for cheap bounded reconnaissance,
   inventories, docs/log snippets, and simple summaries.
+- ` + "`tiller-summary`" + `: ` + "`gpt-5.4-mini`" + ` for compact status updates, run
+  ledger summaries, stale/late report triage, checkpoint candidate synthesis,
+  and next-action bookkeeping.
 - ` + "`tiller-worker`" + `: ` + "`gpt-5.5 medium`" + ` for bounded implementation, edits,
   builds, and tests.
 - ` + "`tiller-debugger`" + `: ` + "`gpt-5.5 high`" + ` for root-cause analysis plus fixes.
@@ -1117,6 +1134,9 @@ Codex delegation mechanics:
 - Use the normal Codex multi-agent tools (` + "`spawn_agent`" + `, ` + "`wait_agent`" + `,
   ` + "`send_input`" + `, ` + "`resume_agent`" + `, ` + "`close_agent`" + `) with ` + "`agent_type`" + ` set to one of
   the ` + "`tiller-*`" + ` agents.
+- Use ` + "`tiller-summary`" + ` for compact status updates, run ledger summaries,
+  stale/late report triage, checkpoint candidate synthesis, and next-action
+  bookkeeping instead of spending root output on routine status compaction.
 - Keep delegated prompts bounded. Include the concrete task, relevant paths,
   expected output, and verification target when known.
 - Continue useful orchestration while agents run. When a result returns, review
@@ -1184,6 +1204,7 @@ func codexSkillSnippet() string {
 		"",
 		"- root: direct reads/searches and routing decisions; no subagent needed for ordinary context.",
 		"- `tiller-scout`: `gpt-5.4-mini` for cheap bounded reconnaissance, inventories, docs/log snippets, and simple summaries.",
+		"- `tiller-summary`: `gpt-5.4-mini` for compact status updates, run ledger summaries, stale/late report triage, checkpoint candidate synthesis, and next-action bookkeeping.",
 		"- `tiller-worker`: `gpt-5.5 medium` for bounded implementation, edits, builds, and tests.",
 		"- `tiller-debugger`: `gpt-5.5 high` for root-cause analysis plus fixes.",
 		"- `tiller-investigator`/`tiller-reviewer`: `gpt-5.5 xhigh` read-only for deep tracing, adversarial review, and high-stakes verification.",
@@ -1192,6 +1213,7 @@ func codexSkillSnippet() string {
 		"## Delegation",
 		"",
 		"- Use `tiller-scout` for cheap, bounded read-only reconnaissance and simple summaries.",
+		"- Use `tiller-summary` for compact status updates, run ledger summaries, stale/late report triage, checkpoint candidate synthesis, and next-action bookkeeping.",
 		"- Use `tiller-worker` for implementation, file edits, builds, tests, generated files, and other execution work.",
 		"- Use `tiller-debugger` for root-cause debugging plus fixes.",
 		"- Use `tiller-investigator` for deep read-only tracing or claim verification.",
@@ -1271,6 +1293,8 @@ Root OpenCode session:
 Right-sizing matrix:
 - ` + "`tiller-scout`" + `: cheap bounded reconnaissance, inventories, docs/log
   snippets, and simple summaries.
+- ` + "`tiller-summary`" + `: compact status updates, run ledger summaries, stale/late
+  report triage, checkpoint candidate synthesis, and next-action bookkeeping.
 - ` + "`tiller-worker`" + `: bounded implementation, edits, builds, and tests.
 - ` + "`tiller-debugger`" + `: root-cause analysis plus fixes.
 - ` + "`tiller-investigator`" + `/` + "`tiller-reviewer`" + `: read-only deep tracing,

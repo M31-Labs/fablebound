@@ -202,7 +202,7 @@ func (d *codexDoctor) checkHookSmoke(cwd string) {
 	})
 	if err != nil {
 		d.fail("hook smoke SessionStart: %v", err)
-	} else if context := codexDoctorAdditionalContext(sessionOut); containsAll(context, []string{"tiller-scout", "gpt-5.4-mini", ".tiller/scratch/codex/", "configured checkpoint tool", "spawn_agent"}) {
+	} else if context := codexDoctorAdditionalContext(sessionOut); containsAll(context, []string{"tiller-scout", "tiller-summary", "gpt-5.4-mini", ".tiller/scratch/codex/", "configured checkpoint tool", "spawn_agent"}) {
 		d.pass("hook smoke: SessionStart context")
 	} else {
 		d.fail("hook smoke SessionStart: missing expected context in %q", context)

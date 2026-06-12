@@ -30,6 +30,7 @@ func TestRunCodexDoctorHappyPath(t *testing.T) {
 		"PASS codex config: [agents] max_threads = 12",
 		"PASS codex config: [agents] max_depth = 2",
 		"PASS codex agents: tiller-scout.toml present",
+		"PASS codex agents: tiller-summary.toml present",
 		"PASS codex skill using-tiller: managed snippet matches",
 		"PASS codex skill using-sirena: managed snippet matches",
 		"PASS hook smoke: SessionStart context",

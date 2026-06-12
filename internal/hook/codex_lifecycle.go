@@ -174,7 +174,7 @@ func codexAgentRole(agentType string) string {
 
 func codexAgentTier(agentType string) string {
 	switch agentType {
-	case "tiller-scout", "tiller-investigator", "tiller-reviewer":
+	case "tiller-scout", "tiller-summary", "tiller-investigator", "tiller-reviewer":
 		return "scrutiny"
 	case "tiller-worker", "tiller-debugger":
 		return "execute"

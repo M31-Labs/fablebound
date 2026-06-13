@@ -61,7 +61,7 @@ For Claude Code, then in any `claude` session:
 /model opus
 ```
 
-Ambient mode engages immediately. The Opus 4.8 root is restricted to orchestration-only tools - with targeted carve-outs described below. Execution is automatically delegated to tiller-* subagents on cheaper models. The concrete Claude model token is `claude-opus-4-8`; `opus` is the Claude Code alias used in persona frontmatter and `/model` guidance.
+Ambient mode engages immediately. The Opus 4.8 root is restricted to orchestration-only tools - with targeted carve-outs described below. Execution is automatically delegated to tiller-* subagents on cheaper models, while read-only investigation, review, deep design, and exhaustive reports may use Opus 4.8 when warranted. The concrete Claude model token is `claude-opus-4-8`; `opus` is the Claude Code alias used in persona frontmatter and `/model` guidance.
 
 For Codex, open or restart a Codex session in the installed project so Codex loads the project `.codex/` config, hooks, and custom agents. Codex remains silent at startup unless `SessionStart` can prove the root session maps to a governed tier, such as `gpt-5.5 xhigh`, from the hook payload or transcript. When that proof exists, `SessionStart` adds the Tiller operating context up front. `SubagentStart` adds role-specific context for each `tiller-*` agent. For OpenCode, open or restart OpenCode in the installed project and switch to the `tiller-orchestrator` primary agent.
 
@@ -110,8 +110,8 @@ When the reason-tier root delegates via the Agent/Task tool, these personas rout
 | `tiller-summary` | haiku | execute | Status compaction, distilled ambient state, run ledger summaries, stale/late report triage, checkpoint candidate synthesis |
 | `tiller-worker` | sonnet | execute | Writing/editing code, running builds and tests, all file-mutating work |
 | `tiller-debugger` | sonnet | execute | Systematic debugging - root-cause, fix, verify |
-| `tiller-investigator` | opus | reason | Deep read-only investigation, code tracing, adversarial verification |
-| `tiller-reviewer` | opus | reason | Code review - correctness, security, quality |
+| `tiller-investigator` | opus | scrutiny | Deep read-only investigation, code tracing, adversarial verification |
+| `tiller-reviewer` | opus | scrutiny | Code review - correctness, security, quality |
 | `tiller-architect` | opus | reason | Architectural specs, deep design, complex trade-off analysis |
 | `tiller-deep-report` | opus | reason | Exhaustive multi-source research reports |
 

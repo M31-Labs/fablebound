@@ -773,7 +773,7 @@ func runAmbient(stdin io.Reader, stdout io.Writer, workspaceDir, backend string)
 		appendAmbientDispatchTrace(full)
 	}
 
-	// Model is fable: evaluate ambient orchestrator-only policy.
+	// Governed reason-tier model: evaluate ambient orchestrator-only policy.
 	// Reconstruct a plain HookEvent from the full event.
 	event := HookEvent{
 		HookEventName: full.HookEventName,
@@ -832,7 +832,7 @@ func loadAmbientConfig(projectDir, backend string) *tier.AmbientConfig {
 }
 
 // appendAmbientDispatchTrace appends a kind:"dispatch" TraceEvent when a
-// Task/Agent tool call is observed in the ambient fable session AND a run
+// Task/Agent tool call is observed in a governed ambient session AND a run
 // context is resolvable from TILLER_RUN_DIR.
 //
 // D4 observe-only: this is purely informational. Errors are silently swallowed;

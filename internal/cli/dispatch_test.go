@@ -485,7 +485,7 @@ func TestDispatch_ModelAliasDeprecated(t *testing.T) {
 		model    string
 		wantTier string // the policy will route to this tier
 	}{
-		{"chief-architect", "opus", "reason"},
+		{"reviewer", "opus", "scrutiny"},
 		{"chief-architect", "claude-opus-4-8", "reason"},
 		{"chief-architect", "fable", "reason"},
 		{"worker", "sonnet", "execute"},

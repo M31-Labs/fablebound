@@ -72,6 +72,46 @@ func TestRunAmbientStatusWithoutRunContextSucceeds(t *testing.T) {
 	if strings.Contains(out, "run:") {
 		t.Fatalf("status without run context should not print run digest: %q", out)
 	}
+	if !strings.Contains(out, "fallback_ledger: "+scratch.CodexAmbientFallbackLedgerPath(dir)) {
+		t.Fatalf("status without run context should print fallback ledger path: %q", out)
+	}
+	if !strings.Contains(out, "fallback_ledger_events: 0") || !strings.Contains(out, "fallback_ledger_last: none") {
+		t.Fatalf("status without fallback ledger should print empty fallback summary: %q", out)
+	}
+}
+
+func TestRunAmbientStatusWithoutRunContextShowsFallbackLedgerSummary(t *testing.T) {
+	dir := t.TempDir()
+	withChdir(t, dir)
+	t.Setenv("TILLER_RUN_DIR", "")
+	now := time.Date(2026, 6, 13, 1, 2, 3, 4, time.UTC)
+	if err := scratch.AppendCodexAmbientFallbackLedger(dir, scratch.LedgerEvent{
+		ID:      "fallback-001",
+		Backend: "codex",
+		Kind:    "codex.session_start",
+		Status:  "observed",
+		At:      now,
+		Summary: "session",
+	}); err != nil {
+		t.Fatalf("AppendCodexAmbientFallbackLedger: %v", err)
+	}
+
+	out := captureAmbientStdout(t, func() {
+		if err := runAmbient([]string{"status"}); err != nil {
+			t.Fatalf("status: %v", err)
+		}
+	})
+
+	want := []string{
+		"fallback_ledger: " + scratch.CodexAmbientFallbackLedgerPath(dir),
+		"fallback_ledger_events: 1",
+		"fallback_ledger_last: kind=codex.session_start status=observed at=2026-06-13T01:02:03.000000004Z",
+	}
+	for _, line := range want {
+		if !strings.Contains(out, line) {
+			t.Fatalf("status output missing %q:\n%s", line, out)
+		}
+	}
 }
 
 func TestRunAmbientNextRequiresRunContext(t *testing.T) {

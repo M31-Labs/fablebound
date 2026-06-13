@@ -3,7 +3,6 @@ package hook
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -93,16 +92,7 @@ func appendCodexAmbientFallbackLifecycleRecord(full HookEventFull, workspaceDir 
 		ev.AgentRunID = codexAgentRunID(full.AgentID)
 	}
 
-	path := filepath.Join(workspace, ".tiller", "scratch", "codex", "ambient-ledger.jsonl")
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	_ = json.NewEncoder(f).Encode(ev)
+	_ = scratch.AppendCodexAmbientFallbackLedger(workspace, ev)
 }
 
 func isCodexMultiAgentLifecycleTool(toolName string) bool {

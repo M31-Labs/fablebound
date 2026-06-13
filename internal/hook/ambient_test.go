@@ -565,22 +565,9 @@ func makeAmbientLifecycleRunDir(t *testing.T, workspace string) string {
 
 func readCodexFallbackAmbientLedger(t *testing.T, workspace string) []scratch.LedgerEvent {
 	t.Helper()
-	path := filepath.Join(workspace, ".tiller", "scratch", "codex", "ambient-ledger.jsonl")
-	data, err := os.ReadFile(path)
+	events, err := scratch.ListCodexAmbientFallbackLedger(workspace)
 	if err != nil {
 		t.Fatalf("read fallback ambient ledger: %v", err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	events := make([]scratch.LedgerEvent, 0, len(lines))
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		var ev scratch.LedgerEvent
-		if err := json.Unmarshal([]byte(line), &ev); err != nil {
-			t.Fatalf("parse fallback ambient ledger line %q: %v", line, err)
-		}
-		events = append(events, ev)
 	}
 	return events
 }
@@ -1329,6 +1316,9 @@ func TestCodexLifecycleSessionStartAppendsLedger(t *testing.T) {
 	if got := string(status); !strings.Contains(got, "Generated snapshot from `manifest.json`") || !strings.Contains(got, "codex.session_start") || !strings.Contains(got, "- ledger: input=0 output=321") {
 		t.Fatalf("status.md missing Codex lifecycle content:\n%s", got)
 	}
+	if _, err := os.Stat(scratch.CodexAmbientFallbackLedgerPath(workspace)); !os.IsNotExist(err) {
+		t.Fatalf("managed run should not write fallback ambient ledger, stat err=%v", err)
+	}
 }
 
 func TestCodexLifecycleSessionStartMediumDoesNotAppendLedger(t *testing.T) {
@@ -1460,6 +1450,45 @@ func TestCodexLifecycleSessionStartFallbackLedgerWithoutRunDir(t *testing.T) {
 	if ev.TokenUsage == nil || ev.TokenUsage.OutputTokens != 321 {
 		t.Fatalf("fallback ledger token usage mismatch: %#v", ev.TokenUsage)
 	}
+	path := scratch.CodexAmbientFallbackLedgerPath(workspace)
+	if info, err := os.Stat(filepath.Dir(path)); err != nil {
+		t.Fatalf("stat fallback ledger dir: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("fallback ledger dir mode=%o want 700", got)
+	}
+	if info, err := os.Stat(path); err != nil {
+		t.Fatalf("stat fallback ledger file: %v", err)
+	} else if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("fallback ledger file mode=%o want 600", got)
+	}
+}
+
+func TestCodexLifecycleSessionStartFallbackLedgerFailOpen(t *testing.T) {
+	workspace := t.TempDir()
+	t.Setenv("TILLER_ROLE", "")
+	t.Setenv("TILLER_RUN_DIR", "")
+	if err := os.MkdirAll(scratch.CodexAmbientFallbackLedgerPath(workspace), 0o700); err != nil {
+		t.Fatalf("make unappendable fallback path: %v", err)
+	}
+
+	p := codexTranscript(t, "xhigh")
+	event := map[string]any{
+		"hook_event_name": "SessionStart",
+		"transcript_path": p,
+		"model":           "gpt-5.5",
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := RunWithBackend(strings.NewReader(string(data)), &out, workspace, "codex"); err != nil {
+		t.Fatalf("RunWithBackend should fail open despite fallback write failure: %v", err)
+	}
+	if ctx := parseAdditionalContext(t, bytes.TrimSpace(out.Bytes())); !strings.Contains(ctx, "Tiller ambient is active") {
+		t.Fatalf("missing Codex SessionStart context after fallback write failure: %s", ctx)
+	}
 }
 
 func TestCodexLifecycleSessionStartMediumDoesNotWriteFallbackLedger(t *testing.T) {
@@ -1485,7 +1514,7 @@ func TestCodexLifecycleSessionStartMediumDoesNotWriteFallbackLedger(t *testing.T
 	if got := bytes.TrimSpace(out.Bytes()); len(got) != 0 {
 		t.Fatalf("medium Codex SessionStart should be silent, got %s", got)
 	}
-	if _, err := os.Stat(filepath.Join(workspace, ".tiller", "scratch", "codex", "ambient-ledger.jsonl")); !os.IsNotExist(err) {
+	if _, err := os.Stat(scratch.CodexAmbientFallbackLedgerPath(workspace)); !os.IsNotExist(err) {
 		t.Fatalf("fallback ambient ledger should not exist for medium SessionStart, stat err=%v", err)
 	}
 }
@@ -1553,7 +1582,7 @@ func TestCodexLifecycleNonTillerSubagentStartDoesNotWriteFallbackLedger(t *testi
 	if got := bytes.TrimSpace(out.Bytes()); len(got) != 0 {
 		t.Fatalf("non-Tiller Codex SubagentStart should pass through silently, got %s", got)
 	}
-	if _, err := os.Stat(filepath.Join(workspace, ".tiller", "scratch", "codex", "ambient-ledger.jsonl")); !os.IsNotExist(err) {
+	if _, err := os.Stat(scratch.CodexAmbientFallbackLedgerPath(workspace)); !os.IsNotExist(err) {
 		t.Fatalf("fallback ambient ledger should not exist for non-Tiller SubagentStart, stat err=%v", err)
 	}
 }

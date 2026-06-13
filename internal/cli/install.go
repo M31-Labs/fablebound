@@ -852,16 +852,6 @@ func opencodePaths(project bool) (configPath, agentsDir, notesPath, instructionP
 	return
 }
 
-// claudeSettingsPath returns the path to ~/.claude/settings.json.
-// Kept for backward compatibility with existing test helpers.
-func claudeSettingsPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("home dir: %w", err)
-	}
-	return filepath.Join(home, ".claude", "settings.json"), nil
-}
-
 func loadInstallAmbientConfig(project bool, backend string) *tier.AmbientConfig {
 	projectDir := ""
 	if project {
@@ -1386,7 +1376,7 @@ func installOpenCodeNotes(notesPath string, dryRun bool) (bool, error) {
 		if string(existing) == content {
 			return false, nil
 		}
-	} else if err != nil && !os.IsNotExist(err) {
+	} else if !os.IsNotExist(err) {
 		return false, fmt.Errorf("read %s: %w", notesPath, err)
 	}
 	if dryRun {

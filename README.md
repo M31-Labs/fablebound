@@ -203,6 +203,8 @@ Command (non-Claude) backends use the `command` adapter - see [Non-Claude Backen
 
 `[ambient.<backend>]` sections are for interactive ambient sessions. They map backend-specific model strings to tiller tier labels before policy evaluation. Claude Code reads root assistant model IDs from its JSONL transcript. Codex reads the hook payload plus transcript `turn_context` and normalizes `gpt-5.5` with `xhigh` into the alias `gpt-5.5 xhigh` (or the shorthand `5.5 xhigh`) before policy evaluation.
 
+Claude Code's `opus` token is intentionally context-sensitive in Tiller: ambient root transcript detection treats it as governed reason-tier Opus 4.8, while managed/persona routing still classifies investigator and reviewer as scrutiny roles.
+
 For Claude Code installs, `tiller install` renders the `model:` frontmatter in the `tiller-*` personas from `[ambient.claude-code]`: worker/debugger use the execute alias, architect/deep-report use the reason alias, and investigator/reviewer use the scrutiny alias when present or the reason alias otherwise. This keeps persona routing configurable without editing embedded markdown templates.
 
 For Codex, `tiller install --backend codex --project` writes the equivalent `.codex/agents/*.toml` files, `.codex/hooks.json`, `.codex/config.toml`, `AGENTS.md` operating notes, `.codex/skills/using-tiller/SKILL.md`, and `.codex/skills/using-sirena/SKILL.md` with subagent limits of 12 concurrent threads and max depth 2.

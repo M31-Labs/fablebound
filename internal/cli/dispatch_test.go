@@ -12,6 +12,7 @@ import (
 	"m31labs.dev/tiller/internal/sandbox"
 	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/scratch/fsstore"
+	"m31labs.dev/tiller/internal/tier"
 )
 
 // ── runIDBucket ────────────────────────────────────────────────────────────────
@@ -524,6 +525,53 @@ func TestDispatch_ModelAliasDeprecated(t *testing.T) {
 				t.Errorf("--model=%s: dispatch tier = %q, want %q", tc.model, d.Tier, tc.wantTier)
 			}
 		})
+	}
+}
+
+func TestClaudeOpusAmbientAndDispatchAliasContracts(t *testing.T) {
+	cfg, err := tier.Load("")
+	if err != nil {
+		t.Fatalf("tier.Load: %v", err)
+	}
+	claude := cfg.AmbientConfig("claude-code")
+	if claude == nil {
+		t.Fatal("AmbientConfig(\"claude-code\") returned nil")
+	}
+	if got := claude.ModelTier("opus"); got != "reason" {
+		t.Fatalf("Claude ambient ModelTier(opus) = %q, want reason", got)
+	}
+	if !claude.GovernsTier("reason") {
+		t.Fatal("Claude ambient config should govern reason tier")
+	}
+
+	_, runDir, runID, st := makeDispatchTestEnv(t)
+	reg := adapter.NewRegistry()
+	reg.Register(newFakeAdapter("claude-headless", "full"))
+
+	t.Setenv("TILLER_RUN_DIR", runDir)
+	t.Setenv("TILLER_ROLE", "orchestrator")
+	t.Setenv("TILLER_DEPTH", "0")
+	t.Setenv("TILLER_DISPATCH_ID", "")
+
+	err = runDispatchWithRegistry([]string{
+		"--role", "reviewer",
+		"--model", "opus",
+		"--brief", "brief text",
+		"--queue",
+	}, reg)
+	if err != nil {
+		t.Fatalf("runDispatchWithRegistry --model=opus: %v", err)
+	}
+
+	dispatches, err := listDispatchesFromStore(t, st, runID)
+	if err != nil {
+		t.Fatalf("listDispatches: %v", err)
+	}
+	if len(dispatches) != 1 {
+		t.Fatalf("dispatch count = %d, want 1", len(dispatches))
+	}
+	if got := dispatches[0].Tier; got != "scrutiny" {
+		t.Fatalf("dispatch --model opus tier = %q, want scrutiny", got)
 	}
 }
 

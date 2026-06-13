@@ -113,17 +113,18 @@ func TestLargeLineThenFable(t *testing.T) {
 	}
 }
 
-// ─── Model switch (fable → opus) ─────────────────────────────────────────────
+// ─── Model switch (legacy fable → Opus 4.8) ──────────────────────────────────
 
-// TestFableThenOpus: after a /model switch from fable to opus, no fable tier.
+// TestFableThenOpus: after a /model switch from legacy fable to Opus 4.8,
+// the session remains governed as reason-tier.
 func TestFableThenOpus(t *testing.T) {
 	p := fixturePath(t, "fable_then_opus.jsonl")
 	tier, ok := DetectTier(p)
-	if ok {
-		t.Errorf("got ok=true, want false (opus is not fable)")
+	if !ok {
+		t.Errorf("got ok=false, want true (opus is governed reason-tier)")
 	}
-	if tier != "" {
-		t.Errorf("got tier=%q, want empty (model switch to opus must clear detection)", tier)
+	if tier != "reason" {
+		t.Errorf("got tier=%q, want reason", tier)
 	}
 }
 
@@ -167,7 +168,7 @@ func TestIsFableModel(t *testing.T) {
 	}{
 		{"claude-fable-5", true},
 		{"fable", true},
-		{"claude-opus-4-8", false},
+		{"claude-opus-4-8", true},
 		{"claude-sonnet-4-5", false},
 		{"", false},
 		{"<synthetic>", false},

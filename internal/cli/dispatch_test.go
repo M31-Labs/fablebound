@@ -481,11 +481,15 @@ func TestDispatch_MissingRunDir(t *testing.T) {
 // for known aliases and that the dispatch still succeeds (--queue mode).
 func TestDispatch_ModelAliasDeprecated(t *testing.T) {
 	cases := []struct {
+		role     string
 		model    string
 		wantTier string // the policy will route to this tier
 	}{
-		{"sonnet", "execute"},
-		{"haiku", "execute"},
+		{"chief-architect", "opus", "reason"},
+		{"chief-architect", "claude-opus-4-8", "reason"},
+		{"chief-architect", "fable", "reason"},
+		{"worker", "sonnet", "execute"},
+		{"worker", "haiku", "execute"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.model, func(t *testing.T) {
@@ -494,12 +498,12 @@ func TestDispatch_ModelAliasDeprecated(t *testing.T) {
 			reg.Register(newFakeAdapter("claude-headless", "full"))
 
 			t.Setenv("TILLER_RUN_DIR", runDir)
-			t.Setenv("TILLER_ROLE", "user")
+			t.Setenv("TILLER_ROLE", "orchestrator")
 			t.Setenv("TILLER_DEPTH", "0")
 			t.Setenv("TILLER_DISPATCH_ID", "")
 
 			err := runDispatchWithRegistry([]string{
-				"--role", "worker",
+				"--role", tc.role,
 				"--model", tc.model,
 				"--brief", "brief text",
 				"--queue",

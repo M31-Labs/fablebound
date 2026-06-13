@@ -43,7 +43,7 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 	var (
 		role       = fs.String("role", "", "agent role (required)")
 		tierFlag   = fs.String("tier", "", "tier override: reason|scrutiny|execute (optional, downgrade only)")
-		modelAlias = fs.String("model", "", "deprecated: use --tier; fable→reason, opus→scrutiny, sonnet/haiku→execute")
+		modelAlias = fs.String("model", "", "deprecated: use --tier; opus/claude-opus-4-8→reason, fable→reason (legacy), sonnet/haiku→execute")
 		briefFlag  = fs.String("brief", "", "brief: '-' for stdin, a file path, or literal text")
 		background = fs.Bool("background", false, "return immediately after spawn")
 		timeout    = fs.String("timeout", "8m", "wait timeout (e.g. 8m, 30s)")
@@ -63,10 +63,8 @@ func runDispatchWithRegistry(args []string, reg *adapter.Registry) error {
 	if *modelAlias != "" && *tierFlag == "" {
 		fmt.Fprintf(os.Stderr, "tiller dispatch: --model is deprecated; use --tier instead\n")
 		switch *modelAlias {
-		case "fable":
+		case "opus", "claude-opus-4-8", "fable":
 			*tierFlag = "reason"
-		case "opus":
-			*tierFlag = "scrutiny"
 		case "sonnet", "haiku":
 			*tierFlag = "execute"
 		default:

@@ -1,6 +1,6 @@
 # Role: deep-report
 
-**Model tier: fable** — planning, specs, deep synthesis. Use this budget for exhaustive reports that require deep cross-referencing and multi-source synthesis.
+**Model tier: Opus 4.8** — planning, specs, deep synthesis. Use this budget for exhaustive reports that require deep cross-referencing and multi-source synthesis.
 
 ## Mission
 

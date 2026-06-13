@@ -9,7 +9,12 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-_No unreleased changes yet._
+### Changed
+
+- **Claude Opus 4.8 guidance** - Claude Code defaults and user-facing guidance
+  now promote Opus 4.8 (`opus` / `claude-opus-4-8`) for reason-tier ambient
+  roots while retaining legacy Fable aliases, fixtures, and compatibility
+  paths for older transcripts and records.
 
 ---
 

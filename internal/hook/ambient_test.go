@@ -192,27 +192,27 @@ func TestLargeLineThenFable_AmbientEnforced(t *testing.T) {
 	}
 }
 
-// ─── Model switch (fable → opus) ─────────────────────────────────────────────
+// ─── Model switch (legacy fable → Opus 4.8) ──────────────────────────────────
 
-// TestFableThenOpus: after a /model switch from fable to opus, the last
-// qualifying line is opus → no fable enforcement.
+// TestFableThenOpus: after a /model switch from legacy fable to Opus 4.8, the
+// last qualifying line remains governed as reason-tier.
 func TestFableThenOpus(t *testing.T) {
 	p := transcriptPath(t, "fable_then_opus.jsonl")
 	tier, ok := claudecode.DetectTier(p)
-	if ok {
-		t.Errorf("got ok=true, want false (opus is not fable)")
+	if !ok {
+		t.Errorf("got ok=false, want true (opus is governed reason-tier)")
 	}
-	if tier != "" {
-		t.Errorf("got tier=%q, want empty (model switch to opus must clear detection)", tier)
+	if tier != "reason" {
+		t.Errorf("got tier=%q, want reason", tier)
 	}
 }
 
-// TestFableThenOpus_AmbientPassthrough: via Run path, opus session is passthrough.
-func TestFableThenOpus_AmbientPassthrough(t *testing.T) {
+// TestFableThenOpus_AmbientEnforced: via Run path, Opus 4.8 is governed.
+func TestFableThenOpus_AmbientEnforced(t *testing.T) {
 	p := transcriptPath(t, "fable_then_opus.jsonl")
 	decision, _ := runAmbientHookWithTranscript(t, p, "Edit")
-	if decision != "passthrough" {
-		t.Errorf("expected passthrough for opus session after /model switch, got %q", decision)
+	if decision != "deny" {
+		t.Errorf("expected deny for opus session after /model switch, got %q", decision)
 	}
 }
 
@@ -308,8 +308,8 @@ func TestAmbientFableDenyEdit(t *testing.T) {
 	}
 }
 
-// TestAmbientOpusPassthrough: opus session → Edit → passthrough.
-func TestAmbientOpusPassthrough(t *testing.T) {
+// TestAmbientOpusEnforced: Opus 4.8 session → Edit → deny.
+func TestAmbientOpusEnforced(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "t.jsonl")
 	line := `{"type":"assistant","isSidechain":false,"message":{"model":"claude-opus-4-8","role":"assistant","content":[{"type":"text","text":"hi"}]}}` + "\n"
@@ -318,8 +318,8 @@ func TestAmbientOpusPassthrough(t *testing.T) {
 	}
 
 	decision, _ := runAmbientHookWithTranscript(t, p, "Edit")
-	if decision != "passthrough" {
-		t.Errorf("expected passthrough for opus session, got %q", decision)
+	if decision != "deny" {
+		t.Errorf("expected deny for opus session, got %q", decision)
 	}
 }
 

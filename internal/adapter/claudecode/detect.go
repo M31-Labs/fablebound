@@ -300,7 +300,7 @@ func LatestTokenUsage(transcriptPath string) *scratch.TokenUsage {
 	return nil
 }
 
-// IsFableModel reports whether model is a fable-tier model ID.
+// IsFableModel reports whether model is a governed reason-tier model ID.
 // Kept for compatibility with older tests and callers. New code should use
 // ModelTier or tier.AmbientConfig directly.
 func IsFableModel(model string) bool {

@@ -12,6 +12,7 @@ import (
 	"m31labs.dev/tiller/internal/sandbox"
 	"m31labs.dev/tiller/internal/scratch"
 	"m31labs.dev/tiller/internal/scratch/fsstore"
+	"m31labs.dev/tiller/internal/tier"
 )
 
 // ── runIDBucket ────────────────────────────────────────────────────────────────
@@ -481,11 +482,21 @@ func TestDispatch_MissingRunDir(t *testing.T) {
 // for known aliases and that the dispatch still succeeds (--queue mode).
 func TestDispatch_ModelAliasDeprecated(t *testing.T) {
 	cases := []struct {
+		role     string
 		model    string
 		wantTier string // the policy will route to this tier
 	}{
-		{"sonnet", "execute"},
-		{"haiku", "execute"},
+		{"reviewer", "opus", "scrutiny"},
+		{"chief-architect", "claude-opus-4-8", "reason"},
+		{"chief-architect", "fable", "reason"},
+		// Non-vacuous case: chief-architect defaults to the reason tier, so
+		// --model opus (which maps to scrutiny) only resolves to scrutiny when
+		// the deprecated alias mapping fires and the cost downgrade is honored.
+		// Removing the opus→scrutiny mapping would leave this routed at reason
+		// and fail this assertion.
+		{"chief-architect", "opus", "scrutiny"},
+		{"worker", "sonnet", "execute"},
+		{"worker", "haiku", "execute"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.model, func(t *testing.T) {
@@ -494,12 +505,12 @@ func TestDispatch_ModelAliasDeprecated(t *testing.T) {
 			reg.Register(newFakeAdapter("claude-headless", "full"))
 
 			t.Setenv("TILLER_RUN_DIR", runDir)
-			t.Setenv("TILLER_ROLE", "user")
+			t.Setenv("TILLER_ROLE", "orchestrator")
 			t.Setenv("TILLER_DEPTH", "0")
 			t.Setenv("TILLER_DISPATCH_ID", "")
 
 			err := runDispatchWithRegistry([]string{
-				"--role", "worker",
+				"--role", tc.role,
 				"--model", tc.model,
 				"--brief", "brief text",
 				"--queue",
@@ -520,6 +531,53 @@ func TestDispatch_ModelAliasDeprecated(t *testing.T) {
 				t.Errorf("--model=%s: dispatch tier = %q, want %q", tc.model, d.Tier, tc.wantTier)
 			}
 		})
+	}
+}
+
+func TestClaudeOpusAmbientAndDispatchAliasContracts(t *testing.T) {
+	cfg, err := tier.Load("")
+	if err != nil {
+		t.Fatalf("tier.Load: %v", err)
+	}
+	claude := cfg.AmbientConfig("claude-code")
+	if claude == nil {
+		t.Fatal("AmbientConfig(\"claude-code\") returned nil")
+	}
+	if got := claude.ModelTier("opus"); got != "reason" {
+		t.Fatalf("Claude ambient ModelTier(opus) = %q, want reason", got)
+	}
+	if !claude.GovernsTier("reason") {
+		t.Fatal("Claude ambient config should govern reason tier")
+	}
+
+	_, runDir, runID, st := makeDispatchTestEnv(t)
+	reg := adapter.NewRegistry()
+	reg.Register(newFakeAdapter("claude-headless", "full"))
+
+	t.Setenv("TILLER_RUN_DIR", runDir)
+	t.Setenv("TILLER_ROLE", "orchestrator")
+	t.Setenv("TILLER_DEPTH", "0")
+	t.Setenv("TILLER_DISPATCH_ID", "")
+
+	err = runDispatchWithRegistry([]string{
+		"--role", "reviewer",
+		"--model", "opus",
+		"--brief", "brief text",
+		"--queue",
+	}, reg)
+	if err != nil {
+		t.Fatalf("runDispatchWithRegistry --model=opus: %v", err)
+	}
+
+	dispatches, err := listDispatchesFromStore(t, st, runID)
+	if err != nil {
+		t.Fatalf("listDispatches: %v", err)
+	}
+	if len(dispatches) != 1 {
+		t.Fatalf("dispatch count = %d, want 1", len(dispatches))
+	}
+	if got := dispatches[0].Tier; got != "scrutiny" {
+		t.Fatalf("dispatch --model opus tier = %q, want scrutiny", got)
 	}
 }
 

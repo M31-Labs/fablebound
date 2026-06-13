@@ -20,7 +20,7 @@
 //	[ambient.claude-code]
 //	detector = "claude-jsonl-transcript"
 //	govern_tiers = ["reason"]
-//	reason_models = ["fable", "claude-fable-5"]
+//	reason_models = ["opus", "claude-opus-4-8"]
 package tier
 
 import (

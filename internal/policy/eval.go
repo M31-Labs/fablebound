@@ -54,8 +54,8 @@ type AmbientNextActionResult struct {
 
 // EvalDispatch evaluates a DispatchRequest against the loaded dispatch policy.
 // On Allow it also evaluates the DispatchRoute strategy to obtain routing.
-// On Allow, if req.Model is non-empty and represents a cost downgrade vs the
-// routed model, the explicit model is substituted (§6.3).
+// On Allow, if req.Tier is non-empty and represents a cost downgrade vs the
+// routed tier, the explicit tier is substituted (§6.3).
 func EvalDispatch(loaded *Loaded, req DispatchRequest) (DispatchResult, error) {
 	prog := loaded.Prog
 	ctx := ContextMap(req)

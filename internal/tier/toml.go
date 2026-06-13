@@ -32,7 +32,7 @@ const (
 //	[ambient.<name>]  — interactive ambient backend section headers
 //	detector = "claude-jsonl-transcript"  — string value
 //	govern_tiers = ["reason"]             — single-line string array
-//	reason_models = ["fable"]             — tier aliases; <tier>_models
+//	reason_models = ["opus"]              — tier aliases; <tier>_models
 //
 // Any other content is rejected. Line numbers in errors are 1-based.
 func parse(data []byte) (*Config, error) {

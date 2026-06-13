@@ -89,12 +89,12 @@ tiller runs show "$RUN"
 
 **Expected output (dispatches section)**:
 ```
-root orchestrator(fable) [completed] → dispatches/root/report.md
+root orchestrator(claude-opus-4-8) [completed] → dispatches/root/report.md
   └─ d01 investigator(sonnet) [completed] → dispatches/d01/report.md
   └─ d02 worker(sonnet) [completed] → dispatches/d02/report.md
 ```
 
-Root must show model `fable`; children must show `sonnet` or `haiku`.
+Root must show model `claude-opus-4-8`; children must show `sonnet` or `haiku`.
 
 ---
 
@@ -297,7 +297,7 @@ the `**Demo gate probe**` paragraph was removed from
 |-------|--------|
 | 1 init+vet | PASS (exit 0, 54+52 tests green, 100% coverage) |
 | 2 run completed | PASS (2.8 min) |
-| 3 tree with models | PASS (root=fable, d01+d02=sonnet) |
+| 3 tree with models | PASS (root=claude-opus-4-8, d01+d02=sonnet) |
 | 4 reports+haiku.md | PASS (d01: 46259B, d02: 41727B; haiku.md: 121B) |
 | 5 ≥1 Deny + ≥2 Allow | PASS (Deny: Bash ls / OrchestratorDenyRest; Allow: 2 dispatches) |
 | 6 arbiter replay | PASS (toolgate 17/0 changed, dispatch 2/0 changed) |

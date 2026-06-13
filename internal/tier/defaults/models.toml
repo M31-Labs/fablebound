@@ -1,5 +1,5 @@
 [tiers.reason]
-candidates = ["claude-headless:anthropic/fable"]
+candidates = ["claude-headless:anthropic/claude-opus-4-8"]
 
 [tiers.scrutiny]
 candidates = ["claude-headless:anthropic/opus"]
@@ -10,8 +10,7 @@ candidates = ["claude-headless:anthropic/sonnet", "claude-headless:anthropic/hai
 [ambient.claude-code]
 detector = "claude-jsonl-transcript"
 govern_tiers = ["reason"]
-reason_models = ["fable", "claude-fable-5"]
-scrutiny_models = ["opus", "claude-opus-4-8"]
+reason_models = ["opus", "claude-opus-4-8", "fable", "claude-fable-5"]
 execute_models = ["sonnet", "claude-sonnet-4-5", "haiku", "claude-haiku-4-5"]
 
 [ambient.codex]

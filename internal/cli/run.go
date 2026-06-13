@@ -257,7 +257,8 @@ func runRun(args []string) error {
 }
 
 // spawnRootSupervisor starts a detached _supervise process for the root dispatch.
-// Unlike regular dispatch, the root has model=fable and no dispatch policy check.
+// Unlike regular dispatch, the root uses the configured reason-tier model and
+// no dispatch policy check.
 // We directly invoke _supervise which will call Supervise() reading meta.json,
 // but we need to override the ClaudeArgs for the root — in particular the
 // role prompt path, which Supervise() builds from RolePromptPath(runDir, "orchestrator").

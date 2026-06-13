@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -64,7 +65,7 @@ func runAmbient(args []string) error {
 		} else {
 			fmt.Printf("tiller: ambient enabled for %s (%s absent)\n", cwd, path)
 		}
-		if digest, err := buildAmbientNextDigest(cwd, false); err == nil {
+		if digest, err := buildAmbientNextDigest(cwd); err == nil {
 			fmt.Printf("run: %s\n", digest.runID)
 			fmt.Printf("status: %s\n", valueOrUnknown(digest.runStatus))
 			fmt.Printf("next_action: %s confidence=%d risk=%s budget=%s fallback=%t\n",
@@ -80,8 +81,12 @@ func runAmbient(args []string) error {
 		if len(args) != 1 {
 			return fmt.Errorf("usage: tiller ambient next")
 		}
-		digest, err := buildAmbientNextDigest(cwd, true)
+		digest, err := buildAmbientNextDigest(cwd)
 		if err != nil {
+			if errors.Is(err, errAmbientNoRun) {
+				printAmbientIdle("next", cwd)
+				return nil
+			}
 			return err
 		}
 		printAmbientNextDigest(digest)
@@ -94,8 +99,12 @@ func runAmbient(args []string) error {
 		if len(args) != 2 || args[1] != "--dry-run" {
 			return fmt.Errorf("usage: tiller ambient step --dry-run")
 		}
-		digest, err := buildAmbientNextDigest(cwd, true)
+		digest, err := buildAmbientNextDigest(cwd)
 		if err != nil {
+			if errors.Is(err, errAmbientNoRun) {
+				printAmbientIdle("step", cwd)
+				return nil
+			}
 			return err
 		}
 		printAmbientStepDryRun(digest)
@@ -130,6 +139,15 @@ func printCodexAmbientFallbackLedgerStatus(cwd string) {
 		valueOrUnknown(last.Kind), valueOrUnknown(last.Status), valueOrUnknown(last.At.Format(time.RFC3339Nano)))
 }
 
+// printAmbientIdle reports that there is no active managed run for the given
+// ambient subcommand and surfaces the unmanaged fallback ledger, mirroring
+// `tiller ambient status`. Callers use this for a clean exit 0 instead of an
+// error when TILLER_RUN_DIR is unset.
+func printAmbientIdle(sub, cwd string) {
+	fmt.Printf("tiller ambient %s: idle - no active managed run (TILLER_RUN_DIR unset)\n", sub)
+	printCodexAmbientFallbackLedgerStatus(cwd)
+}
+
 func latestFallbackLedgerEvent(events []scratch.LedgerEvent) *scratch.LedgerEvent {
 	var latest *scratch.LedgerEvent
 	for i := range events {
@@ -153,57 +171,42 @@ type ambientNextDigest struct {
 	distillation string
 }
 
-func buildAmbientNextDigest(cwd string, requireRun bool) (*ambientNextDigest, error) {
+// errAmbientNoRun is returned by buildAmbientNextDigest when there is no managed
+// run to report on (TILLER_RUN_DIR is unset). Callers that can degrade
+// gracefully - status, next, step - treat it as an idle state and exit 0 rather
+// than surfacing an error.
+var errAmbientNoRun = errors.New("ambient: no active managed run (TILLER_RUN_DIR unset)")
+
+func buildAmbientNextDigest(cwd string) (*ambientNextDigest, error) {
 	runDir := strings.TrimSpace(os.Getenv("TILLER_RUN_DIR"))
 	if runDir == "" {
-		if requireRun {
-			return nil, fmt.Errorf("ambient next: TILLER_RUN_DIR is not set")
-		}
-		return nil, fmt.Errorf("ambient next: TILLER_RUN_DIR is not set")
+		return nil, errAmbientNoRun
 	}
 	if _, err := os.Stat(runDir); err != nil {
-		if requireRun {
-			return nil, fmt.Errorf("ambient next: TILLER_RUN_DIR %q: %w", runDir, err)
-		}
-		return nil, err
+		return nil, fmt.Errorf("ambient: TILLER_RUN_DIR %q: %w", runDir, err)
 	}
 
 	runID := filepath.Base(runDir)
 	st := fsstore.Open(filepath.Dir(runDir))
 	r, err := st.ReadRun(runID)
 	if err != nil {
-		if requireRun {
-			return nil, fmt.Errorf("ambient next: read run %s: %w", runID, err)
-		}
-		return nil, err
+		return nil, fmt.Errorf("ambient: read run %s: %w", runID, err)
 	}
 	dispatches, err := st.ListDispatches(runID)
 	if err != nil {
-		if requireRun {
-			return nil, fmt.Errorf("ambient next: list dispatches: %w", err)
-		}
-		return nil, err
+		return nil, fmt.Errorf("ambient: list dispatches: %w", err)
 	}
 	agents, err := st.ListAgentRuns(runID)
 	if err != nil {
-		if requireRun {
-			return nil, fmt.Errorf("ambient next: list agent runs: %w", err)
-		}
-		return nil, err
+		return nil, fmt.Errorf("ambient: list agent runs: %w", err)
 	}
 	candidates, err := st.ListCheckpointCandidates(runID)
 	if err != nil {
-		if requireRun {
-			return nil, fmt.Errorf("ambient next: list checkpoint candidates: %w", err)
-		}
-		return nil, err
+		return nil, fmt.Errorf("ambient: list checkpoint candidates: %w", err)
 	}
 	ledger, err := st.ListLedgerEvents(runID)
 	if err != nil {
-		if requireRun {
-			return nil, fmt.Errorf("ambient next: list ledger events: %w", err)
-		}
-		return nil, err
+		return nil, fmt.Errorf("ambient: list ledger events: %w", err)
 	}
 
 	opts := ambientNextStatusOptions(time.Now())

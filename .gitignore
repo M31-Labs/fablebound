@@ -1,5 +1,9 @@
 # tiller run scratch — never commit run artifacts
 .tiller/runs/
+# unmanaged ambient fallback ledger + scratch state (internal/scratch)
+.tiller/scratch/
+# generated run/report output
+.tiller/reports/
 
 # built binary (root only, not cmd/tiller/)
 /tiller

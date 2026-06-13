@@ -114,10 +114,22 @@ func TestRunAmbientStatusWithoutRunContextShowsFallbackLedgerSummary(t *testing.
 	}
 }
 
-func TestRunAmbientNextRequiresRunContext(t *testing.T) {
+func TestRunAmbientNextWithoutRunContextSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	withChdir(t, dir)
 	t.Setenv("TILLER_RUN_DIR", "")
-	if err := runAmbient([]string{"next"}); err == nil || !strings.Contains(err.Error(), "TILLER_RUN_DIR") {
-		t.Fatalf("next error = %v, want missing TILLER_RUN_DIR", err)
+
+	out := captureAmbientStdout(t, func() {
+		if err := runAmbient([]string{"next"}); err != nil {
+			t.Fatalf("next: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "tiller ambient next: idle - no active managed run") {
+		t.Fatalf("next without run context should print idle message: %q", out)
+	}
+	if !strings.Contains(out, "fallback_ledger: "+scratch.CodexAmbientFallbackLedgerPath(dir)) {
+		t.Fatalf("next without run context should surface fallback ledger: %q", out)
 	}
 }
 
@@ -130,10 +142,22 @@ func TestRunAmbientStepRequiresDryRun(t *testing.T) {
 	}
 }
 
-func TestRunAmbientStepDryRunRequiresRunContext(t *testing.T) {
+func TestRunAmbientStepDryRunWithoutRunContextSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	withChdir(t, dir)
 	t.Setenv("TILLER_RUN_DIR", "")
-	if err := runAmbient([]string{"step", "--dry-run"}); err == nil || !strings.Contains(err.Error(), "TILLER_RUN_DIR") {
-		t.Fatalf("step --dry-run error = %v, want missing TILLER_RUN_DIR", err)
+
+	out := captureAmbientStdout(t, func() {
+		if err := runAmbient([]string{"step", "--dry-run"}); err != nil {
+			t.Fatalf("step --dry-run: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "tiller ambient step: idle - no active managed run") {
+		t.Fatalf("step --dry-run without run context should print idle message: %q", out)
+	}
+	if !strings.Contains(out, "fallback_ledger: "+scratch.CodexAmbientFallbackLedgerPath(dir)) {
+		t.Fatalf("step --dry-run without run context should surface fallback ledger: %q", out)
 	}
 }
 

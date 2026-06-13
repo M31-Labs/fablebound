@@ -489,6 +489,12 @@ func TestDispatch_ModelAliasDeprecated(t *testing.T) {
 		{"reviewer", "opus", "scrutiny"},
 		{"chief-architect", "claude-opus-4-8", "reason"},
 		{"chief-architect", "fable", "reason"},
+		// Non-vacuous case: chief-architect defaults to the reason tier, so
+		// --model opus (which maps to scrutiny) only resolves to scrutiny when
+		// the deprecated alias mapping fires and the cost downgrade is honored.
+		// Removing the opus→scrutiny mapping would leave this routed at reason
+		// and fail this assertion.
+		{"chief-architect", "opus", "scrutiny"},
 		{"worker", "sonnet", "execute"},
 		{"worker", "haiku", "execute"},
 	}

@@ -17,6 +17,13 @@ tiller uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   paths for older transcripts and records. Deprecated `tiller dispatch --model
   opus` still maps to the scrutiny tier for older scripts; use
   `--model claude-opus-4-8` for reason-tier dispatch.
+- **Codex fallback ambient ledger hardening** - unmanaged Codex lifecycle
+  observations now use a shared fallback ledger helper with `0700` parent
+  directory permissions, `0600` file permissions, locked JSONL appends, clean
+  `tiller ambient status` visibility when `TILLER_RUN_DIR` is absent, and
+  `tiller ambient doctor` smoke coverage. Managed runs continue to use their
+  run-backed `ledger.jsonl` and `status.md`; ambient policy decisions are
+  unchanged.
 
 ---
 

@@ -32,6 +32,7 @@ func TestRunAmbientDoctorHappyPath(t *testing.T) {
 		"PASS classifier smoke: lsof port diagnostics readonly",
 		"PASS classifier smoke: ss port diagnostics readonly",
 		"PASS classifier smoke: go build denied-classified",
+		"PASS fallback ledger smoke: write/read ok",
 		`PASS hook smoke: PreToolUse Bash "git status --short" silent allow`,
 		`PASS hook smoke: PreToolUse Bash "lsof -iTCP -sTCP:LISTEN -P -n" silent allow`,
 		`PASS hook smoke: PreToolUse Bash "tiller ambient status" silent allow`,

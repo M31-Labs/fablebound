@@ -71,6 +71,8 @@ func runAmbient(args []string) error {
 				valueOrUnknown(digest.decision.Action), digest.decision.Confidence,
 				valueOrUnknown(digest.decision.Risk), valueOrUnknown(digest.decision.BudgetPosture), digest.fallback)
 			fmt.Printf("read: %s\n", filepath.Join(digest.runDir, "status.md"))
+		} else if strings.TrimSpace(os.Getenv("TILLER_RUN_DIR")) == "" {
+			printCodexAmbientFallbackLedgerStatus(cwd)
 		}
 		return nil
 
@@ -108,6 +110,35 @@ func runAmbient(args []string) error {
 	default:
 		return fmt.Errorf("unknown ambient command %q (want disable, enable, status, next, step --dry-run, or doctor)", args[0])
 	}
+}
+
+func printCodexAmbientFallbackLedgerStatus(cwd string) {
+	path := scratch.CodexAmbientFallbackLedgerPath(cwd)
+	events, err := scratch.ListCodexAmbientFallbackLedger(cwd)
+	if err != nil {
+		fmt.Printf("fallback_ledger: %s unreadable: %v\n", path, err)
+		return
+	}
+	fmt.Printf("fallback_ledger: %s\n", path)
+	fmt.Printf("fallback_ledger_events: %d\n", len(events))
+	last := latestFallbackLedgerEvent(events)
+	if last == nil {
+		fmt.Println("fallback_ledger_last: none")
+		return
+	}
+	fmt.Printf("fallback_ledger_last: kind=%s status=%s at=%s\n",
+		valueOrUnknown(last.Kind), valueOrUnknown(last.Status), valueOrUnknown(last.At.Format(time.RFC3339Nano)))
+}
+
+func latestFallbackLedgerEvent(events []scratch.LedgerEvent) *scratch.LedgerEvent {
+	var latest *scratch.LedgerEvent
+	for i := range events {
+		ev := &events[i]
+		if latest == nil || ev.At.After(latest.At) || ev.At.Equal(latest.At) && ev.ID > latest.ID {
+			latest = ev
+		}
+	}
+	return latest
 }
 
 type ambientNextDigest struct {

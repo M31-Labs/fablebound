@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"m31labs.dev/tiller/internal/ambientgate"
 	"m31labs.dev/tiller/internal/hook"
+	"m31labs.dev/tiller/internal/scratch"
 )
 
 type ambientDoctor struct {
@@ -25,11 +27,59 @@ func runAmbientDoctor() error {
 	d.checkSourceDrift(cwd)
 	d.checkAmbientBypass(cwd)
 	d.checkClassifierSmoke()
+	d.checkFallbackLedgerSmoke()
 	d.checkHookSmoke()
 	if d.failures > 0 {
 		return fmt.Errorf("ambient doctor found %d failing check(s)", d.failures)
 	}
 	return nil
+}
+
+func (d *ambientDoctor) checkFallbackLedgerSmoke() {
+	workspace, err := os.MkdirTemp("", "tiller-codex-ambient-ledger-*")
+	if err != nil {
+		d.fail("fallback ledger smoke: temp workspace: %v", err)
+		return
+	}
+	defer os.RemoveAll(workspace)
+
+	ev := scratch.LedgerEvent{
+		ID:      "doctor-fallback-ledger-smoke",
+		Backend: "codex",
+		Kind:    "codex.lifecycle_tool",
+		Status:  scratch.AgentRunStatusRequested,
+		At:      time.Now().UTC(),
+		Summary: "ambient doctor fallback ledger smoke",
+	}
+	if err := scratch.AppendCodexAmbientFallbackLedger(workspace, ev); err != nil {
+		d.fail("fallback ledger smoke: write: %v", err)
+		return
+	}
+	events, err := scratch.ListCodexAmbientFallbackLedger(workspace)
+	if err != nil {
+		d.fail("fallback ledger smoke: read: %v", err)
+		return
+	}
+	if len(events) != 1 || events[0].ID != ev.ID || events[0].Kind != ev.Kind || events[0].Status != ev.Status {
+		d.fail("fallback ledger smoke: unexpected events: %#v", events)
+		return
+	}
+	path := scratch.CodexAmbientFallbackLedgerPath(workspace)
+	if info, err := os.Stat(filepath.Dir(path)); err != nil {
+		d.fail("fallback ledger smoke: stat dir: %v", err)
+		return
+	} else if info.Mode().Perm() != 0o700 {
+		d.fail("fallback ledger smoke: dir permissions %o want 700", info.Mode().Perm())
+		return
+	}
+	if info, err := os.Stat(path); err != nil {
+		d.fail("fallback ledger smoke: stat file: %v", err)
+		return
+	} else if info.Mode().Perm() != 0o600 {
+		d.fail("fallback ledger smoke: file permissions %o want 600", info.Mode().Perm())
+		return
+	}
+	d.pass("fallback ledger smoke: write/read ok")
 }
 
 func (d *ambientDoctor) pass(format string, args ...any) {

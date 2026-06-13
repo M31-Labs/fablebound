@@ -91,6 +91,15 @@ func ListCodexAmbientFallbackLedger(workspace string) ([]LedgerEvent, error) {
 	return out, nil
 }
 
+// ensureCodexAmbientFallbackLedgerDir creates the .tiller/scratch/codex tree
+// (each level 0700) and rejects any symlinked path component it observes. The
+// ledger file itself is opened with O_NOFOLLOW, which atomically refuses a
+// symlinked final component. Intermediate-component rejection here is a
+// best-effort lstat walk: a component swapped for a symlink between this walk
+// and the subsequent open could still be followed (a TOCTOU window). That is
+// acceptable for this best-effort, fail-open ledger, which tiller only ever
+// creates under 0700/0755 ancestors it owns; a fully race-free variant would
+// thread openat(2)/O_DIRECTORY fds down each level.
 func ensureCodexAmbientFallbackLedgerDir(workspace string) error {
 	base := filepath.Clean(workspace)
 	dir := base

@@ -11,7 +11,7 @@ candidates = ["claude-headless:anthropic/sonnet", "claude-headless:anthropic/hai
 detector = "claude-jsonl-transcript"
 govern_tiers = ["reason"]
 reason_models = ["opus", "claude-opus-4-8", "fable", "claude-fable-5"]
-execute_models = ["sonnet", "claude-sonnet-4-5", "haiku", "claude-haiku-4-5"]
+execute_models = ["sonnet", "claude-sonnet-4-6", "haiku", "claude-haiku-4-5", "claude-haiku-4-5-20251001"]
 
 [ambient.codex]
 detector = "codex-jsonl-transcript"
